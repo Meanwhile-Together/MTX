@@ -2,5 +2,4 @@
 # MTX dev android-debug: run npm run build:android:debug from repo root
 desc="Build Android debug APK (optional: ADB install)"
 set -e
-cd "$ROOT_"
-exec npm run build:android:debug
+npm run build:android:debug

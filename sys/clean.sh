@@ -9,8 +9,6 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-cd "$ROOT_"
-
 echo -e "${BLUE}🧹 Project Clean${NC}"
 echo "This will remove build artifacts and generated files."
 echo ""

@@ -46,17 +46,29 @@ execDir="$(pwd)"
             [ -n "$line" ] && echo "$line"
         }
 
-        # Preload includes
+        # Preload includes (bolors etc.). Use scriptDir when installed, else dir when running from repo (before clone).
         if [ -d "$scriptDir/includes" ]; then
             for file in "$scriptDir/includes"/*.sh; do
-                if [ -f "$file" ]; then
-                    source "$file"
-                fi
+                [ -f "$file" ] && source "$file"
             done
+        elif [ -d "$dir/includes" ]; then
+            for file in "$dir/includes"/*.sh; do
+                [ -f "$file" ] && source "$file"
+            done
+        else
+            # No includes yet (e.g. scriptDir not cloned). Stub so we don't call undefined functions.
+            color() { echo -n "$@"; }
+            c() { echo -n "$@"; }
+            echoc() { echo "$@"; }
+            info() { echo "[INFO] $*"; }
+            success() { echo "[SUCCESS] $*"; }
+            error() { echo "[ERROR] $*" >&2; }
+            warn() { echo "[WARN] $*"; }
+            debug() { :; }
         fi
 
-        # Create package list file if it doesn't exist
-        if [ ! -f "$packageListFile" ]; then
+        # Create package list file if it doesn't exist (scriptDir must exist)
+        if [ -d "$scriptDir" ] && [ ! -f "$packageListFile" ]; then
             touch "$packageListFile"
         fi
 
@@ -247,8 +259,8 @@ case "$1" in
             if git -C "$scriptDir" remote update &>/dev/null; then
                 if ! git -C "$scriptDir" diff --ignore-space-at-eol --quiet origin/main; then
                     info "Remote repository has changes."
-                    shaNow=$(git -C "$scriptDir" rev-parse HEAD)
-                    info "Pre update SHA: $(color yellow "$shaNow")"
+                    shaBefore=$(git -C "$scriptDir" rev-parse HEAD)
+                    info "Pre update SHA: $(color yellow "$shaBefore")"
                     info "Updating local repository..."
                     if [ $verbose -eq 1 ]; then
                         git -C "$scriptDir" fetch --all
@@ -270,6 +282,10 @@ case "$1" in
                     success "Local repository has been updated from remote repository."
                     shaNow=$(git -C "$scriptDir" rev-parse HEAD)
                     info "Post update SHA: $(color yellow "$shaNow")"
+                    if [ -n "$shaBefore" ] && [ "$shaBefore" != "$shaNow" ]; then
+                        info "Commits in this update:"
+                        git -C "$scriptDir" log --oneline "$shaBefore..$shaNow" 2>/dev/null | sed 's/^/  /' || true
+                    fi
                 else
                     success "Local repository is up-to-date with remote repository."
                 fi

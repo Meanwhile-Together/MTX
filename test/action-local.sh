@@ -3,8 +3,6 @@
 desc="Local test for setup-environment composite action"
 set -e
 
-cd "$ROOT_"
-
 NODE_VERSION="${1:-}"
 INSTALL_DEV_DEPS="${2:-false}"
 CACHE_NPM="${3:-true}"

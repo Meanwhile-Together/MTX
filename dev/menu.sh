@@ -3,8 +3,6 @@
 desc="Dev helper menu: versions, build, dev servers, Android"
 set -e
 
-cd "$ROOT_"
-
 NODE_BIN=$(command -v node || true)
 NPM_BIN=$(command -v npm || true)
 

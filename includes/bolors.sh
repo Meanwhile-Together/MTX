@@ -79,6 +79,7 @@ color() {
     shift
     echo -ne "${!c}$*${reset}"
 }
+c() { color "$@"; }
 
 echoc() {
     local c="$1"

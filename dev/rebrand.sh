@@ -3,8 +3,6 @@
 desc="Rename project, owner, package id, scope; apply to repo"
 set -e
 
-cd "$ROOT_"
-
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'

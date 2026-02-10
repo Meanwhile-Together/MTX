@@ -1,0 +1,55 @@
+# Script patterns (child scripts)
+
+Child scripts are **dev/*.sh**, **setup/*.sh**, **deploy/*.sh**, etc.—the scripts that mtx.sh **sources** after changing to the project directory. This doc is for authors of those scripts. For wrapper behavior (includes, help, install), see **mtx-patterns.md**.
+
+---
+
+## Contract from the wrapper
+
+- mtx.sh runs **`cd "$execDir"`** before sourcing your script, where `execDir` is the directory the user ran `mtx` from (the project root).
+- mtx.sh does **not** set or export a "root" or "project root" variable. You get only the current working directory.
+
+---
+
+## What scripts DON'T do (anti-patterns)
+
+- **Don't use a "root" or "project root" variable.** No `ROOT_`, `ROOT`, or similar. The caller already put you in the project directory. If you need to reference "here" after changing directory, use relative paths (e.g. `../config`) or a small helper that finds the project (e.g. walk up until `package.json` exists).
+
+- **Don't assume the script runs from the script's own directory.** You are run from the **project** directory (where the user invoked `mtx`). Paths are relative to the **current working directory** (the project), not the script file location.
+
+- **Don't `cd` to an absolute "root" path.** Never `cd "$ROOT_/targets/desktop"` or `cd /targets/desktop`. If `ROOT_` is empty you get `cd "/targets/desktop"` and break. Use relative paths: `cd targets/desktop`.
+
+- **Don't add no-op `cd`.** `cd "$ROOT_"` or `cd .` when you're already in the right place is pointless. Omit it.
+
+- **Don't use `exec`.** `exec` replaces the shell process with the command, so control never returns to the caller, traps and cleanup never run, and the wrapper can't rely on the script process exiting normally. Run the command normally (e.g. `npm run build`) so the script exits after the command and the caller gets control back.
+
+- **Don't require the caller to set or export variables for you.** Scripts should work with the environment mtx gives them (cwd = project root). If you need to "remember" where project root is after you `cd` away, derive it (e.g. walk up to find `package.json`) or use relative paths like `..` and `../config`.
+
+---
+
+## What scripts DO (patterns)
+
+- **Rely on current working directory.** When the script runs, `pwd` is the project root. Use it: `cd targets/desktop`, `npm run build`, `config/deploy.json`, `.env`.
+
+- **Use relative paths.** Paths are relative to the project: `targets/desktop`, `./config/deploy.json`, `terraform`, `.env`. After `cd terraform`, project root is `..` and config is `../config/deploy.json`.
+
+- **If you leave the project dir, get back without a stored "root".** When you `cd terraform` (or similar), return by either:
+  - `cd ..` when you know you're exactly one level down, or
+  - A small helper, e.g. `while [ ! -f package.json ] && [ "$(pwd)" != "/" ]; do cd ..; done`, so you don't depend on any variable.
+
+- **Keep scripts self-contained.** They should work given only: (1) mtx has done `cd "$execDir"`, and (2) the project has the expected layout (e.g. `package.json`, `targets/`, `config/`). No magic exports from the caller.
+
+- **Set `desc` for the help menu.** In the first 30 lines of the script, define `desc="Short description"` or `desc='Short description'`. The wrapper uses it for `mtx help`. See **mtx-patterns.md** for how help is built.
+
+---
+
+## Summary table
+
+| Anti-pattern | Pattern |
+|-------------|--------|
+| `ROOT_`, `ROOT`, or any "project root" variable | Use `pwd` and relative paths; you're already in the project |
+| `cd "$ROOT_/targets/desktop"` | `cd targets/desktop` |
+| `cd "$ROOT_"` / `cd .` to "ensure we're in root" | Omit, or use a helper that walks up to `package.json` |
+| Requiring the caller to export where the project is | Script assumes cwd is project root when it starts |
+| No `desc` in first 30 lines | Add `desc="One-line description"` near top for help menu |
+| `exec npm run ...` (or any `exec`) | Run the command normally so the script exits and caller gets control back |

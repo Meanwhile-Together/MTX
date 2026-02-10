@@ -2,7 +2,6 @@
 # MTX dev build: run npm run build:* from repo root (client/desktop/mobile/server/all)
 desc="Build client, desktop, mobile, server, or all"
 set -e
-cd "$ROOT_"
 TARGET="${1:-}"
 if [ -z "$TARGET" ]; then
   echo "Usage: $0 <client|desktop|mobile|server|all>"

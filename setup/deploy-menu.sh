@@ -3,7 +3,7 @@
 desc="Interactive deploy menu: tokens, Terraform, Railway"
 set -e
 
-ENV_FILE="$ROOT_/.env"
+ENV_FILE=".env"
 
 # Colors
 GREEN='\033[0;32m'
@@ -13,14 +13,17 @@ CYAN='\033[0;36m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+# Ensure we're in project root (mtx already cd's here; after we cd terraform we need to get back)
+go_to_project_root() {
+    while [ ! -f "package.json" ] && [ "$(pwd)" != "/" ]; do cd ..; done
+}
+
 # Load existing .env file if it exists
 if [ -f "$ENV_FILE" ]; then
     set -a
     source "$ENV_FILE"
     set +a
 fi
-
-cd "$ROOT_"
 
 # Function to save environment variable to .env
 save_env_var() {
@@ -108,12 +111,12 @@ show_menu() {
 
 # Function to check if repo is set up
 is_repo_setup() {
-    if [ ! -f "$ROOT_/config/deploy.json" ]; then
+    if [ ! -f "./config/deploy.json" ]; then
         return 1  # Not set up
     fi
     
     # Check if platform array is empty or missing
-    PLATFORM_COUNT=$(jq -r '.platform | length' "$ROOT_/config/deploy.json" 2>/dev/null || echo "0")
+    PLATFORM_COUNT=$(jq -r '.platform | length' "./config/deploy.json" 2>/dev/null || echo "0")
     if [ "$PLATFORM_COUNT" = "0" ] || [ "$PLATFORM_COUNT" = "null" ]; then
         return 1  # Not set up
     fi
@@ -163,10 +166,10 @@ initial_setup() {
     esac
     
     # Create config directory if it doesn't exist
-    mkdir -p "$ROOT_/config"
+    mkdir -p "./config"
     
     # Create/update deploy.json
-    cat > "$ROOT_/config/deploy.json" <<EOF
+    cat > "./config/deploy.json" <<EOF
 {
   "platform": $PLATFORMS,
   "projectId": "",
@@ -180,8 +183,8 @@ initial_setup() {
 EOF
     
     # Create/update app.json
-    if [ ! -f "$ROOT_/config/app.json" ]; then
-        cat > "$ROOT_/config/app.json" <<EOF
+    if [ ! -f "./config/app.json" ]; then
+        cat > "./config/app.json" <<EOF
 {
   "app": {
     "name": "$APP_NAME",
@@ -203,9 +206,9 @@ EOF
 EOF
     else
         # Update app name in existing app.json
-        APP_JSON=$(cat "$ROOT_/config/app.json")
-        echo "$APP_JSON" | jq ".app.name = \"$APP_NAME\"" > "$ROOT_/config/app.json.tmp"
-        mv "$ROOT_/config/app.json.tmp" "$ROOT_/config/app.json"
+        APP_JSON=$(cat "./config/app.json")
+        echo "$APP_JSON" | jq ".app.name = \"$APP_NAME\"" > "./config/app.json.tmp"
+        mv "./config/app.json.tmp" "./config/app.json"
     fi
     
     echo ""
@@ -223,7 +226,7 @@ guided_setup() {
     echo ""
     
     # Step 1: Check if repo is cloned
-    if [ ! -f "$ROOT_/package.json" ]; then
+    if [ ! -f "./package.json" ]; then
         echo -e "${YELLOW}⚠️  This doesn't appear to be the project directory${NC}"
         echo "Please make sure you've cloned the repository and are in the project root."
         read -p "Press Enter to continue or Ctrl+C to exit..."
@@ -237,7 +240,7 @@ guided_setup() {
     
     # Step 3: Install dependencies
     echo -e "${CYAN}Step 1: Installing dependencies...${NC}"
-    cd "$ROOT_"
+    go_to_project_root
     if ! npm install; then
         echo -e "${RED}❌ Failed to install dependencies${NC}"
         return 1
@@ -246,14 +249,14 @@ guided_setup() {
     echo ""
     
     # Step 4: Check which platforms need tokens
-    PLATFORMS=$(jq -r '.platform | join(", ")' "$ROOT_/config/deploy.json" 2>/dev/null || echo "railway")
+    PLATFORMS=$(jq -r '.platform | join(", ")' "./config/deploy.json" 2>/dev/null || echo "railway")
     echo -e "${CYAN}Step 2: Checking required API tokens...${NC}"
     echo "Platforms configured: $PLATFORMS"
     echo ""
     
     # Step 5: Collect tokens
-    HAS_RAILWAY=$(jq -r '.platform | index("railway") != null' "$ROOT_/config/deploy.json" 2>/dev/null || echo "false")
-    HAS_VERCEL=$(jq -r '.platform | index("vercel") != null' "$ROOT_/config/deploy.json" 2>/dev/null || echo "false")
+    HAS_RAILWAY=$(jq -r '.platform | index("railway") != null' "./config/deploy.json" 2>/dev/null || echo "false")
+    HAS_VERCEL=$(jq -r '.platform | index("vercel") != null' "./config/deploy.json" 2>/dev/null || echo "false")
     
     if [ "$HAS_RAILWAY" = "true" ]; then
         if ! has_token "RAILWAY_TOKEN"; then
@@ -273,7 +276,7 @@ guided_setup() {
     
     echo ""
     echo -e "${CYAN}Step 3: Initializing Terraform...${NC}"
-    cd "$ROOT_/terraform"
+    cd terraform
     if ! terraform init; then
         echo -e "${RED}❌ Terraform initialization failed${NC}"
         return 1
@@ -344,17 +347,17 @@ guided_setup() {
         deploy_confirm="${deploy_confirm:-y}"
         
         if [ "$deploy_confirm" = "y" ] || [ "$deploy_confirm" = "Y" ]; then
-            cd "$ROOT_"
+            go_to_project_root
             
             # Get project and service IDs from Terraform
-            cd "$ROOT_/terraform"
+            cd terraform
             PROJECT_ID=$(terraform output -raw railway_project_id 2>/dev/null || echo "")
             SERVICE_ID=$(terraform output -raw railway_service_id 2>/dev/null || echo "")
             BACKEND_SERVICE_ID=$(terraform output -raw railway_backend_service_id 2>/dev/null || echo "")
             ENVIRONMENT="${ENVIRONMENT:-staging}"
             
             if [ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "null" ] && [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "null" ]; then
-                cd "$ROOT_"
+                go_to_project_root
                 
                 # Check for Railway CLI
                 if ! command -v railway &> /dev/null; then
@@ -407,15 +410,15 @@ guided_setup() {
                         read -p "Deploy backend (backend-server + backend panel) to the backend service? (y/n, default: n): " deploy_backend_confirm
                         deploy_backend_confirm="${deploy_backend_confirm:-n}"
                         if [ "$deploy_backend_confirm" = "y" ] || [ "$deploy_backend_confirm" = "Y" ]; then
-                            cd "$ROOT_"
+                            go_to_project_root
                             echo -e "${CYAN}Building backend-server and backend...${NC}"
                             npm run build:backend-server && npm run build:backend || {
                                 echo -e "${RED}❌ Build failed.${NC}"
                             }
                             # Railway uses root railway.json; swap to backend config so backend service gets correct build/start
-                            RAILWAY_JSON_ROOT="$ROOT_/railway.json"
-                            RAILWAY_JSON_BACKEND="$ROOT_/targets/backend-server/railway.json"
-                            RAILWAY_JSON_BAK="$ROOT_/railway.json.app.bak"
+                            RAILWAY_JSON_ROOT="./railway.json"
+                            RAILWAY_JSON_BACKEND="./targets/backend-server/railway.json"
+                            RAILWAY_JSON_BAK="./railway.json.app.bak"
                             if [ -f "$RAILWAY_JSON_BACKEND" ]; then
                                 cp "$RAILWAY_JSON_ROOT" "$RAILWAY_JSON_BAK"
                                 cp "$RAILWAY_JSON_BACKEND" "$RAILWAY_JSON_ROOT"
@@ -525,8 +528,8 @@ view_config() {
     echo ""
     
     echo -e "${CYAN}Deploy Configuration:${NC}"
-    if [ -f "$ROOT_/config/deploy.json" ]; then
-        cat "$ROOT_/config/deploy.json" | jq '.' 2>/dev/null || cat "$ROOT_/config/deploy.json"
+    if [ -f "./config/deploy.json" ]; then
+        cat "./config/deploy.json" | jq '.' 2>/dev/null || cat "./config/deploy.json"
     else
         echo -e "${YELLOW}⚠️  config/deploy.json not found${NC}"
     fi
@@ -553,7 +556,7 @@ view_config() {
 }
 
 # Main loop
-cd "$ROOT_"
+go_to_project_root
 
 # Create .env file if it doesn't exist
 if [ ! -f "$ENV_FILE" ]; then
@@ -562,9 +565,9 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 # Ensure .env is in .gitignore
-if [ -f "$ROOT_/.gitignore" ]; then
-    if ! grep -q "^\.env$" "$ROOT_/.gitignore"; then
-        echo ".env" >> "$ROOT_/.gitignore"
+if [ -f "./.gitignore" ]; then
+    if ! grep -q "^\.env$" "./.gitignore"; then
+        echo ".env" >> "./.gitignore"
     fi
 fi
 
@@ -574,7 +577,7 @@ while true; do
     case $choice in
         1)
             echo -e "${CYAN}Installing dependencies...${NC}"
-            cd "$ROOT_"
+            go_to_project_root
             npm install
             echo -e "${GREEN}✅ Dependencies installed${NC}"
             read -p "Press Enter to continue..."
@@ -584,7 +587,7 @@ while true; do
             ;;
         3)
             echo -e "${CYAN}Provisioning infrastructure with Terraform...${NC}"
-            cd "$ROOT_/terraform"
+            cd terraform
             
             # Check for existing Terraform processes
             if pgrep -f "terraform (plan|apply)" > /dev/null; then
@@ -660,7 +663,7 @@ while true; do
             ;;
         4)
             echo -e "${CYAN}Deploying to Railway...${NC}"
-            cd "$ROOT_"
+            go_to_project_root
             
             # Check if Railway CLI is installed
             if ! command -v railway &> /dev/null; then
@@ -670,7 +673,7 @@ while true; do
             fi
             
             # Get project and service IDs from Terraform
-            cd "$ROOT_/terraform"
+            cd terraform
             if [ ! -f "terraform.tfstate" ] || [ ! -s "terraform.tfstate" ]; then
                 echo -e "${RED}❌ Terraform state not found${NC}"
                 echo "Please run option 3 (Provision Infrastructure) first."
@@ -709,7 +712,7 @@ while true; do
             export RAILWAY_TOKEN
             
             # Link directory to Railway if not already linked
-            cd "$ROOT_"
+            go_to_project_root
             if [ ! -d ".railway" ]; then
                 echo -e "${BLUE}🔗 Linking directory to Railway service...${NC}"
                 railway link --service "$SERVICE_ID" --project "$PROJECT_ID" 2>/dev/null || {

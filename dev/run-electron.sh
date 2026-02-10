@@ -3,7 +3,7 @@
 desc="Run Electron; kill nodemon on clean exit"
 set -e
 
-cd "$ROOT_/targets/desktop"
+cd targets/desktop
 cross-env NODE_ENV=development electron "$@"
 EXIT_CODE=$?
 

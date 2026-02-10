@@ -3,8 +3,6 @@
 desc="Full project setup: rebrand, build, optional deployment"
 set -e
 
-cd "$ROOT_"
-
 # 1. Identity + apply-names (project name, scope, package.json/app.json)
 "$0" dev rebrand "$@"
 
