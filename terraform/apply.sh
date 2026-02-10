@@ -253,6 +253,15 @@ if [ -n "${EXISTING_BACKEND_ID:-}" ] && [ "$EXISTING_BACKEND_ID" != "null" ]; th
     done
 fi
 
+# When we pass an existing app ID, Terraform must not manage the app service (count becomes 0),
+# or it will DESTROY the live service. Remove from state so we reuse it and update outputs only.
+if [ -n "${EXISTING_APP_ID:-}" ] && [ "$EXISTING_APP_ID" != "null" ]; then
+    if terraform state list 2>/dev/null | grep -qF 'module.railway_app[0].railway_service.app[0]'; then
+        echo -e "${CYAN}ℹ️  Removing app service from state (using existing app; avoid destroying live service)...${NC}"
+        terraform state rm 'module.railway_app[0].railway_service.app[0]' 2>/dev/null || true
+    fi
+fi
+
 # Run terraform apply - show output in real-time, capture for retry check
 # Using -auto-approve since we're in a script and user has already confirmed via setup.sh
 set +e  # Don't exit on error, we'll check exit code
