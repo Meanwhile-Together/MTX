@@ -4,7 +4,7 @@ desc="Run Electron; kill nodemon on clean exit"
 set -e
 
 cd targets/desktop
-NODE_ENV=development electron "$@"
+NODE_ENV=development npx electron "$@"
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -eq 0 ]; then
