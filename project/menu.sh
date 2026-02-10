@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MTX dev menu: dev helper (versions, build, dev servers, Android) from shell-scripts.md §9
-desc="Dev helper menu: versions, build, dev servers, Android"
+# MTX project menu: project helper (versions, build, dev servers, Android)
+desc="Project helper menu: versions, build, dev servers, Android"
 set -e
 
 NODE_BIN=$(command -v node || true)
@@ -136,10 +136,10 @@ android_menu() {
   read -rp "Select: " choice
   case "$choice" in
     1)
-      "$0" dev android-debug
+      "$0" compile android-debug
       ;;
     2)
-      "$0" dev android-debug
+      "$0" compile android-debug
       APK_PATH=$(npm run -s find:apk 2>/dev/null | tail -n 1 || true)
       if [[ -z "$APK_PATH" ]]; then echo "❌ APK not found"; return; fi
       if ! command -v adb >/dev/null 2>&1; then echo "❌ adb is not installed or not in PATH"; return; fi

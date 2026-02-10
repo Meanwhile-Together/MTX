@@ -4,7 +4,7 @@ desc="Full project setup: rebrand, build, optional deployment"
 set -e
 
 # 1. Identity + apply-names (project name, scope, package.json/app.json)
-"$0" dev rebrand "$@"
+"$0" project rebrand "$@"
 
 # 2. Build
 echo ""
@@ -19,4 +19,4 @@ if [[ "$do_deploy" =~ ^[Yy]$ ]]; then
 fi
 
 echo ""
-echo "✅ Setup complete. Next: mtx dev menu, mtx setup deploy-menu"
+echo "✅ Setup complete. Next: mtx project menu, mtx setup deploy-menu"
