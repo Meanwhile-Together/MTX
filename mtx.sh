@@ -472,6 +472,14 @@ case "$1" in
                 fi
 
                 cd "$execDir"
+                if [ -d "$scriptDir/precond" ]; then
+                    for pre in "$scriptDir"/precond/*.sh; do
+                        [ -f "$pre" ] || continue
+                        ( source "$pre" )
+                        r=$?
+                        if [ $r -ne 0 ]; then exit $r; fi
+                    done
+                fi
                 [ $verbose -ge 2 ] && echo "$args"
                 export MTX_SKIP_UPDATE=1
                 export MTX_VERBOSE=$verbose

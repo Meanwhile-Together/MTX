@@ -11,6 +11,14 @@ This doc covers **mtx.sh** (the wrapper): how it runs, loads includes, builds he
 
 ---
 
+## Preconditions (`precond/`)
+
+- **Location:** `$scriptDir/precond/` (e.g. `/etc/mtx/precond` when installed). Scripts must be named **`00-name.sh`**, **`01-name.sh`**, etc. so they run in order.
+- **When:** After `cd "$execDir"` and before the requested command is run, mtx loops over `precond/*.sh` (lexicographic order) and **sources** each. If any script exits non-zero, mtx exits with that code and does not run the command.
+- **Contract:** Each script runs with cwd = project root and the same environment as child scripts (includes loaded). The script must **log its own error message** (e.g. `echo "❌ ..." >&2`) and **exit non-zero** on failure. No arguments are passed. Use for checks like “node/npm available,” “required file exists,” etc.
+
+---
+
 ## Includes (bolors)
 
 - **Load order:** (1) `$scriptDir/includes/*.sh` if present (installed copy), (2) else `$dir/includes/*.sh` if present (running from repo before install), (3) else stub functions so `info`, `success`, `error`, `warn`, `debug`, `color`, `c`, `echoc` exist (no-op or plain echo).
