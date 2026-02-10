@@ -11,6 +11,8 @@ This guide is for adding new scripts to MTX so they appear in `mtx help` and run
 - **Script file:** Put your script in that category as `<name>.sh`. So `dev/run-electron.sh` is run with `mtx dev run-electron`.
 - **Subcommands only:** If a category has no `category.sh` and only `category/*.sh`, those appear as subcommands (e.g. `mtx compile android-debug`). If there is both `deploy.sh` and `deploy/*.sh`, the wrapper merges them so the directory’s scripts show as subcommands of `deploy`.
 
+- **Top-level with paired subfolder:** If you have both `compile.sh` and `compile/`, the **top-level script must not take arguments**. When the user runs `mtx compile` (no subcommand), only `compile.sh` runs—it should show usage or a short message. All real targets live in `compile/*.sh` (e.g. `mtx compile client`, `mtx compile android-debug`). Do not dispatch on `$1` in the top-level script.
+
 So: pick or create a category dir (e.g. `dev/`), add `<something>.sh`, and the command is `mtx dev something`.
 
 ---

@@ -96,11 +96,11 @@ build_menu() {
   echo "6) Back"
   read -rp "Select: " choice
   case "$choice" in
-    1) "$0" dev build client ;;
-    2) "$0" dev build desktop ;;
-    3) "$0" dev build mobile ;;
-    4) "$0" dev build server ;;
-    5) "$0" dev build all ;;
+    1) "$0" compile client ;;
+    2) "$0" compile desktop ;;
+    3) "$0" compile mobile ;;
+    4) "$0" compile server ;;
+    5) "$0" compile all ;;
     *) return ;;
   esac
 }
