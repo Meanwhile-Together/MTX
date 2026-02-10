@@ -3,6 +3,12 @@
 desc="Run Electron; kill nodemon on clean exit"
 set -e
 
+# Build desktop app if main entry is missing (script runs with cwd = project root)
+DESKTOP_MAIN=$(node -p "try { require('./targets/desktop/package.json').main } catch(e) { '' }" 2>/dev/null || true)
+if [ -n "$DESKTOP_MAIN" ] && [ ! -f "targets/desktop/$DESKTOP_MAIN" ]; then
+  npm run build:desktop
+fi
+
 cd targets/desktop
 NODE_ENV=development npx electron "$@"
 EXIT_CODE=$?
