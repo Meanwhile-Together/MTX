@@ -344,7 +344,9 @@ case "$1" in
             #     sudo chown $USER:$USER "$scriptDir"
             debug "Script is in $binDir, checking wrapper to see if its outdated..."
             cd "$scriptDir"
-            updateCheck
+            if [ -z "${MTX_SKIP_UPDATE:-}" ]; then
+                updateCheck
+            fi
 
             if [ $verbose -eq 1 ]; then
                 printVersion
@@ -436,6 +438,7 @@ case "$1" in
 
                 cd "$execDir"
                 echo "$args"
+                export MTX_SKIP_UPDATE=1
                 source "$scriptDir/$script" $args
             else
                 if [ ! -z "$hoist_target" ]; then
