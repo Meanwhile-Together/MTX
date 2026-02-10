@@ -1,6 +1,6 @@
 # Getting started: writing and adding scripts
 
-This guide is for adding new scripts to MTX so they appear in `mtx help` and run in the project directory. For patterns and anti-patterns, see **script-patterns.md**. For how the wrapper works (help, includes), see **mtx-patterns.md**.
+This guide is for adding new scripts to MTX so they appear in `mtx help` and run in the project directory. For patterns and anti-patterns, see **script-patterns.md**. For how the wrapper works (help, includes), see **mtx-patterns.md**. For change history derived from git, see **history.md**.
 
 ---
 
@@ -110,3 +110,4 @@ fi
 - **`mtx help`** — Lists all commands and their `desc`. Built from the **installed** copy of MTX (`$scriptDir`), not the repo you’re editing. After you install or update, help will show your new script.
 - **script-patterns.md** — What scripts should and shouldn’t do (no ROOT, relative paths, getting back to root).
 - **mtx-patterns.md** — How the wrapper works (includes, help, `desc` extraction, known issues).
+- **history.md** — Change history derived from git (chronological summary and themes).

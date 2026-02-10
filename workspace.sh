@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # MTX workspace: create a fresh Meanwhile-Together multi-repo workspace (empty folder only).
 # Prompts, then creates a VS Code workspace file and clones 6 repos.
-desc="Create fresh Meanwhile-Together workspace (empty folder); clones MTX, project-bridge, archive-dogfood, test, client-a, cicd"
+desc="Create fresh Meanwhile-Together workspace (empty folder); clones MTX, project-bridge, test, client-a, cicd"
 set -e
 
 # Require empty folder (only ., .., and optionally .git)
