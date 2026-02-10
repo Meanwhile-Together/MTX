@@ -3,4 +3,4 @@
 desc="Run backend server in dev"
 set -e
 
-npm run dev:server
+mtx_run npm run dev:server

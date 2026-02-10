@@ -43,6 +43,8 @@ Child scripts are **dev/*.sh**, **setup/*.sh**, **deploy/*.sh**, etc.—the scri
 
 - **Set `desc` for the help menu.** In the first 30 lines of the script, define `desc="Short description"` or `desc='Short description'`. The wrapper uses it for `mtx help`. See **mtx-patterns.md** for how help is built.
 
+- **Use `mtx_run` for subprocesses so output obeys verbosity.** The wrapper sets `MTX_VERBOSE` (1=quiet, 2=detail, 3=full, 4=trace). For any command that should be quiet at default (e.g. `npm run build`, `"$0" compile vite`), run it via **`mtx_run`**: e.g. `mtx_run npm run build`, `mtx_run "$0" compile vite`. Then at `-v`/default only errors are shown; at `-vvv` full output is shown; at `-vvvv` commands are traced. Do **not** use `mtx_run` when you need to capture output (e.g. `APK_PATH=$(npm run -s find:apk ...)`).
+
 ---
 
 ## Summary table
@@ -56,3 +58,4 @@ Child scripts are **dev/*.sh**, **setup/*.sh**, **deploy/*.sh**, etc.—the scri
 | No `desc` in first 30 lines | Add `desc="One-line description"` near top for help menu |
 | `exec npm run ...` (or any `exec`) | Run the command normally so the script exits and caller gets control back |
 | Top-level script with paired subfolder taking arguments (e.g. `compile.sh` with `$1`) | No arguments; subcommands live in the subfolder (e.g. `compile/client.sh`); top-level shows usage only |
+| `npm run build` / `"$0" compile vite` (always noisy) | `mtx_run npm run build` / `mtx_run "$0" compile vite` so output respects `-v` / `-vvv` |

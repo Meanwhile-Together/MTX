@@ -3,4 +3,4 @@
 desc="Build Android debug APK"
 set -e
 
-npm run build:android:debug
+mtx_run npm run build:android:debug

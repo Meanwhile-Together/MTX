@@ -2,7 +2,7 @@
 # MTX compile vite: build all Vite-based targets (client, desktop renderer, backend, mobile)
 desc="Build all Vite-based targets (client, desktop, backend, mobile)"
 set -e
-npm run build:client
-npm run build:desktop
-npm run build:backend
-npm run build:mobile
+mtx_run npm run build:client
+mtx_run npm run build:desktop
+mtx_run npm run build:backend
+mtx_run npm run build:mobile

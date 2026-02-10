@@ -93,7 +93,7 @@ log() {
     shift
     case "$level" in
         "debug")
-            [ ${verbose:-0} -eq 1 ] && echoc cyan "[DEBUG] $*"
+            [ ${verbose:-0} -ge 2 ] && echoc cyan "[DEBUG] $*"
             ;;
         "info")
             echoc blue "[INFO] $*"

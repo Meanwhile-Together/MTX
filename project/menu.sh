@@ -97,12 +97,12 @@ build_menu() {
   echo "7) Back"
   read -rp "Select: " choice
   case "$choice" in
-    1) "$0" compile vite ;;
-    2) "$0" compile electron ;;
-    3) "$0" compile android ;;
-    4) "$0" compile ios ;;
-    5) "$0" compile servers ;;
-    6) "$0" compile ;;
+    1) mtx_run "$0" compile vite ;;
+    2) mtx_run "$0" compile electron ;;
+    3) mtx_run "$0" compile android ;;
+    4) mtx_run "$0" compile ios ;;
+    5) mtx_run "$0" compile servers ;;
+    6) mtx_run "$0" compile ;;
     *) return ;;
   esac
 }
@@ -118,11 +118,11 @@ dev_menu() {
   echo "6) Back"
   read -rp "Select: " choice
   case "$choice" in
-    1) npm run dev:server ;;
-    2) npm run dev:client ;;
-    3) npm run dev:desktop ;;
-    4) npm run dev:mobile ;;
-    5) npm run dev:all ;;
+    1) mtx_run npm run dev:server ;;
+    2) mtx_run npm run dev:client ;;
+    3) mtx_run npm run dev:desktop ;;
+    4) mtx_run npm run dev:mobile ;;
+    5) mtx_run npm run dev:all ;;
     *) return ;;
   esac
 }
@@ -138,10 +138,10 @@ android_menu() {
   read -rp "Select: " choice
   case "$choice" in
     1)
-      "$0" compile android-debug
+      mtx_run "$0" compile android-debug
       ;;
     2)
-      "$0" compile android-debug
+      mtx_run "$0" compile android-debug
       APK_PATH=$(npm run -s find:apk 2>/dev/null | tail -n 1 || true)
       if [[ -z "$APK_PATH" ]]; then echo "❌ APK not found"; return; fi
       if ! command -v adb >/dev/null 2>&1; then echo "❌ adb is not installed or not in PATH"; return; fi
@@ -162,7 +162,7 @@ android_menu() {
       fi
       ;;
     4)
-      (cd targets/mobile && npx cap run android)
+      mtx_run bash -c 'cd targets/mobile && npx cap run android'
       ;;
     *) return ;;
   esac

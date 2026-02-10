@@ -3,5 +3,5 @@
 desc="Build all targets; use mtx compile <vite|electron|android|ios|servers> for one"
 set -e
 for target in vite electron android ios servers; do
-  "$0" compile "$target"
+  mtx_run "$0" compile "$target"
 done

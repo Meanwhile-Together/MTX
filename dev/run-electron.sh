@@ -3,4 +3,4 @@
 desc="Run Electron; kill nodemon on clean exit"
 set -e
 
-npm run dev:desktop
+mtx_run npm run dev:desktop

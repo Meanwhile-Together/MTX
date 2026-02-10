@@ -3,4 +3,4 @@
 desc="Run main dev (server, prisma watch)"
 set -e
 
-npm run dev
+mtx_run npm run dev

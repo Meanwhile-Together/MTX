@@ -2,4 +2,4 @@
 # MTX compile electron: build desktop app
 desc="Build desktop app (Electron)"
 set -e
-npm run build:desktop
+mtx_run npm run build:desktop

@@ -65,6 +65,7 @@ execDir="$(pwd)"
             error() { echo "[ERROR] $*" >&2; }
             warn() { echo "[WARN] $*"; }
             debug() { :; }
+            mtx_run() { "$@"; }
         fi
 
         # Create package list file if it doesn't exist (scriptDir must exist)
@@ -72,8 +73,8 @@ execDir="$(pwd)"
             touch "$packageListFile"
         fi
 
-        #handle arguments
-        verbose=0
+        #handle arguments (verbose: 1=quiet, 2=detail, 3=full output, 4=trace)
+        verbose=${MTX_VERBOSE:-1}
         version=0
         uninstall=0
         reinstall=0
@@ -164,7 +165,10 @@ case "$1" in
         echo "Options:"
         echo "   --help Show this help message"
         echo "   --version Print nnw version"
-        echo "   --verbose Print more information"
+        echo "   -v       Quiet: only MTX output and errors from scripts (default)"
+        echo "   -vv      More detail (debug messages)"
+        echo "   -vvv     Full output from scripts"
+        echo "   -vvvv    Trace: print every command run"
         echo "   --update Update nnw"
         echo "   --uninstall Uninstall nnw"
         echo "   --reinstall Reinstall nnw"
@@ -179,9 +183,24 @@ case "$1" in
                 debug "Version flag detected, will print version and exit"
                 shift
                 ;;
-            "--verbose")
+            -vvvv)
+                verbose=4
+                shift
+                ;;
+            -vvv)
+                verbose=3
+                shift
+                ;;
+            -vv)
+                verbose=2
+                shift
+                ;;
+            -v)
                 verbose=1
-                debug "Verbosity enabled, will log lots of stuff!"
+                shift
+                ;;
+            "--verbose")
+                verbose=3
                 shift
                 ;;
             "--uninstall")
@@ -262,12 +281,12 @@ case "$1" in
                     shaBefore=$(git -C "$scriptDir" rev-parse HEAD)
                     info "Pre update SHA: $(color yellow "$shaBefore")"
                     info "Updating local repository..."
-                    if [ $verbose -eq 1 ]; then
+                    if [ $verbose -ge 3 ]; then
                         git -C "$scriptDir" fetch --all
                     else
                         git -C "$scriptDir" fetch --all --quiet
                     fi
-                    if [ $verbose -eq 1 ]; then
+                    if [ $verbose -ge 3 ]; then
                         git -C "$scriptDir" fetch --all
                     else
                         git -C "$scriptDir" reset --hard origin/main --quiet
@@ -348,7 +367,7 @@ case "$1" in
                 updateCheck
             fi
 
-            if [ $verbose -eq 1 ]; then
+            if [ $verbose -ge 2 ]; then
                 printVersion
             fi
 
@@ -437,8 +456,16 @@ case "$1" in
                 fi
 
                 cd "$execDir"
-                echo "$args"
+                [ $verbose -ge 2 ] && echo "$args"
                 export MTX_SKIP_UPDATE=1
+                export MTX_VERBOSE=$verbose
+                if [ $verbose -eq 1 ]; then
+                    ( source "$scriptDir/$script" $args ) 1>/dev/null
+                    exit $?
+                elif [ $verbose -eq 4 ]; then
+                    ( set -x; source "$scriptDir/$script" $args )
+                    exit $?
+                fi
                 source "$scriptDir/$script" $args
             else
                 if [ ! -z "$hoist_target" ]; then
