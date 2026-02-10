@@ -2,7 +2,11 @@
 # MTX deploy: no args → interactive menu (staging / production), then terraform apply
 set -e
 
-ENV="${1:-}"
+# Only use $1 as env if it's a valid environment; otherwise show menu (avoids "deploy" or other junk as env)
+ENV=""
+case "${1:-}" in
+  staging|production) ENV="$1" ;;
+esac
 if [ -z "$ENV" ]; then
   echo "Deploy environment:"
   echo "  1) staging"
