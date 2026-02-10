@@ -3,12 +3,12 @@
 desc="Build iOS app"
 set -e
 if ! command -v xcodebuild &>/dev/null; then
-  echo "⏭️ iOS skipped (no xcodebuild)"
+  echo "⏭️ iOS skipped (no xcodebuild)" >&2
   exit 0
 fi
-echo "🔨 iOS..."
+echo "🔨 iOS..." >&2
 if ! mtx_run npm run build:mobile:ios; then
-  echo "⏭️ iOS build failed; continuing."
+  echo "⏭️ iOS build failed; continuing." >&2
   exit 0
 fi
-echo "✅ ios done"
+echo "✅ ios done" >&2

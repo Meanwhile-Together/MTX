@@ -3,7 +3,7 @@
 desc="Build all targets; use mtx compile <vite|electron|android|ios|servers> for one"
 set -e
 for target in vite electron android ios servers; do
-  echo "🔨 $target..."
+  echo "🔨 $target..." >&2
   mtx_run "$0" compile "$target"
 done
-echo "✅ compile done"
+echo "✅ compile done" >&2
