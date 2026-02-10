@@ -3,18 +3,23 @@
 desc="Build Android debug APK"
 set -e
 
+echo "🔨 Android debug..."
 build_out=$(mktemp)
 trap 'rm -f "$build_out"' EXIT
 
 if ! mtx_run npm run build:android:debug >"$build_out" 2>&1; then
   if grep -qE "Could not find method java\(\)|BUILD FAILED" "$build_out" 2>/dev/null; then
+    echo "🔄 Gradle corrupted → removing android/ios, re-adding with Capacitor..."
     warn "Gradle/cache corrupted; removing android and ios, re-adding with Capacitor, then retrying."
     rm -rf targets/mobile/android targets/mobile/ios
     (cd targets/mobile && npx cap add android && (npx cap add ios || true))
+    echo "🔨 mobile sync..."
     mtx_run npm run build:mobile
+    echo "🔨 Android debug (retry)..."
     mtx_run npm run build:android:debug
   else
     cat "$build_out" 1>&2
     exit 1
   fi
 fi
+echo "✅ android done"
