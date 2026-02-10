@@ -501,6 +501,10 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 fi
             else
                 # No multiple services issue, check if deployment succeeded
+                # If Railway CLI printed "Deploy complete", treat as success (don't false-fail on other "failed" wording)
+                if echo "$OUTPUT" | grep -qi "Deploy complete"; then
+                    return 0
+                fi
                 # Check both exit code and output for error patterns
                 # Railway CLI might return 0 even on timeout/errors
                 local HAS_ERROR=false
@@ -925,11 +929,13 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             
             # Build backend server first (artifact for deploy; Railway may also build on its side using backend config)
             echo -e "${BLUE}🔨 Building backend server...${NC}"
+            BACKEND_BUILD_EXIT=0
             npm run build:backend-server || {
+                BACKEND_BUILD_EXIT=$?
                 echo -e "${YELLOW}⚠️  Backend build failed, skipping backend deployment${NC}"
             }
             
-            if [ $? -eq 0 ]; then
+            if [ "$BACKEND_BUILD_EXIT" -eq 0 ]; then
                 BACKEND_DEPLOY_SUCCESS=false
                 # Use same project token as app deploy so backend deploy is authorized (account token causes Unauthorized for railway up).
                 BACKEND_DEPLOY_TOKEN="$PROJECT_TOKEN"
