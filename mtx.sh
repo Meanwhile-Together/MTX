@@ -479,7 +479,7 @@ case "$1" in
                 fi
 
                 cd "$execDir"
-                if [ -d "$scriptDir/precond" ]; then
+                if [ -d "$scriptDir/precond" ] && [ "$script" != "workspace.sh" ]; then
                     for pre in "$scriptDir"/precond/*.sh; do
                         [ -f "$pre" ] || continue
                         ( source "$pre" )
