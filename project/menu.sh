@@ -102,7 +102,7 @@ build_menu() {
     3) "$0" compile android ;;
     4) "$0" compile ios ;;
     5) "$0" compile servers ;;
-    6) "$0" compile all ;;
+    6) "$0" compile ;;
     *) return ;;
   esac
 }

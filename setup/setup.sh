@@ -9,7 +9,7 @@ set -e
 # 2. Build
 echo ""
 echo "Building..."
-"$0" compile all
+"$0" compile
 
 # 3. Optional deployment
 echo ""
