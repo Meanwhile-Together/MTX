@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # MTX sys clean: remove build artifacts (from shell-scripts.md §8)
+desc="Remove build artifacts and generated files"
 set -e
 
 RED='\033[0;31m'

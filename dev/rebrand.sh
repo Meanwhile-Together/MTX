@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # MTX dev rebrand: identity + apply-names (project name, owner, package id, scope, root name) from shell-scripts.md §2b
+desc="Rename project, owner, package id, scope; apply to repo"
 set -e
 
 cd "$ROOT_"

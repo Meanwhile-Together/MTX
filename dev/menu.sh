@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # MTX dev menu: dev helper (versions, build, dev servers, Android) from shell-scripts.md §9
+desc="Dev helper menu: versions, build, dev servers, Android"
 set -e
 
 cd "$ROOT_"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # MTX setup deploy-menu: interactive deploy menu (from shell-scripts.md §3)
-
+desc="Interactive deploy menu: tokens, Terraform, Railway"
 set -e
 
 ENV_FILE="$ROOT_/.env"

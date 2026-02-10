@@ -1,5 +1,6 @@
 #!/bin/bash
 # MTX test deploy-config: test deploy.json platform array parsing (from shell-scripts.md §13)
+desc="Test deploy.json platform array parsing"
 set -e
 
 GREEN='\033[0;32m'

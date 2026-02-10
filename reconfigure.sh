@@ -1,12 +1,63 @@
 #!/bin/bash
 # Interactive reconfiguration for the wrapper script.
-# Updates the config block at the top of the wrapper and optionally renames it,
-# then updates references to the wrapper filename in the repo.
-
+desc="Update wrapper config (tokens, display name, repo) and optionally rename script"
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Scope reference updates to this repo (directory containing the wrapper)
 REPO_ROOT="$SCRIPT_DIR"
+
+RED='\033[1;31m'
+BOLD_RED='\033[1;31m\033[1m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Require Enter 3 times to continue (forces reading)
+confirm_continue() {
+    local msg="$1"
+    echo ""
+    read -p "Press Enter (1/3) to continue: " _
+    read -p "Press Enter (2/3) to continue: " _
+    read -p "Press Enter (3/3) to continue: " _
+}
+
+# --- WARNING SCREEN 1 ---
+echo ""
+echo -e "${BOLD_RED}  >>> RECONFIGURE: This modifies the WRAPPER script. For your own fork only. <<<${NC}"
+echo ""
+echo -e "${BOLD_RED}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BOLD_RED}║                          ⚠️  WARNING  ⚠️                                    ║${NC}"
+echo -e "${BOLD_RED}║                                                                              ║${NC}"
+echo -e "${BOLD_RED}║  This script RECONFIGURES THE WRAPPER SCRIPT.                                ║${NC}"
+echo -e "${BOLD_RED}║  It will OVERWRITE the config block at the top of the wrapper.              ║${NC}"
+echo -e "${BOLD_RED}║                                                                              ║${NC}"
+echo -e "${BOLD_RED}║  This is ONLY intended for setting up YOUR OWN version (fork) of the        ║${NC}"
+echo -e "${BOLD_RED}║  wrapper — e.g. your own display name, repo, install path, command name.   ║${NC}"
+echo -e "${BOLD_RED}║                                                                              ║${NC}"
+echo -e "${BOLD_RED}║  Do NOT run this if you are just using the wrapper as a normal user.       ║${NC}"
+echo -e "${BOLD_RED}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
+confirm_continue
+
+# --- WARNING SCREEN 2 ---
+echo ""
+echo -e "${RED}═══════════════════════════════════════════════════════════════════════════════${NC}"
+echo -e "${RED}  You are about to change: display name, repo URL, install paths, command name.${NC}"
+echo -e "${RED}  The wrapper file itself will be modified. This affects everyone using this    ${NC}"
+echo -e "${RED}  installation. Only proceed if you are the maintainer of your own fork.         ${NC}"
+echo -e "${RED}═══════════════════════════════════════════════════════════════════════════════${NC}"
+confirm_continue
+
+# --- WARNING SCREEN 3 ---
+echo ""
+echo -e "${YELLOW}  Reconfigure is for: creating your own branded wrapper (e.g. \"MyTool\" instead of \"MTX\").${NC}"
+echo -e "${YELLOW}  It is NOT for: changing project config, tokens for a single project, or daily use.${NC}"
+echo ""
+echo -e "${RED}  Type YES in capitals if you understand and want to reconfigure the wrapper: ${NC}"
+read -r confirm
+if [ "$confirm" != "YES" ]; then
+    echo "Aborted. You did not type YES."
+    exit 1
+fi
+confirm_continue
 
 # Find the wrapper script (contains config block; exclude self)
 find_wrapper() {
@@ -93,6 +144,14 @@ gitUsername="${input_gitUsername:-$current_gitUsername}"
 
 read -p "Git token (optional) [$current_gitToken]: " input_gitToken
 gitToken="${input_gitToken:-$current_gitToken}"
+
+# --- FINAL WARNING BEFORE WRITE ---
+echo ""
+echo -e "${BOLD_RED}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BOLD_RED}║  About to WRITE new config to the wrapper. This cannot be undone from here.  ║${NC}"
+echo -e "${BOLD_RED}║  Ensure you are setting up YOUR OWN wrapper, not modifying a shared install. ║${NC}"
+echo -e "${BOLD_RED}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
+confirm_continue
 
 # Build new config block (packageListFile is derived)
 CONFIG_BLOCK="## Begin Config Section (use ./reconfigure.sh to change these interactively)

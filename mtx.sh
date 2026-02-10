@@ -89,6 +89,9 @@ case "$1" in
         if [ -d "$scriptDir" ]; then
             echo "Commands:"
             echo
+            help_labels=()
+            help_descs=()
+            help_sep=()
             # First-level: top-level .sh (except mtx.sh) and top-level dirs; merge same name (e.g. deploy.sh + deploy/)
             for item in "$scriptDir"/*; do
                 [ -e "$item" ] || continue
@@ -97,28 +100,50 @@ case "$1" in
                 if [ -f "$item" ] && [[ "$base" == *.sh ]]; then
                     cmd="${base%.sh}"
                     d=$(get_desc "$item")
-                    [ -n "$d" ] && echo "  $cmd    $d" || echo "  $cmd"
+                    help_labels+=("  $cmd")
+                    help_descs+=("${d:-}")
                     if [ -d "$scriptDir/$cmd" ]; then
+                        help_sep+=(0)
                         for sub in "$scriptDir/$cmd"/*.sh; do
                             [ -f "$sub" ] || continue
                             subbase=$(basename "$sub" .sh)
                             d=$(get_desc "$sub")
-                            [ -n "$d" ] && echo "    $subbase    $d" || echo "    $subbase"
+                            help_labels+=("    $subbase")
+                            help_descs+=("${d:-}")
+                            help_sep+=(0)
                         done
+                        help_sep[$((${#help_sep[@]}-1))]=1
+                    else
+                        help_sep+=(1)
                     fi
-                    echo
                 elif [ -d "$item" ]; then
-                    # Only print dir if we did not already print it (as same-name .sh)
                     [ -f "$scriptDir/$base.sh" ] && continue
-                    echo "  $base"
+                    help_labels+=("  $base")
+                    help_descs+=("")
+                    help_sep+=(0)
                     for sub in "$item"/*.sh; do
                         [ -f "$sub" ] || continue
                         subbase=$(basename "$sub" .sh)
                         d=$(get_desc "$sub")
-                        [ -n "$d" ] && echo "    $subbase    $d" || echo "    $subbase"
+                        help_labels+=("    $subbase")
+                        help_descs+=("${d:-}")
+                        help_sep+=(0)
                     done
-                    echo
+                    help_sep[$((${#help_sep[@]}-1))]=1
                 fi
+            done
+            maxlen=0
+            for i in "${!help_labels[@]}"; do
+                len=${#help_labels[$i]}
+                [ $len -gt $maxlen ] && maxlen=$len
+            done
+            for i in "${!help_labels[@]}"; do
+                if [ -n "${help_descs[$i]}" ]; then
+                    printf "%-*s  %s\n" "$maxlen" "${help_labels[$i]}" "${help_descs[$i]}"
+                else
+                    echo "${help_labels[$i]}"
+                fi
+                [ "${help_sep[$i]:-0}" = "1" ] && echo
             done
         else
             echo "No scripts directory at: $scriptDir"

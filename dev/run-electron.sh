@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # MTX dev run-electron: run Electron, kill nodemon on clean exit (from shell-scripts.md §14)
+desc="Run Electron; kill nodemon on clean exit"
 set -e
 
 cd "$ROOT_/targets/desktop"

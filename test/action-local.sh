@@ -1,5 +1,6 @@
 #!/bin/bash
 # MTX test action-local: local test for setup-environment action (from shell-scripts.md §12)
+desc="Local test for setup-environment composite action"
 set -e
 
 cd "$ROOT_"

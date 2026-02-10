@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # MTX setup setup: full project setup — rebrand, build, optional deployment (from shell-scripts.md §2, cohesion)
+desc="Full project setup: rebrand, build, optional deployment"
 set -e
 
 cd "$ROOT_"

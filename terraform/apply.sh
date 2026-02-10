@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # MTX terraform apply: run from project root (wrapper sets cwd); use project's terraform dir
-
+desc="Apply Terraform (Railway etc.); deploy app and backend"
 set -e
 
 PROJECT_ROOT="$(pwd)"

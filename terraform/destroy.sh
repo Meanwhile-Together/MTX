@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # MTX terraform destroy: run from project root (wrapper sets cwd); use project's terraform dir
-
+desc="Destroy Terraform-managed resources for environment"
 set -e
 
 PROJECT_ROOT="$(pwd)"
