@@ -290,8 +290,7 @@ guided_setup() {
     fi
     
     echo ""
-    cd "$ROOT_/terraform"
-    if ! ./apply.sh 2>&1 | tee /tmp/terraform-apply.log; then
+    if ! "$0" terraform apply 2>&1 | tee /tmp/terraform-apply.log; then
         APPLY_EXIT=${PIPESTATUS[0]}
         echo ""
         echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
@@ -326,7 +325,7 @@ guided_setup() {
         echo -e "${BLUE}5. Try running manually for more details${NC}"
         echo "   cd terraform"
         echo "   terraform init"
-        echo "   ./apply.sh"
+        echo "   mtx terraform apply"
         echo ""
         echo -e "${YELLOW}💡 Tip:${NC} The error message above should contain specific details"
         echo "   about what went wrong. Look for lines starting with 'Error:'"
@@ -628,7 +627,7 @@ while true; do
             fi
             
             echo ""
-            if ! ./apply.sh 2>&1 | tee /tmp/terraform-apply.log; then
+            if ! "$0" terraform apply 2>&1 | tee /tmp/terraform-apply.log; then
                 APPLY_EXIT=${PIPESTATUS[0]}
                 echo ""
                 echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"

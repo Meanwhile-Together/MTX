@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MTX deploy manual: prompt for env or use arg, then run terraform/apply.sh
+# MTX deploy manual: prompt for env or use arg, then mtx terraform apply
 set -e
 
 ENV="${1:-}"
@@ -9,5 +9,4 @@ if [ -z "$ENV" ]; then
 fi
 
 [ -n "${FORCE_BACKEND:-}" ] && export FORCE_BACKEND
-cd "$ROOT_/terraform"
-exec ./apply.sh "$ENV"
+"$0" terraform apply "$ENV"
