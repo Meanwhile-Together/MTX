@@ -97,11 +97,11 @@ build_menu() {
   echo "6) Back"
   read -rp "Select: " choice
   case "$choice" in
-    1) mtx dev build client ;;
-    2) mtx dev build desktop ;;
-    3) mtx dev build mobile ;;
-    4) mtx dev build server ;;
-    5) mtx dev build all ;;
+    1) "$0" dev build client ;;
+    2) "$0" dev build desktop ;;
+    3) "$0" dev build mobile ;;
+    4) "$0" dev build server ;;
+    5) "$0" dev build all ;;
     *) return ;;
   esac
 }
@@ -137,10 +137,10 @@ android_menu() {
   read -rp "Select: " choice
   case "$choice" in
     1)
-      mtx dev android-debug
+      "$0" dev android-debug
       ;;
     2)
-      mtx dev android-debug
+      "$0" dev android-debug
       APK_PATH=$(npm run -s find:apk 2>/dev/null | tail -n 1 || true)
       if [[ -z "$APK_PATH" ]]; then echo "❌ APK not found"; return; fi
       if ! command -v adb >/dev/null 2>&1; then echo "❌ adb is not installed or not in PATH"; return; fi

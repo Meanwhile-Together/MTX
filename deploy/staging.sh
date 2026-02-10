@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
-# MTX deploy staging: shortcut that runs manual.sh with staging
+# MTX deploy staging: shortcut → mtx deploy manual staging
 set -e
-exec "$SCRIPT_DIR/manual.sh" staging
+"$0" deploy manual staging
