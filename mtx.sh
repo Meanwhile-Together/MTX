@@ -75,7 +75,7 @@ case "$1" in
         if [ -d "$scriptDir" ]; then
             echo "Commands:"
             echo
-            # First-level: top-level .sh (except mtx.sh) and top-level dirs that contain .sh
+            # First-level: top-level .sh (except mtx.sh) and top-level dirs; merge same name (e.g. deploy.sh + deploy/)
             for item in "$scriptDir"/*; do
                 [ -e "$item" ] || continue
                 base=$(basename "$item")
@@ -83,15 +83,21 @@ case "$1" in
                 if [ -f "$item" ] && [[ "$base" == *.sh ]]; then
                     cmd="${base%.sh}"
                     echo "  $cmd"
-                    echo "    (no subcommand)  run interactive/default"
+                    [ -d "$scriptDir/$cmd" ] || echo "    (no subcommand)  run interactive/default"
+                    if [ -d "$scriptDir/$cmd" ]; then
+                        for sub in "$scriptDir/$cmd"/*.sh; do
+                            [ -f "$sub" ] || continue
+                            echo "    $(basename "$sub" .sh)"
+                        done
+                    fi
                     echo
                 elif [ -d "$item" ]; then
-                    # Directory: list .sh files as subcommands
+                    # Only print dir if we did not already print it (as same-name .sh)
+                    [ -f "$scriptDir/$base.sh" ] && continue
                     echo "  $base"
                     for sub in "$item"/*.sh; do
                         [ -f "$sub" ] || continue
-                        subbase=$(basename "$sub" .sh)
-                        echo "    $subbase"
+                        echo "    $(basename "$sub" .sh)"
                     done
                     echo
                 fi
