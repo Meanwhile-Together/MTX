@@ -181,6 +181,22 @@ if [ "$HAS_RAILWAY" = "true" ]; then
     fi
     
     # Resolve backend and app service IDs from API. Services are named with -staging / -production suffix.
+    # Parse supports both edges/node and direct array response shapes.
+    discover_railway_services() {
+        EXISTING_BACKEND_ID=""
+        EXISTING_APP_ID=""
+        [ -z "$SERVICES_RESPONSE" ] && return
+        # Try edges/node (GraphQL connection style)
+        EXISTING_BACKEND_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$BACKEND_NAME" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
+        EXISTING_APP_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$APP_SERVICE_NAME" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
+        # Fallback: direct array (some API versions)
+        if [ -z "$EXISTING_BACKEND_ID" ] || [ "$EXISTING_BACKEND_ID" = "null" ]; then
+            EXISTING_BACKEND_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$BACKEND_NAME" '.data.project.services[]? | select(.name == $name) | .id // empty' 2>/dev/null | head -1)
+        fi
+        if [ -z "$EXISTING_APP_ID" ] || [ "$EXISTING_APP_ID" = "null" ]; then
+            EXISTING_APP_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$APP_SERVICE_NAME" '.data.project.services[]? | select(.name == $name) | .id // empty' 2>/dev/null | head -1)
+        fi
+    }
     EXISTING_BACKEND_ID=""
     EXISTING_APP_ID=""
     BACKEND_NAME="backend-$ENVIRONMENT"
@@ -191,10 +207,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             -H "Authorization: Bearer $RAILWAY_TOKEN_VALUE" \
             -H "Content-Type: application/json" \
             -d "$SERVICES_QUERY" 2>/dev/null)
-        if [ -n "$SERVICES_RESPONSE" ]; then
-            EXISTING_BACKEND_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$BACKEND_NAME" '.data.project.services.edges[] | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
-            EXISTING_APP_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$APP_SERVICE_NAME" '.data.project.services.edges[] | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
-        fi
+        discover_railway_services
     fi
     # Self-heal: if backend was invalidated (404), ignore discovered ID so Terraform creates a new backend on retry
     if [ -f "$PROJECT_ROOT/.railway-backend-invalidated" ]; then
@@ -240,13 +253,40 @@ if [ -n "${EXISTING_BACKEND_ID:-}" ] && [ "$EXISTING_BACKEND_ID" != "null" ]; th
     done
 fi
 
-# Run terraform apply - show output in real-time, don't capture
-# This ensures errors are visible immediately
+# Run terraform apply - show output in real-time, capture for retry check
 # Using -auto-approve since we're in a script and user has already confirmed via setup.sh
 set +e  # Don't exit on error, we'll check exit code
-terraform apply -auto-approve "${TF_VARS[@]}"
-TERRAFORM_EXIT=$?
+TF_APPLY_LOG="/tmp/tf-apply-$$.log"
+terraform apply -auto-approve "${TF_VARS[@]}" 2>&1 | tee "$TF_APPLY_LOG"
+TERRAFORM_EXIT=${PIPESTATUS[0]}
 set -e  # Re-enable exit on error
+
+# If apply failed with "already exists" (service created outside Terraform), discover and re-apply with existing ID
+if [ $TERRAFORM_EXIT -ne 0 ] && grep -q "already exists in this project" "$TF_APPLY_LOG" 2>/dev/null; then
+    echo ""
+    echo -e "${BLUE}🔧 Service already exists; discovering and re-applying with existing ID...${NC}"
+    SERVICES_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+        -H "Authorization: Bearer $RAILWAY_TOKEN_VALUE" \
+        -H "Content-Type: application/json" \
+        -d "$SERVICES_QUERY" 2>/dev/null)
+    discover_railway_services
+    if [ -n "$EXISTING_BACKEND_ID" ] && [ "$EXISTING_BACKEND_ID" != "null" ]; then
+        for res in 'module.railway_owner[0].railway_service.backend_staging[0]' 'module.railway_owner[0].railway_service.backend_production[0]'; do
+            terraform state rm "$res" 2>/dev/null || true
+        done
+        TF_VARS+=(-var="railway_backend_service_id=$EXISTING_BACKEND_ID")
+        echo -e "${GREEN}✅ Using existing backend service: $EXISTING_BACKEND_ID${NC}"
+    fi
+    if [ -n "$EXISTING_APP_ID" ] && [ "$EXISTING_APP_ID" != "null" ]; then
+        terraform state rm 'module.railway_app[0].railway_service.app[0]' 2>/dev/null || true
+        TF_VARS+=(-var="railway_service_id=$EXISTING_APP_ID")
+        echo -e "${GREEN}✅ Using existing app service: $EXISTING_APP_ID${NC}"
+    fi
+    echo ""
+    terraform apply -auto-approve "${TF_VARS[@]}"
+    TERRAFORM_EXIT=$?
+fi
+rm -f "$TF_APPLY_LOG"
 
 if [ $TERRAFORM_EXIT -ne 0 ]; then
     echo ""
