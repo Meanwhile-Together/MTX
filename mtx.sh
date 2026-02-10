@@ -376,6 +376,15 @@ case "$1" in
             else
                 script=${@:1:cmdEndIndex-1}
                 script="${script// //}.sh"
+                # Prefer subfolder script when both name.sh and name/ exist and user passed a subcommand (e.g. mtx compile vite → compile/vite.sh)
+                if [ $cmdEndIndex -le $# ]; then
+                    nextArg="${!cmdEndIndex}"
+                    baseScript="${script%.sh}"
+                    if [ -f "$baseScript/$nextArg.sh" ]; then
+                        script="$baseScript/$nextArg.sh"
+                        ((cmdEndIndex++)) || true
+                    fi
+                fi
             fi
             if [ -f "$script" ]; then
                 debug "Running $script"

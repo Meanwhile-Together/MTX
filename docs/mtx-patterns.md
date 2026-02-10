@@ -35,6 +35,8 @@ This doc covers **mtx.sh** (the wrapper): how it runs, loads includes, builds he
   - **Top-level commands:** Every `*.sh` in `$scriptDir` except `mtx.sh` and files under `includes/` or dot-prefixed. Each becomes a line like `  cmd` with its `desc` (from `get_desc`) aligned to the right.
   - **Subcommands:** For every directory `$scriptDir/<name>`, if there is also `$scriptDir/<name>.sh`, only the directory is used (merged). Otherwise the directory is listed and each `*.sh` inside is a subcommand: `    subcmd` with its `desc`. A blank line is printed after the last subcommand of each group.
   - **Options:** At the end, help always prints the same options block (e.g. `--help`, `--version`, `--verbose`, `--update`, `--uninstall`, `--reinstall`, `--hoist=`, `--submerge`).
+- **Paired top-level + subfolder:** When both `<name>.sh` and `<name>/` exist and the user passes another word (e.g. `mtx compile vite`), the wrapper checks for `<name>/<next>.sh`. If it exists, that subcommand script is run instead of the top-level script with the word as an argument. So `mtx compile vite` runs `compile/vite.sh`, not `compile.sh` with `vite` as `$1`.
+
 - **Anti-pattern:** Don't assume help is built from the current repo. After install, help reflects `$scriptDir` (the cloned copy). Scripts without `desc` in the first 30 lines still appear in the menu but with no description next to them.
 
 ---
