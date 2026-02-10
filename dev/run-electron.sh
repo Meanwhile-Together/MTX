@@ -1,34 +1,6 @@
 #!/usr/bin/env bash
-# MTX dev run-electron: run Electron, kill nodemon on clean exit (from shell-scripts.md §14)
+# MTX dev run-electron: run the project's desktop dev flow (Electron + nodemon etc.)
 desc="Run Electron; kill nodemon on clean exit"
 set -e
 
-# Build desktop app if main entry is missing (script runs with cwd = project root)
-DESKTOP_MAIN=$(node -p "try { require('./targets/desktop/package.json').main } catch(e) { '' }" 2>/dev/null || true)
-if [ -n "$DESKTOP_MAIN" ] && [ ! -f "targets/desktop/$DESKTOP_MAIN" ]; then
-  npm run build:desktop
-fi
-
-cd targets/desktop
-NODE_ENV=development npx electron "$@"
-EXIT_CODE=$?
-
-if [ $EXIT_CODE -eq 0 ]; then
-  CURRENT_PID=$$
-  while [ $CURRENT_PID -ne 1 ]; do
-    PARENT_PID=$(ps -o ppid= -p $CURRENT_PID 2>/dev/null | xargs)
-    if [ -z "$PARENT_PID" ] || [ "$PARENT_PID" = "1" ]; then
-      break
-    fi
-    PARENT_CMD=$(ps -o comm= -p $PARENT_PID 2>/dev/null || echo "")
-    if echo "$PARENT_CMD" | grep -qi "nodemon"; then
-      kill -TERM $PARENT_PID 2>/dev/null || true
-      break
-    fi
-    CURRENT_PID=$PARENT_PID
-  done
-  pkill -f "nodemon.*run-electron" 2>/dev/null || true
-  exit 0
-fi
-
-exit $EXIT_CODE
+npm run dev:desktop
