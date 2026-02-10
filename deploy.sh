@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # MTX deploy: no args → interactive menu (staging / production), then terraform apply
+desc="Interactive deploy menu (choose staging or production), then terraform apply"
 set -e
 
 # Only use $1 as env if it's a valid environment; otherwise show menu (avoids "deploy" or other junk as env)

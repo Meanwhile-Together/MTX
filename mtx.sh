@@ -32,6 +32,20 @@ fi
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 execDir="$(pwd)"
 
+        # Extract desc= "..." or '...' from first 30 lines of a script (for help)
+        get_desc() {
+            local f="$1"
+            local line
+            [ -f "$f" ] || return
+            line=$(head -30 "$f" 2>/dev/null | grep -m1 '^desc=') || return
+            line="${line#desc=}"
+            line="${line#\"}"
+            line="${line%\"}"
+            line="${line#\'}"
+            line="${line%\'}"
+            [ -n "$line" ] && echo "$line"
+        }
+
         # Preload includes
         if [ -d "$scriptDir/includes" ]; then
             for file in "$scriptDir/includes"/*.sh; do
@@ -82,15 +96,15 @@ case "$1" in
                 [ "$base" = "mtx.sh" ] || [ "$base" = "includes" ] || [[ "$base" == .* ]] && continue
                 if [ -f "$item" ] && [[ "$base" == *.sh ]]; then
                     cmd="${base%.sh}"
-                    echo "  $cmd"
+                    d=$(get_desc "$item")
+                    [ -n "$d" ] && echo "  $cmd    $d" || echo "  $cmd"
                     if [ -d "$scriptDir/$cmd" ]; then
-                        echo "    (no subcommand)  run interactive menu"
                         for sub in "$scriptDir/$cmd"/*.sh; do
                             [ -f "$sub" ] || continue
-                            echo "    $(basename "$sub" .sh)"
+                            subbase=$(basename "$sub" .sh)
+                            d=$(get_desc "$sub")
+                            [ -n "$d" ] && echo "    $subbase    $d" || echo "    $subbase"
                         done
-                    else
-                        echo "    (no subcommand)"
                     fi
                     echo
                 elif [ -d "$item" ]; then
@@ -99,7 +113,9 @@ case "$1" in
                     echo "  $base"
                     for sub in "$item"/*.sh; do
                         [ -f "$sub" ] || continue
-                        echo "    $(basename "$sub" .sh)"
+                        subbase=$(basename "$sub" .sh)
+                        d=$(get_desc "$sub")
+                        [ -n "$d" ] && echo "    $subbase    $d" || echo "    $subbase"
                     done
                     echo
                 fi
