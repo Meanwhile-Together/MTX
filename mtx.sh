@@ -67,6 +67,22 @@ execDir="$(pwd)"
             debug() { :; }
             mtx_run() { "$@"; }
         fi
+        # Ensure mtx_run is always defined (self-heal if include missing or old install)
+        if ! type mtx_run &>/dev/null; then
+            mtx_run() {
+                local v=${MTX_VERBOSE:-1}
+                if [ "$v" -le 2 ]; then
+                    "$@" 1>/dev/null
+                    return $?
+                elif [ "$v" -eq 4 ]; then
+                    ( set -x; "$@" )
+                    return $?
+                else
+                    "$@"
+                    return $?
+                fi
+            }
+        fi
 
         # Create package list file if it doesn't exist (scriptDir must exist)
         if [ -d "$scriptDir" ] && [ ! -f "$packageListFile" ]; then
