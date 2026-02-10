@@ -20,7 +20,7 @@ if [[ ! "$answer" =~ ^[Yy]$ ]]; then
 fi
 
 GITHUB_ORG="Meanwhile-Together"
-REPOS=(MTX project-bridge archive test client-a cicd)
+REPOS=(MTX project-bridge test client-a cicd)
 WORKSPACE_FILE="Meanwhile-Together.code-workspace"
 
 echo "📦 Creating $WORKSPACE_FILE and cloning ${#REPOS[@]} repos..." >&2
