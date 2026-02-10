@@ -88,19 +88,21 @@ set_version() {
 build_menu() {
   echo ""
   echo "🔨 Build options:"
-  echo "1) Build web (client)"
-  echo "2) Build desktop"
-  echo "3) Build mobile (Capacitor bundle)"
-  echo "4) Build server"
-  echo "5) Build all"
-  echo "6) Back"
+  echo "1) Build web (vite)"
+  echo "2) Build desktop (electron)"
+  echo "3) Build Android"
+  echo "4) Build iOS"
+  echo "5) Build servers"
+  echo "6) Build all"
+  echo "7) Back"
   read -rp "Select: " choice
   case "$choice" in
-    1) "$0" compile client ;;
-    2) "$0" compile desktop ;;
-    3) "$0" compile mobile ;;
-    4) "$0" compile server ;;
-    5) "$0" compile all ;;
+    1) "$0" compile vite ;;
+    2) "$0" compile electron ;;
+    3) "$0" compile android ;;
+    4) "$0" compile ios ;;
+    5) "$0" compile servers ;;
+    6) "$0" compile all ;;
     *) return ;;
   esac
 }

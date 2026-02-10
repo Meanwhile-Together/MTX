@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # MTX compile: build targets — use mtx compile <target> (no arguments here; see compile/*.sh)
-desc="Build targets; use mtx compile <client|desktop|mobile|server|all|android-debug>"
+desc="Build targets; use mtx compile <vite|electron|android|ios|servers|all>"
 set -e
 
-echo "Usage: mtx compile <client|desktop|mobile|server|all|android-debug>"
-echo "  client        - npm run build:client"
-echo "  desktop       - npm run build:desktop"
-echo "  mobile        - npm run build:mobile"
-echo "  server        - npm run build:server"
-echo "  all           - npm run build"
-echo "  android-debug - Build Android debug APK"
+echo "Usage: mtx compile <vite|electron|android|ios|servers|all>"
+echo "  vite     - Build web client (Vite)"
+echo "  electron - Build desktop app (Electron)"
+echo "  android  - Build Android debug APK"
+echo "  ios      - Build iOS app"
+echo "  servers  - Build app server and backend server"
+echo "  all      - Build all targets"
