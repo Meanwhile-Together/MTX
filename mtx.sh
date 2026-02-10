@@ -1,0 +1,381 @@
+#!/bin/bash
+## Begin Config Section (use ./reconfigure.sh to change these interactively)
+gitUsername=""
+gitToken=""
+domain="https://github.com"
+displayName="MTX"
+slugName=$(echo "$displayName" | awk '{print tolower($0)}')
+repo="Meanwhile-Together/MTX"
+installedName="$slugName"
+binDir="/usr/bin"
+scriptDir="/etc/$slugName"
+packageListFile="$scriptDir/.installed_packages"
+wrapperName="mtx.sh"
+## End Config Section. Don't edit below, unless you intend to change functionality.
+
+# Get version from git if available
+if [ -d "$scriptDir/.git" ]; then
+    NNW_VERSION=$(git -C "$scriptDir" describe --tags 2>/dev/null || git -C "$scriptDir" rev-parse --short HEAD)
+else
+    NNW_VERSION="unknown"
+fi
+
+# Exit codes
+# 0: Script completed successfully.
+# 1: Error due to "uninstall" and "reinstall" flags being set at the same time.
+# 2: Error due to the script directory not existing.
+# 3: Error updating remote repository, and couldn't clone a new repository.
+# 4: Script not found for installation
+# 5: Script already installed
+# 6: Script not in package list for uninstallation
+
+dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+execDir="$(pwd)"
+
+        # Preload includes
+        if [ -d "$scriptDir/includes" ]; then
+            for file in "$scriptDir/includes"/*.sh; do
+                if [ -f "$file" ]; then
+                    source "$file"
+                fi
+            done
+        fi
+
+        # Create package list file if it doesn't exist
+        if [ ! -f "$packageListFile" ]; then
+            touch "$packageListFile"
+        fi
+
+        #handle arguments
+        verbose=0
+        version=0
+        uninstall=0
+        reinstall=0
+        hoist_target=""
+        submerge=0
+
+        printVersion() {
+            if [ ! -z "$NNW_VERSION" ]; then
+                echoc cyan "$(color blue NNW)[$(color yellow "$NNW_VERSION")]: as $(color magenta "$displayName")"
+            fi
+        }
+
+        isScriptInstalled() {
+            local script_name="$1"
+            grep -q "^$script_name$" "$packageListFile"
+            return $?
+        }
+
+case "$1" in
+    "help")
+        echo "$installedName - A helpful script wrapper"
+        echo
+        echo "Usage: $installedName [path/to/script] [options]"
+        echo  
+        echo "Scripts & Directories:"
+            
+       if [ -d "$scriptDir" ]; then
+        
+            echo "Scripts & Directories:"
+            
+            # Recursively find all scripts, excluding .git directory
+            scripts=$(find "$scriptDir" -type f -name "*.sh" -not -path "*/\.*")  
+            for script in $scripts; do
+                
+                # Construct command for display
+                cmd="$installedName ${script#$scriptDir/}"
+                
+                echo "$cmd"
+            done
+            
+            # Print directories, excluding .git and includes
+            dirs=$(find "$scriptDir" -type d -not -path "*/\.*" -not -path "*/includes*")   
+            for dir in $dirs; do
+                echo
+                echo "$dir:"
+                ls -1 "$dir" 2>/dev/null | grep -v "includes\|\.git"
+                
+            done                       
+            
+        else
+            
+            echo "No scripts directory at: $scriptDir"
+            
+        fi 
+
+        echo
+        echo "Options:"
+        echo "   --help Show this help message"
+        echo "   --version Print nnw version" 
+        echo "   --verbose Print more information"
+        echo "   --update Update nnw "
+        echo "   --uninstall Uninstall nnw" 
+        echo "   --reinstall Reinstall nnw"
+        echo "   --hoist=<name> Install script as command with given name"
+        echo "   --submerge Remove all hoisted instances of the current script"
+
+        # Could also parse through each script to print script specific help
+        ;;
+    *)
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            "--version")
+                version=1
+                debug "Version flag detected, will print version and exit"
+                shift
+                ;;
+            "--verbose")
+                verbose=1
+                debug "Verbosity enabled, will log lots of stuff!"
+                shift
+                ;;
+            "--uninstall")
+                uninstall=1
+                debug "Uninstall flag detected, will uninstall $(c yellow "$displayName")"
+                shift
+                ;;
+            "--reinstall")
+                reinstall=1
+                debug "Reinstall flag detected, will reinstall $(c yellow "$displayName")"
+                shift
+                ;;
+            --hoist=*)
+                hoist_target="${1#*=}"
+                debug "Hoist flag detected, will hoist script as $hoist_target"
+                shift
+                ;;
+            "--submerge")
+                submerge=1
+                debug "Submerge flag detected, will remove all hoisted instances of current script"
+                shift
+                ;;
+            *)
+                break
+                ;;
+            esac
+        done
+
+        #check if version flag is set, if so print version and exit
+        if [ $version -eq 1 ]; then
+            printVersion
+            exit 0
+        fi
+
+        #check if uninstall and reinstall are both set, if so exit, that can't happen
+        if [ $uninstall -eq 1 ] && [ $reinstall -eq 1 ]; then
+            error "Both uninstall and reinstall flags are set, this is not allowed"
+            exit 1
+        fi
+
+        installWrapper() {
+            if command -v sudo &>/dev/null; then
+                sudo rm -rf "$scriptDir"
+                sudo mkdir -p "$scriptDir"
+                sudo chown $USER:$USER "$scriptDir"
+            else
+                rm -rf "$scriptDir"
+                mkdir -p "$scriptDir"
+                chown $USER:$USER "$scriptDir"
+            fi
+            updateCheck
+            if command -v sudo &>/dev/null; then
+                sudo rm -f "$binDir/$installedName"
+                sudo ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName" >/dev/null
+                sudo chmod +x "$scriptDir/$wrapperName"
+            else
+                rm -f "$binDir/$installedName"
+                ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName" >/dev/null
+                chmod +x "$scriptDir/$wrapperName"
+            fi
+            success "$(color magenta "$wrapperName") as $(color yellow "$displayName") installed"
+            success "      As?                 '$installedName'"
+            success "      Where?              $binDir/$installedName"
+            success "      Repo link?          $domain/$repo"
+            success "Ready to roooollout!"
+        }
+
+        updateCheck() {
+            info "Checking for updates..."
+            if [ ! -d "$scriptDir" ]; then
+                error "Directory '$scriptDir' does not exist"
+                exit 2
+            fi
+
+            if git -C "$scriptDir" remote update &>/dev/null; then
+                if ! git -C "$scriptDir" diff --ignore-space-at-eol --quiet origin/main; then
+                    info "Remote repository has changes."
+                    shaNow=$(git -C "$scriptDir" rev-parse HEAD)
+                    info "Pre update SHA: $(color yellow "$shaNow")"
+                    info "Updating local repository..."
+                    if [ $verbose -eq 1 ]; then
+                        git -C "$scriptDir" fetch --all
+                    else
+                        git -C "$scriptDir" fetch --all --quiet
+                    fi
+                    if [ $verbose -eq 1 ]; then
+                        git -C "$scriptDir" fetch --all
+                    else
+                        git -C "$scriptDir" reset --hard origin/main --quiet
+                    fi
+                    if command -v sudo &>/dev/null; then
+                        sudo chmod +x "$scriptDir/$wrapperName"
+                        sudo ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName"
+                    else
+                        chmod +x "$scriptDir/$wrapperName"
+                        ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName"
+                    fi
+                    success "Local repository has been updated from remote repository."
+                    shaNow=$(git -C "$scriptDir" rev-parse HEAD)
+                    info "Post update SHA: $(color yellow "$shaNow")"
+                else
+                    success "Local repository is up-to-date with remote repository."
+                fi
+            else
+                error "Error updating remote repository. Cloning new repository..."
+                git -C "$scriptDir" clone --depth 1 "$domain/$repo" "$scriptDir"
+            fi
+        }
+
+        isolateScript() {
+
+            pathSoFar="."
+            pathAt=1
+            for w in "$@"; do
+                let pathAt++
+                pathSoFar="$pathSoFar/$w"
+                if [ -f "$pathSoFar.sh" ]; then
+                    echo "$pathAt"
+                    return 0
+                fi
+            done
+            return 1
+        }
+
+        isolateDir() {
+
+            pathSoFar="."
+            pathAt=1
+            for w in "$@"; do
+                let pathAt++
+                pathSoFar="$pathSoFar/$w"
+                if [ -d "$pathSoFar" ]; then
+                    echo "$pathAt"
+                    return 0
+                fi
+            done
+            return 1
+        }
+
+        if [ $uninstall -eq 1 ]; then
+            debug "Uninstalling $(c yellow "$displayName")..."
+            if command -v sudo &>/dev/null; then
+                sudo rm -f "$binDir/$installedName"
+            else
+                rm -f "$binDir/$installedName"
+            fi
+            success "Uninstalled $(c yellow "$displayName")"
+            exit 0
+        fi
+
+        if [ ! "$dir" == "$binDir" ]; then
+            debug "Script is not in $binDir, installing wrapper..."
+            installWrapper
+            exit 0
+        else
+            #     sudo chown $USER:$USER "$scriptDir"
+            debug "Script is in $binDir, checking wrapper to see if its outdated..."
+            cd "$scriptDir"
+            updateCheck
+
+            if [ $verbose -eq 1 ]; then
+                printVersion
+            fi
+
+            cmdEndIndex=$(isolateScript "$@")
+            debug "cmdEndIndex: $cmdEndIndex"
+            if [ $((cmdEndIndex - 1)) -lt 0 ]; then
+                debug "Wasn't a script, lets see if its a dir."
+                cmdEndIndex=$(isolateDir "$@")
+                if [ $((cmdEndIndex - 1)) -gt 0 ]; then
+                    debug "It was a dir! Lets list the contents for the user."
+                    script=${@:1:cmdEndIndex-1}
+                    script="${script// //}"
+                    error "Script '$script' is a directory."
+                    info "Available scripts and subdirectories in this directory are:"
+                    info "Scripts are $(color green "green") and directories are $(color yellow "yellow")"
+                    for file in "$script"/*; do
+                        if [[ -d "$file" ]]; then
+                            info "\t- $(basename "$file")"
+                        else
+                            info "\t- $(basename "$file")"
+                        fi
+                    done
+                else
+                    debug "It wasn't a dir either, looks like the user just wanted to run the wrapper. Maybe they want to update only?"
+                    success "We're done here."
+                fi
+            else
+                script=${@:1:cmdEndIndex-1}
+                script="${script// //}.sh"
+            fi
+            if [ -f "$script" ]; then
+                debug "Running $script"
+                git -C "$scriptDir" reset --hard origin/main
+                chmod +x "$script"
+                args=""
+                if [ $cmdEndIndex -le $# ]; then
+                    for a in "${@:cmdEndIndex}"; do
+                        args="$args $a"
+                    done
+                fi
+
+                if [ ! -z "$hoist_target" ]; then
+                    #Un-comment to disable multi-hoisting
+                    # if isScriptInstalled "$hoist_target"; then
+                    #     error "Error: $hoist_target is already hoisted"
+                    #     exit 5
+                    # fi
+                    debug "Hoisting script as $hoist_target..."
+                    if command -v sudo &>/dev/null; then
+                        sudo ln -sf "$scriptDir/$script" "$binDir/$hoist_target"
+                        sudo chmod +x "$binDir/$hoist_target"
+                    else
+                        ln -sf "$scriptDir/$script" "$binDir/$hoist_target"
+                        chmod +x "$binDir/$hoist_target"
+                    fi
+                    echo "$hoist_target" >> "$packageListFile"
+                    success "Hoisted $script as $hoist_target"
+                    exit 0
+                fi
+
+                if [ $submerge -eq 1 ]; then
+                    debug "Submerging all hoisted instances of $script..."
+                    script_path="$scriptDir/$script"
+                    while read -r alias; do
+                        if [ "$(readlink -f "$binDir/$alias")" = "$(readlink -f "$script_path")" ]; then
+                            if command -v sudo &>/dev/null; then
+                                sudo rm -f "$binDir/$alias"
+                            else
+                                rm -f "$binDir/$alias"
+                            fi
+                            sed -i "/^$alias$/d" "$packageListFile"
+                            success "Removed hoisted instance: $alias"
+                        fi
+                    done < "$packageListFile"
+                    success "All hoisted instances of $script have been removed"
+                    exit 0
+                fi
+
+                cd "$execDir"
+                echo "$args"
+                source "$scriptDir/$script" $args
+            else
+                if [ ! -z "$hoist_target" ]; then
+                    error "Error: Script $script not found"
+                    exit 4
+                fi
+            fi
+        fi
+
+
+esac
