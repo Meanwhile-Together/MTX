@@ -83,12 +83,14 @@ case "$1" in
                 if [ -f "$item" ] && [[ "$base" == *.sh ]]; then
                     cmd="${base%.sh}"
                     echo "  $cmd"
-                    [ -d "$scriptDir/$cmd" ] || echo "    (no subcommand)  run interactive/default"
                     if [ -d "$scriptDir/$cmd" ]; then
+                        echo "    (no subcommand)  run interactive menu"
                         for sub in "$scriptDir/$cmd"/*.sh; do
                             [ -f "$sub" ] || continue
                             echo "    $(basename "$sub" .sh)"
                         done
+                    else
+                        echo "    (no subcommand)"
                     fi
                     echo
                 elif [ -d "$item" ]; then
