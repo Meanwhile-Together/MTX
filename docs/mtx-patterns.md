@@ -11,6 +11,13 @@ This doc covers **mtx.sh** (the wrapper): how it runs, loads includes, builds he
 
 ---
 
+## System folders
+
+- **Declared in config:** `systemFolders="includes precond"` in the config section of mtx.sh. Add any folder name that must not appear as a command (e.g. internal/system use only).
+- **Effect:** These folders are omitted from the help menu and are not treated as valid command directories. For example, `mtx precond` does not list precond’s contents; it falls through to “We’re done here.” Use for `includes/`, `precond/`, or other non-command dirs.
+
+---
+
 ## Preconditions (`precond/`)
 
 - **Location:** `$scriptDir/precond/` (e.g. `/etc/mtx/precond` when installed). Scripts must be named **`00-name.sh`**, **`01-name.sh`**, etc. so they run in order.

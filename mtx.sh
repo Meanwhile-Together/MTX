@@ -11,7 +11,14 @@ binDir="/usr/bin"
 scriptDir="/etc/$slugName"
 packageListFile="$scriptDir/.installed_packages"
 wrapperName="mtx.sh"
+# System folders: omitted from help and not treated as commands (e.g. mtx precond does nothing)
+systemFolders="includes precond"
 ## End Config Section. Don't edit below, unless you intend to change functionality.
+
+        is_system_folder() {
+            local n="$1"
+            case " $systemFolders " in *" $n "*) return 0;; *) return 1;; esac
+        }
 
 # Get version from git if available
 if [ -d "$scriptDir/.git" ]; then
@@ -125,7 +132,7 @@ case "$1" in
             for item in "$scriptDir"/*; do
                 [ -e "$item" ] || continue
                 base=$(basename "$item")
-                [ "$base" = "mtx.sh" ] || [ "$base" = "includes" ] || [[ "$base" == .* ]] && continue
+                [ "$base" = "mtx.sh" ] || is_system_folder "$base" || [[ "$base" == .* ]] && continue
                 if [ -f "$item" ] && [[ "$base" == *.sh ]]; then
                     cmd="${base%.sh}"
                     d=$(get_desc "$item")
@@ -352,7 +359,7 @@ case "$1" in
             for w in "$@"; do
                 let pathAt++
                 pathSoFar="$pathSoFar/$w"
-                if [ -d "$pathSoFar" ]; then
+                if [ -d "$pathSoFar" ] && ! is_system_folder "$w"; then
                     echo "$pathAt"
                     return 0
                 fi
