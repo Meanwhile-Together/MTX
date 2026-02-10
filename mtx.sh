@@ -70,51 +70,45 @@ case "$1" in
     "help")
         echo "$installedName - A helpful script wrapper"
         echo
-        echo "Usage: $installedName [path/to/script] [options]"
-        echo  
-        echo "Scripts & Directories:"
-            
-       if [ -d "$scriptDir" ]; then
-        
-            echo "Scripts & Directories:"
-            
-            # Recursively find all scripts, excluding .git directory
-            scripts=$(find "$scriptDir" -type f -name "*.sh" -not -path "*/\.*")  
-            for script in $scripts; do
-                
-                # Construct command for display
-                cmd="$installedName ${script#$scriptDir/}"
-                
-                echo "$cmd"
-            done
-            
-            # Print directories, excluding .git and includes
-            dirs=$(find "$scriptDir" -type d -not -path "*/\.*" -not -path "*/includes*")   
-            for dir in $dirs; do
-                echo
-                echo "$dir:"
-                ls -1 "$dir" 2>/dev/null | grep -v "includes\|\.git"
-                
-            done                       
-            
-        else
-            
-            echo "No scripts directory at: $scriptDir"
-            
-        fi 
-
+        echo "Usage: $installedName <command> [subcommand] [options]"
         echo
+        if [ -d "$scriptDir" ]; then
+            echo "Commands:"
+            echo
+            # First-level: top-level .sh (except mtx.sh) and top-level dirs that contain .sh
+            for item in "$scriptDir"/*; do
+                [ -e "$item" ] || continue
+                base=$(basename "$item")
+                [ "$base" = "mtx.sh" ] || [ "$base" = "includes" ] || [[ "$base" == .* ]] && continue
+                if [ -f "$item" ] && [[ "$base" == *.sh ]]; then
+                    cmd="${base%.sh}"
+                    echo "  $cmd"
+                    echo "    (no subcommand)  run interactive/default"
+                    echo
+                elif [ -d "$item" ]; then
+                    # Directory: list .sh files as subcommands
+                    echo "  $base"
+                    for sub in "$item"/*.sh; do
+                        [ -f "$sub" ] || continue
+                        subbase=$(basename "$sub" .sh)
+                        echo "    $subbase"
+                    done
+                    echo
+                fi
+            done
+        else
+            echo "No scripts directory at: $scriptDir"
+            echo
+        fi
         echo "Options:"
         echo "   --help Show this help message"
-        echo "   --version Print nnw version" 
+        echo "   --version Print nnw version"
         echo "   --verbose Print more information"
-        echo "   --update Update nnw "
-        echo "   --uninstall Uninstall nnw" 
+        echo "   --update Update nnw"
+        echo "   --uninstall Uninstall nnw"
         echo "   --reinstall Reinstall nnw"
         echo "   --hoist=<name> Install script as command with given name"
         echo "   --submerge Remove all hoisted instances of the current script"
-
-        # Could also parse through each script to print script specific help
         ;;
     *)
         while [[ $# -gt 0 ]]; do
