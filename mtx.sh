@@ -53,6 +53,13 @@ execDir="$(pwd)"
             [ -n "$line" ] && echo "$line"
         }
 
+        # Opt-in: script sets nocapture=1 in first 30 lines to bypass stdout funnel when verbose=1
+        get_nocapture() {
+            local f="$1"
+            [ -f "$f" ] || return 1
+            head -30 "$f" 2>/dev/null | grep -qE '^(nocapture|no_capture)=1' || return 1
+        }
+
         # Preload includes (bolors etc.). Use scriptDir when installed, else dir when running from repo (before clone).
         if [ -d "$scriptDir/includes" ]; then
             for file in "$scriptDir/includes"/*.sh; do
@@ -490,11 +497,12 @@ case "$1" in
                 [ $verbose -ge 2 ] && echo "$args"
                 export MTX_SKIP_UPDATE=1
                 export MTX_VERBOSE=$verbose
-                if [ $verbose -eq 1 ]; then
-                    ( source "$scriptDir/$script" $args ) 1>/dev/null
-                    exit $?
-                elif [ $verbose -eq 4 ]; then
+                if [ $verbose -eq 4 ]; then
                     ( set -x; source "$scriptDir/$script" $args )
+                    exit $?
+                fi
+                if [ $verbose -eq 1 ] && ! get_nocapture "$scriptDir/$script"; then
+                    ( source "$scriptDir/$script" $args ) 1>/dev/null
                     exit $?
                 fi
                 source "$scriptDir/$script" $args
