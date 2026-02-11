@@ -56,7 +56,7 @@ read_json() {
 }
 
 # Menu card width (one horizontal "page")
-MENU_W=64
+MENU_W=72
 
 # Build one-line summary of framework + deploy + versions for the menu header/status
 get_framework_line() {
@@ -100,7 +100,12 @@ get_versions_line() {
   web_v=$(read_json_field "$CLIENT_PKG" version 2>/dev/null || true)
   desk_v=$(read_json_field "$DESKTOP_PKG" version 2>/dev/null || true)
   mob_v=$(read_json_field "$MOBILE_PKG" version 2>/dev/null || true)
-  printf "v %s · %s · %s · %s" "${root_v:-—}" "${web_v:-—}" "${desk_v:-—}" "${mob_v:-—}"
+  # Compact: if all same, show once; else repo · web · desk · mob
+  if [ "${root_v:-x}" = "${web_v:-y}" ] && [ "${root_v:-x}" = "${desk_v:-z}" ] && [ "${root_v:-x}" = "${mob_v:-w}" ]; then
+    printf "v %s" "${root_v:-—}"
+  else
+    printf "v %s · %s · %s · %s" "${root_v:-—}" "${web_v:-—}" "${desk_v:-—}" "${mob_v:-—}"
+  fi
 }
 
 # Truncate or pad to width; strip newlines (for menu card lines)
@@ -113,7 +118,7 @@ menu_fit() {
 
 # Draw the main menu card (one screen, horizontal feel)
 draw_menu_card() {
-  clear
+  [ -t 1 ] && clear
   local top_hr line content max_content=$((MENU_W - 4))
   top_hr=$(printf '╔%*s╗' "$((MENU_W-2))" "" | tr ' ' '═')
   printf "%b%s%b\n" "${cyan:-}" "$top_hr" "${reset:-}"
@@ -126,10 +131,11 @@ draw_menu_card() {
   printf "%b%s%b\n" "${dim:-}" "$line" "${reset:-}"
   printf "%b╠%*s╣%b\n" "${cyan:-}" "$((MENU_W-2))" "" "${reset:-}" | tr ' ' '═'
   # Two-column menu (1-4 left, 5-8 right)
-  printf "║ %-29s %-29s ║\n" "1) Set web version"       "5) Build..."
-  printf "║ %-29s %-29s ║\n" "2) Set desktop version" "6) Dev (foreground)..."
-  printf "║ %-29s %-29s ║\n" "3) Set mobile version"  "7) Android helpers..."
-  printf "║ %-29s %-29s ║\n" "4) Set ALL versions"    "8) Quit"
+  local col_w=$(( (MENU_W - 4) / 2 ))
+  printf "║ %-*s %-*s ║\n" "$col_w" "1) Set web version"       "$col_w" "5) Build..."
+  printf "║ %-*s %-*s ║\n" "$col_w" "2) Set desktop version" "$col_w" "6) Dev (foreground)..."
+  printf "║ %-*s %-*s ║\n" "$col_w" "3) Set mobile version"  "$col_w" "7) Android helpers..."
+  printf "║ %-*s %-*s ║\n" "$col_w" "4) Set ALL versions"    "$col_w" "8) Quit"
   printf "%b╚%*s╝%b\n" "${cyan:-}" "$((MENU_W-2))" "" "${reset:-}" | tr ' ' '═'
 }
 
@@ -158,17 +164,29 @@ set_version() {
   echo "✅ Set $target version to $version"
 }
 
+# Draw a submenu card (title + two-column options)
+draw_submenu() {
+  local title="$1" opts="$2"  # opts = "1) Label|2) Label|..." (pairs separated by |)
+  local col_w=$(( (MENU_W - 4) / 2 )) max_content=$((MENU_W - 4))
+  [ -t 1 ] && clear
+  local top_hr
+  top_hr=$(printf '╔%*s╗' "$((MENU_W-2))" "" | tr ' ' '═')
+  printf "%b%s%b\n" "${cyan:-}" "$top_hr" "${reset:-}"
+  printf "%b║ %-*s ║%b\n" "${bold:-}" "$max_content" "$title" "${reset:-}"
+  printf "%b╠%*s╣%b\n" "${cyan:-}" "$((MENU_W-2))" "" "${reset:-}" | tr ' ' '═'
+  local i=0 left= right=
+  while IFS='|' read -r part; do
+    [ -z "$part" ] && continue
+    if [ $((i % 2)) -eq 0 ]; then left="$part"; else right="$part"; printf "║ %-*s %-*s ║\n" "$col_w" "$left" "$col_w" "$right"; fi
+    i=$((i+1))
+  done <<< "$(echo "$opts" | tr '|' '\n')"
+  [ $((i % 2)) -eq 1 ] && printf "║ %-*s %-*s ║\n" "$col_w" "$left" "$col_w" ""
+  printf "%b╚%*s╝%b\n" "${cyan:-}" "$((MENU_W-2))" "" "${reset:-}" | tr ' ' '═'
+}
+
 build_menu() {
-  echo ""
-  echoc yellow "🔨 Build options:"
-  echo "  1) Build web (vite)"
-  echo "  2) Build desktop (electron)"
-  echo "  3) Build Android"
-  echo "  4) Build iOS"
-  echo "  5) Build servers"
-  echo "  6) Build all"
-  echo "  7) Back"
-  color yellow "Select (1-7): "; read -r choice
+  draw_submenu "🔨 Build" "1) Build web (vite)|2) Build desktop (electron)|3) Build Android|4) Build iOS|5) Build servers|6) Build all|7) Back"
+  echo ""; color yellow "Select (1-7): "; read -r choice
   case "$choice" in
     1) mtx_run "$0" compile vite ;;
     2) mtx_run "$0" compile electron ;;
@@ -181,15 +199,8 @@ build_menu() {
 }
 
 dev_menu() {
-  echo ""
-  echoc yellow "▶️  Dev options (foreground):"
-  echo "  1) Dev server only"
-  echo "  2) Dev web (client)"
-  echo "  3) Dev desktop"
-  echo "  4) Dev mobile (vite)"
-  echo "  5) Dev all (server+client+desktop)"
-  echo "  6) Back"
-  color yellow "Select (1-6): "; read -r choice
+  draw_submenu "▶️  Dev (foreground)" "1) Dev server only|2) Dev web (client)|3) Dev desktop|4) Dev mobile (vite)|5) Dev all (server+client+desktop)|6) Back"
+  echo ""; color yellow "Select (1-6): "; read -r choice
   case "$choice" in
     1) mtx_run npm run dev:server ;;
     2) mtx_run npm run dev:client ;;
@@ -201,14 +212,8 @@ dev_menu() {
 }
 
 android_menu() {
-  echo ""
-  echoc yellow "🤖 Android helpers:"
-  echo "  1) Build debug APK"
-  echo "  2) Build debug APK and install via ADB"
-  echo "  3) Install last built APK via ADB"
-  echo "  4) Run with Capacitor (opens Android Studio/emulator)"
-  echo "  5) Back"
-  color yellow "Select (1-5): "; read -r choice
+  draw_submenu "🤖 Android" "1) Build debug APK|2) Build APK + install via ADB|3) Install last APK via ADB|4) Run with Capacitor (Android Studio)|5) Back"
+  echo ""; color yellow "Select (1-5): "; read -r choice
   case "$choice" in
     1)
       mtx_run "$0" compile android-debug
