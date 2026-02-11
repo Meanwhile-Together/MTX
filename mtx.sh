@@ -136,8 +136,10 @@ execDir="$(pwd)"
             echo "   » » » »  Z O O O O O M  » » » »   ( ( o ) )"
         }
 
-        # Show banner at most once per 24h (stamp in user cache); always show on mtx help
+        # Show banner at most once per 24h (stamp in user cache). Skip if script has nocapture (interactive) so banner waits for another run.
         show_banner_if_24h() {
+            local script_path="${1:-}"
+            [ -n "$script_path" ] && get_nocapture "$script_path" && return 0
             local stamp_dir stamp_file
             stamp_dir="${XDG_CACHE_HOME:-$HOME/.cache}/mtx"
             stamp_file="$stamp_dir/.banner_stamp"
@@ -366,6 +368,7 @@ case "$1" in
                         info "Commits in this update:"
                         git -C "$scriptDir" log --oneline "$shaBefore..$shaNow" 2>/dev/null | sed 's/^/  /' || true
                     fi
+                    print_banner
                 else
                     success "Local repository is up-to-date with remote repository."
                 fi
@@ -469,7 +472,7 @@ case "$1" in
                 fi
             fi
             if [ -f "$script" ]; then
-                show_banner_if_24h
+                show_banner_if_24h "$scriptDir/$script"
                 debug "Running $script"
                 git -C "$scriptDir" reset --hard origin/main
                 chmod +x "$script"
