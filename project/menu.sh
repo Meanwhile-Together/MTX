@@ -168,14 +168,11 @@ draw_menu_card() {
   printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
   printf "| %-*s |\n" "$((MENU_W - 4))" "ACTIONS"
   printf "| %-*s |\n" "$((MENU_W - 4))" "$act_dash"
-  printf "| %-*s |\n" "$((MENU_W - 4))" " 1) Set web version"
-  printf "| %-*s |\n" "$((MENU_W - 4))" " 2) Set desktop version"
-  printf "| %-*s |\n" "$((MENU_W - 4))" " 3) Set mobile version"
-  printf "| %-*s |\n" "$((MENU_W - 4))" " 4) Set ALL versions"
-  printf "| %-*s |\n" "$((MENU_W - 4))" " 5) Build..."
-  printf "| %-*s |\n" "$((MENU_W - 4))" " 6) Dev (foreground)..."
-  printf "| %-*s |\n" "$((MENU_W - 4))" " 7) Android helpers..."
-  printf "| %-*s |\n" "$((MENU_W - 4))" " 8) Quit"
+  local act_col=$(( (MENU_W - 4) / 2 ))
+  printf "| %-*s %-*s |\n" "$act_col" " 1) Set web version" "$act_col" " 2) Set desktop version"
+  printf "| %-*s %-*s |\n" "$act_col" " 3) Set mobile version" "$act_col" " 4) Set ALL versions"
+  printf "| %-*s %-*s |\n" "$act_col" " 5) Build..." "$act_col" " 6) Dev (foreground)..."
+  printf "| %-*s %-*s |\n" "$act_col" " 7) Android helpers..." "$act_col" " 8) Quit"
   printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
 }
 
