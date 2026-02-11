@@ -124,6 +124,8 @@ execDir="$(pwd)"
         }
 
         print_banner() {
+            local sha
+            sha=$(git -C "$scriptDir" rev-parse --short HEAD 2>/dev/null || true)
             echo "o        .         o             o          ."
             echo "   ███╗   ███╗     ████████╗    ██╗  ██╗     .         o"
             echo "  ████╗ ████║ ===  ╚══██╔══╝ === ╚██╗██╔╝  .   o     ."
@@ -131,7 +133,7 @@ execDir="$(pwd)"
             echo "██║╚██╔╝██║  =  °     ██║   =      ██╔██╗   o   .   °"
             echo "██║ ╚═╝ ██║      .    ██║      .  ██╔╝ ██╗      O"
             echo "██║     ██║  o        ██║    o    ╚═╝  ╚═╝  .      ."
-            echo "╚═╝     ╚═╝           ╚═╝                    °    o"
+            echo "╚═╝     ╚═╝           ╚═╝      ${sha:-}    °    o"
             echo ""
             echo "   » » » »  Z O O O O O M  » » » »   ( ( o ) )"
         }
