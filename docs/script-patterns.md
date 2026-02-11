@@ -43,9 +43,9 @@ Child scripts are **dev/*.sh**, **setup/*.sh**, **deploy/*.sh**, etc.—the scri
 
 - **Set `desc` for the help menu.** In the first 30 lines of the script, define `desc="Short description"` or `desc='Short description'`. The wrapper uses it for `mtx help`. See **mtx-patterns.md** for how help is built.
 
-- **Set `nocapture=1` if the script is interactive.** When verbose is 1 (default), the wrapper redirects script stdout to `/dev/null`. If your script shows a menu, uses `read`, or must print to the terminal, add **`nocapture=1`** (or `no_capture=1`) in the first 30 lines so the wrapper does not funnel stdout. See **mtx-patterns.md** § `nocapture`.
+- **Optional: `nocapture=1`** for interactive scripts if you want the 24h banner skipped when this script runs. At default `-v`, script and precond output is always shown. See **mtx-patterns.md** § `nocapture`.
 
-- **Use `mtx_run` for subprocesses so output obeys verbosity.** The wrapper sets `MTX_VERBOSE` (1=quiet, 2=detail, 3=full, 4=trace). For any command that should be quiet at default (e.g. `npm run build`, `"$0" compile vite`), run it via **`mtx_run`**: e.g. `mtx_run npm run build`, `mtx_run "$0" compile vite`. Then at `-v`/default only errors are shown; at `-vvv` full output is shown; at `-vvvv` commands are traced. Do **not** use `mtx_run` when you need to capture output (e.g. `APK_PATH=$(npm run -s find:apk ...)`).
+- **Use `mtx_run` for subprocesses so output obeys verbosity.** The wrapper sets `MTX_VERBOSE` (1=normal, 2=detail, 3=full, 4=trace). At default `-v`, your script’s echoes show but `mtx_run` subprocess output is quiet; at `-vvv` runs show full output; at `-vvvv` commands are traced. Use **`mtx_run`** for commands invoked by your script (e.g. `mtx_run npm run build`, `mtx_run "$0" compile vite`). Do **not** use `mtx_run` when you need to capture output (e.g. `APK_PATH=$(npm run -s find:apk ...)`).
 
 ---
 
@@ -58,7 +58,7 @@ Child scripts are **dev/*.sh**, **setup/*.sh**, **deploy/*.sh**, etc.—the scri
 | `cd "$ROOT_"` / `cd .` to "ensure we're in root" | Omit, or use a helper that walks up to `package.json` |
 | Requiring the caller to export where the project is | Script assumes cwd is project root when it starts |
 | No `desc` in first 30 lines | Add `desc="One-line description"` near top for help menu |
-| Interactive menu/script but output hidden at default verbosity | Add `nocapture=1` in first 30 lines so stdout is not funneled |
+| Skip 24h banner when this script runs (e.g. interactive menu) | Add `nocapture=1` in first 30 lines (optional) |
 | `exec npm run ...` (or any `exec`) | Run the command normally so the script exits and caller gets control back |
 | Top-level script with paired subfolder taking arguments (e.g. `compile.sh` with `$1`) | No arguments; subcommands live in the subfolder (e.g. `compile/client.sh`); top-level shows usage only |
-| `npm run build` / `"$0" compile vite` (always noisy) | `mtx_run npm run build` / `mtx_run "$0" compile vite` so output respects `-v` / `-vvv` |
+| Noisy subprocess (npm, compile) | `mtx_run npm run build` / `mtx_run "$0" compile vite` so at `-v` runs stay quiet; at `-vvv` output shows |

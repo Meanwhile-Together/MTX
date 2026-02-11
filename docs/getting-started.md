@@ -58,7 +58,7 @@ If you `cd` into a subdir and need to get back to the project root later, use `c
 2. **Create the file** `category/name.sh` (e.g. `dev/my-task.sh`).
 3. **Add shebang, `desc`, and `set -e`** in the first 30 lines. Example:
    - `desc="Short user-facing description"`
-   - If the script is **interactive** (menu, `read` prompts), add **`nocapture=1`** so its output is shown at default verbosity (see **mtx-patterns.md** § nocapture).
+   - **Optional:** Add **`nocapture=1`** so the 24h banner is skipped when this script runs (see **mtx-patterns.md** § nocapture). At default `-v`, script and precond output is always shown.
 4. **Write the body** using relative paths from the project root (e.g. `targets/desktop`, `config/app.json`). Don’t rely on any variable set by the wrapper except that you’re in the project directory.
 5. **Make it executable** (optional; mtx sources it): `chmod +x dev/my-task.sh`
 6. **Run it:** From the project directory, run `mtx dev my-task` (after install/update). Run `mtx help` to confirm it appears.

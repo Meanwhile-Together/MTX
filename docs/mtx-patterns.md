@@ -54,12 +54,16 @@ This doc covers **mtx.sh** (the wrapper): how it runs, loads includes, builds he
 
 - **Anti-pattern:** Don't assume help is built from the current repo. After install, help reflects `$scriptDir` (the cloned copy). Scripts without `desc` in the first 30 lines still appear in the menu but with no description next to them.
 
-### `nocapture` (stdout funnel bypass)
+### Verbosity and script output
 
-- When **verbose** is **1** (default “quiet”), the wrapper normally runs the child script in a subshell with **stdout redirected to `/dev/null`** so script output is not shown. Interactive menus and scripts that must show prompts or output can **opt out** of this funnel.
+- **Default `-v` (verbose=1):** Echoes from **scripts and preconds** (e.g. `echo`, `echoc`, precond messages) are **shown**. Output from **mtx_run** subprocesses (e.g. `npm run build`, `mtx compile vite`) is suppressed so the runs stay quiet.
+- **Levels:** 1=normal (script echo on, runs quiet), 2=detail (debug), 3=full (runs show output), 4=trace (set -x). See help for `-v` / `-vv` / `-vvv` / `-vvvv`.
+
+### `nocapture` (banner behavior)
+
 - **Format:** In the first **30 lines** of the script, set **`nocapture=1`** or **`no_capture=1`** (e.g. on its own line after `desc=`).
-- **Extraction:** `get_nocapture "$file"` reads the first 30 lines and returns success if it finds a line matching `^(nocapture|no_capture)=1`. If so, the script is run **without** redirecting stdout, so the user sees all output (menus, prompts, etc.). If not, the script is run with `1>/dev/null` when verbose is 1.
-- **Use for:** Interactive menus (e.g. `project/menu.sh`, `setup/deploy-menu.sh`, `deploy.sh`) and any script that uses `read` or must print to the terminal. Non-interactive scripts should omit `nocapture` so their output stays quiet by default.
+- **Extraction:** `get_nocapture "$file"` reads the first 30 lines and returns success if it finds a line matching `^(nocapture|no_capture)=1`.
+- **Use:** Only affects **show_banner_if_24h**: when the script has `nocapture`, the banner is not shown on this run (so interactive menus don’t get the banner; it appears on a later run). Script stdout is not funneled at any verbosity, so `nocapture` is optional and mainly for banner timing.
 
 ---
 
@@ -95,4 +99,4 @@ This doc covers **mtx.sh** (the wrapper): how it runs, loads includes, builds he
 | Calling `info`/`success`/`error` before clone | Stub definitions when no includes dir is available |
 | Creating package list when `$scriptDir` missing | Create `$packageListFile` only when `$scriptDir` exists |
 | Assuming help lists scripts from current repo | Help is built from `$scriptDir` (installed copy) only |
-| Interactive script output hidden when verbose=1 | Script sets `nocapture=1` in first 30 lines to bypass stdout funnel |
+| Want banner skipped for this run (e.g. interactive menu) | Script sets `nocapture=1` in first 30 lines (affects banner only) |

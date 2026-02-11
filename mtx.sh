@@ -53,7 +53,7 @@ execDir="$(pwd)"
             [ -n "$line" ] && echo "$line"
         }
 
-        # Opt-in: script sets nocapture=1 in first 30 lines to bypass stdout funnel when verbose=1
+        # Opt-in: script sets nocapture=1 in first 30 lines (e.g. for show_banner_if_24h: skip banner for interactive scripts)
         get_nocapture() {
             local f="$1"
             [ -f "$f" ] || return 1
@@ -85,7 +85,7 @@ execDir="$(pwd)"
         if ! type mtx_run &>/dev/null; then
             mtx_run() {
                 local v=${MTX_VERBOSE:-1}
-                if [ "$v" -le 2 ]; then
+                if [ "$v" -le 1 ]; then
                     "$@" 1>/dev/null
                     return $?
                 elif [ "$v" -eq 4 ]; then
@@ -103,7 +103,7 @@ execDir="$(pwd)"
             touch "$packageListFile"
         fi
 
-        #handle arguments (verbose: 1=quiet, 2=detail, 3=full output, 4=trace)
+        # Verbosity: 1=normal (script/precond output shown), 2=detail, 3=full, 4=trace
         verbose=${MTX_VERBOSE:-1}
         version=0
         uninstall=0
@@ -230,7 +230,7 @@ case "$1" in
         echo "Options:"
         echo "   --help Show this help message"
         echo "   --version Print nnw version"
-        echo "   -v       Quiet: only MTX output and errors from scripts (default)"
+        echo "   -v       Normal: script/precond echoes shown; mtx_run subprocesses quiet (default)"
         echo "   -vv      More detail (debug messages)"
         echo "   -vvv     Full output from scripts"
         echo "   -vvvv    Trace: print every command run"
@@ -534,10 +534,6 @@ case "$1" in
                 export MTX_VERBOSE=$verbose
                 if [ $verbose -eq 4 ]; then
                     ( set -x; source "$scriptDir/$script" $args )
-                    exit $?
-                fi
-                if [ $verbose -eq 1 ] && ! get_nocapture "$scriptDir/$script"; then
-                    ( source "$scriptDir/$script" $args ) 1>/dev/null
                     exit $?
                 fi
                 source "$scriptDir/$script" $args
