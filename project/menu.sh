@@ -74,24 +74,28 @@ get_framework_line() {
 
 get_deploy_line() {
   if [ ! -f "$DEPLOY_JSON" ]; then
-    printf "platforms: —  Stg ☐  Prd ☐  Back ☐  apps: —"
+    printf "railway-staging Back ☐ Apps ☐  railway-production Back ☐ Apps ☐"
     return
   fi
-  local proj_id platforms has_stg has_prd stg_ok prd_ok backend_ok s1 s2 s3 apps_line
+  local proj_id has_stg has_prd stg_back stg_apps prd_back prd_apps
+  local has_railway apps_count
   proj_id=$(read_json "$DEPLOY_JSON" "(.projectId // \"\")")
-  platforms=$(read_json "$DEPLOY_JSON" "(.platform // [] | join(\", \"))")
-  [ -z "$platforms" ] && platforms="—"
   has_stg=$(read_json "$DEPLOY_JSON" "(.staging != null) | tostring" 2>/dev/null || echo "false")
   has_prd=$(read_json "$DEPLOY_JSON" "(.production != null) | tostring" 2>/dev/null || echo "false")
-  [ -n "$proj_id" ] && [ "$has_stg" = "true" ] && stg_ok=1 || stg_ok=
-  [ -n "$proj_id" ] && [ "$has_prd" = "true" ] && prd_ok=1 || prd_ok=
-  [ -n "$proj_id" ] && backend_ok=1 || backend_ok=
-  [ -n "$stg_ok" ] && s1="✅" || s1="☐"
-  [ -n "$prd_ok" ] && s2="✅" || s2="☐"
-  [ -n "$backend_ok" ] && s3="✅" || s3="☐"
-  apps_line=$(read_json "$DEPLOY_JSON" "(.apps // [] | join(\", \"))")
-  [ -z "$apps_line" ] && apps_line="—"
-  printf "%b%s%b  Stg %s  Prd %s  Back %s  apps: %s" "${dim:-}" "$platforms" "${reset:-}" "$s1" "$s2" "$s3" "$apps_line"
+  has_railway=$(read_json "$DEPLOY_JSON" "(.platform // [] | index(\"railway\") != null) | tostring" 2>/dev/null || echo "false")
+  apps_count=$(read_json "$DEPLOY_JSON" "(.apps // [] | length)" 2>/dev/null || echo "0")
+  # Each env: Back ✅ if projectId + env block; Apps ✅ if .apps has entries
+  [ -n "$proj_id" ] && [ "$has_stg" = "true" ] && stg_back=1 || stg_back=
+  [ -n "$proj_id" ] && [ "$has_prd" = "true" ] && prd_back=1 || prd_back=
+  [ "$apps_count" -gt 0 ] 2>/dev/null && stg_apps=1 || stg_apps=
+  [ "$apps_count" -gt 0 ] 2>/dev/null && prd_apps=1 || prd_apps=
+  if [ "$has_railway" = "true" ]; then
+    printf "%brailway-staging%b Back %s Apps %s  %brailway-production%b Back %s Apps %s" \
+      "${dim:-}" "${reset:-}" "${stg_back:+✅}" "${stg_back:-☐}" "${stg_apps:+✅}" "${stg_apps:-☐}" \
+      "${dim:-}" "${reset:-}" "${prd_back:+✅}" "${prd_back:-☐}" "${prd_apps:+✅}" "${prd_apps:-☐}"
+  else
+    printf "railway-staging Back ☐ Apps ☐  railway-production Back ☐ Apps ☐"
+  fi
 }
 
 get_versions_line() {
