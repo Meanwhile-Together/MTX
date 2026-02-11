@@ -54,10 +54,10 @@ show_versions() {
   web_v=$(read_json_field "$CLIENT_PKG" version 2>/dev/null)
   desk_v=$(read_json_field "$DESKTOP_PKG" version 2>/dev/null)
   mob_v=$(read_json_field "$MOBILE_PKG" version 2>/dev/null)
-  printf "- Repo           : %s\n" "${root_v:-n/a}"
-  printf "- Web (client)   : %s\n" "${web_v:-n/a}"
-  printf "- Desktop        : %s\n" "${desk_v:-n/a}"
-  printf "- Mobile         : %s\n" "${mob_v:-n/a}"
+  printf -- "- Repo           : %s\n" "${root_v:-n/a}"
+  printf -- "- Web (client)   : %s\n" "${web_v:-n/a}"
+  printf -- "- Desktop        : %s\n" "${desk_v:-n/a}"
+  printf -- "- Mobile         : %s\n" "${mob_v:-n/a}"
 }
 
 set_version() {
