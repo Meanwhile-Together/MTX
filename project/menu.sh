@@ -48,16 +48,16 @@ is_semver() {
 
 show_versions() {
   echo ""
-  echo "📦 Current versions:"
+  echoc cyan "📦 Current versions:"
   local root_v web_v desk_v mob_v
   root_v=$(read_json_field "$ROOT_PKG" version)
   web_v=$(read_json_field "$CLIENT_PKG" version 2>/dev/null)
   desk_v=$(read_json_field "$DESKTOP_PKG" version 2>/dev/null)
   mob_v=$(read_json_field "$MOBILE_PKG" version 2>/dev/null)
-  printf -- "- Repo           : %s\n" "${root_v:-n/a}"
-  printf -- "- Web (client)   : %s\n" "${web_v:-n/a}"
-  printf -- "- Desktop        : %s\n" "${desk_v:-n/a}"
-  printf -- "- Mobile         : %s\n" "${mob_v:-n/a}"
+  printf -- "  - Repo           : %s\n" "${root_v:-n/a}"
+  printf -- "  - Web (client)   : %s\n" "${web_v:-n/a}"
+  printf -- "  - Desktop        : %s\n" "${desk_v:-n/a}"
+  printf -- "  - Mobile         : %s\n" "${mob_v:-n/a}"
 }
 
 set_version() {
@@ -87,15 +87,15 @@ set_version() {
 
 build_menu() {
   echo ""
-  echo "🔨 Build options:"
-  echo "1) Build web (vite)"
-  echo "2) Build desktop (electron)"
-  echo "3) Build Android"
-  echo "4) Build iOS"
-  echo "5) Build servers"
-  echo "6) Build all"
-  echo "7) Back"
-  read -rp "Select: " choice
+  echoc yellow "🔨 Build options:"
+  echo "  1) Build web (vite)"
+  echo "  2) Build desktop (electron)"
+  echo "  3) Build Android"
+  echo "  4) Build iOS"
+  echo "  5) Build servers"
+  echo "  6) Build all"
+  echo "  7) Back"
+  color yellow "Select (1-7): "; read -r choice
   case "$choice" in
     1) mtx_run "$0" compile vite ;;
     2) mtx_run "$0" compile electron ;;
@@ -109,14 +109,14 @@ build_menu() {
 
 dev_menu() {
   echo ""
-  echo "▶️  Dev options (foreground):"
-  echo "1) Dev server only"
-  echo "2) Dev web (client)"
-  echo "3) Dev desktop"
-  echo "4) Dev mobile (vite)"
-  echo "5) Dev all (server+client+desktop)"
-  echo "6) Back"
-  read -rp "Select: " choice
+  echoc yellow "▶️  Dev options (foreground):"
+  echo "  1) Dev server only"
+  echo "  2) Dev web (client)"
+  echo "  3) Dev desktop"
+  echo "  4) Dev mobile (vite)"
+  echo "  5) Dev all (server+client+desktop)"
+  echo "  6) Back"
+  color yellow "Select (1-6): "; read -r choice
   case "$choice" in
     1) mtx_run npm run dev:server ;;
     2) mtx_run npm run dev:client ;;
@@ -129,13 +129,13 @@ dev_menu() {
 
 android_menu() {
   echo ""
-  echo "🤖 Android helpers:"
-  echo "1) Build debug APK"
-  echo "2) Build debug APK and install via ADB"
-  echo "3) Install last built APK via ADB"
-  echo "4) Run with Capacitor (opens Android Studio/emulator)"
-  echo "5) Back"
-  read -rp "Select: " choice
+  echoc yellow "🤖 Android helpers:"
+  echo "  1) Build debug APK"
+  echo "  2) Build debug APK and install via ADB"
+  echo "  3) Install last built APK via ADB"
+  echo "  4) Run with Capacitor (opens Android Studio/emulator)"
+  echo "  5) Back"
+  color yellow "Select (1-5): "; read -r choice
   case "$choice" in
     1)
       mtx_run "$0" compile android-debug
@@ -171,19 +171,19 @@ android_menu() {
 main_menu() {
   while true; do
     echo ""
-    echo "===== Dev Helper ====="
+    echoc bold "===== Dev Helper ====="
     show_versions
     echo ""
-    echo "Choose an action:"
-    echo "1) Set web version"
-    echo "2) Set desktop version"
-    echo "3) Set mobile version"
-    echo "4) Set ALL versions"
-    echo "5) Build..."
-    echo "6) Dev (foreground)..."
-    echo "7) Android helpers..."
-    echo "8) Exit"
-    read -rp "Select [1-8]: " ans
+    echoc cyan "Choose an action:"
+    echo "  1) Set web version"
+    echo "  2) Set desktop version"
+    echo "  3) Set mobile version"
+    echo "  4) Set ALL versions"
+    echo "  5) Build..."
+    echo "  6) Dev (foreground)..."
+    echo "  7) Android helpers..."
+    echo "  8) Quit"
+    color yellow "Select (1-8): "; read -r ans
     case "$ans" in
       1) read -rp "New web version (X.Y.Z): " v; [[ -z "$v" ]] || set_version web "$v" ;;
       2) read -rp "New desktop version (X.Y.Z): " v; [[ -z "$v" ]] || set_version desktop "$v" ;;
@@ -192,8 +192,8 @@ main_menu() {
       5) build_menu ;;
       6) dev_menu ;;
       7) android_menu ;;
-      8) echo "Bye"; exit 0 ;;
-      *) echo "Unknown option" ;;
+      8|q|Q) echoc green "Bye"; exit 0 ;;
+      *) warn "Unknown option (choose 1-8)" ;;
     esac
   done
 }
