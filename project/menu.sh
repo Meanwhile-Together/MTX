@@ -55,9 +55,9 @@ read_json() {
   command -v jq &>/dev/null && [ -f "$file" ] && jq -r "$expr" "$file" 2>/dev/null || true
 }
 
-# Menu card width (match mockup)
+# Menu card width (match mockup); ENV_COL_W + VER_COL_W + 7 = MENU_W
 MENU_W=82
-ENV_COL_W=41
+ENV_COL_W=39
 VER_COL_W=36
 
 # Header: owner / app-name
@@ -88,7 +88,7 @@ get_app_slug() {
   printf "%s" "${slug:-app-name}"
 }
 
-# Staging: app + backend checkboxes [✓] or [✗]
+# Staging: app + backend checkboxes [x] or [ ] (ASCII)
 get_staging_app_ok() {
   [ ! -f "$DEPLOY_JSON" ] && printf "0" && return
   local proj_id has_stg apps_count
@@ -139,37 +139,38 @@ draw_menu_card() {
   prd_app=$(get_production_app_ok)
   prd_back=$(get_production_backend_ok)
 
-  local cb_ok="[✓]" cb_no="[✗]"
+  # ASCII checkboxes so all terminals align (no Unicode)
+  local cb_ok="[x]" cb_no="[ ]"
   local s_app s_back p_app p_back
   [ "$stg_app" = "1" ] && s_app="$cb_ok" || s_app="$cb_no"
   [ "$stg_back" = "1" ] && s_back="$cb_ok" || s_back="$cb_no"
   [ "$prd_app" = "1" ] && p_app="$cb_ok" || p_app="$cb_no"
   [ "$prd_back" = "1" ] && p_back="$cb_ok" || p_back="$cb_no"
 
-  # Top border
-  printf "%b╔%*s╗%b\n" "${cyan:-}" "$w" "" "${reset:-}" | tr ' ' '═'
-  # Header
-  printf "║ %-*s ║\n" "$((MENU_W - 4))" "Dev Helper · $(get_framework_line) · $(get_versions_line)"
-  printf "%b╠%*s╣%b\n" "${cyan:-}" "$w" "" "${reset:-}" | tr ' ' '═'
-  # ENVIRONMENTS | VERSIONS
+  local border_hr
+  border_hr=$(printf '%*s' "$w" "" | tr ' ' '-')
   local env_dash ver_dash act_dash
-  env_dash=$(printf '%*s' "$ENV_COL_W" "" | tr ' ' '─')
-  ver_dash=$(printf '%*s' "$VER_COL_W" "" | tr ' ' '─')
-  act_dash=$(printf '%*s' "$((MENU_W - 4))" "" | tr ' ' '─')
+  env_dash=$(printf '%*s' "$ENV_COL_W" "" | tr ' ' '-')
+  ver_dash=$(printf '%*s' "$VER_COL_W" "" | tr ' ' '-')
+  act_dash=$(printf '%*s' "$((MENU_W - 4))" "" | tr ' ' '-')
 
-  printf "║ %-*s │ %-*s ║\n" "$ENV_COL_W" "ENVIRONMENTS" "$VER_COL_W" "VERSIONS"
-  printf "║ %-*s │ %-*s ║\n" "$ENV_COL_W" "$env_dash" "$VER_COL_W" "$ver_dash"
-  printf "║ %-*s │ %-*s ║\n" "$ENV_COL_W" "staging       $app_slug       $s_app" "$VER_COL_W" "Web:     v$(get_web_ver)"
-  printf "║ %-*s │ %-*s ║\n" "$ENV_COL_W" "  └─ backend-staging          $s_back" "$VER_COL_W" "Desktop: v$(get_desktop_ver)"
-  printf "║ %-*s │ %-*s ║\n" "$ENV_COL_W" "" "$VER_COL_W" "Mobile:  v$(get_mobile_ver)"
-  printf "║ %-*s │ %-*s ║\n" "$ENV_COL_W" "production    $app_slug       $p_app" "$VER_COL_W" ""
-  printf "║ %-*s │ %-*s ║\n" "$ENV_COL_W" "  └─ backend-production      $p_back" "$VER_COL_W" ""
-  printf "%b╠%*s╣%b\n" "${cyan:-}" "$w" "" "${reset:-}" | tr ' ' '═'
-  printf "║ %-*s ║\n" "$((MENU_W - 4))" "ACTIONS"
-  printf "║ %-*s ║\n" "$((MENU_W - 4))" "$act_dash"
-  printf "║ %-*s ║\n" "$((MENU_W - 4))" " 1 Web Ver        2 Desktop Ver        3 Mobile Ver        4 ALL Ver"
-  printf "║ %-*s ║\n" "$((MENU_W - 4))" " 5 Build          6 Dev FG             7 Android           8 Quit"
-  printf "%b╚%*s╝%b\n" "${cyan:-}" "$w" "" "${reset:-}" | tr ' ' '═'
+  # ASCII box: +--+ and | (no Unicode box-drawing)
+  printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
+  printf "| %-*s |\n" "$((MENU_W - 4))" "Dev Helper . $(get_framework_line) . $(get_versions_line)"
+  printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
+  printf "| %-*s | %-*s |\n" "$ENV_COL_W" "ENVIRONMENTS" "$VER_COL_W" "VERSIONS"
+  printf "| %-*s | %-*s |\n" "$ENV_COL_W" "$env_dash" "$VER_COL_W" "$ver_dash"
+  printf "| %-*s | %-*s |\n" "$ENV_COL_W" "staging       $app_slug       $s_app" "$VER_COL_W" "Web:     v$(get_web_ver)"
+  printf "| %-*s | %-*s |\n" "$ENV_COL_W" "  - backend-staging          $s_back" "$VER_COL_W" "Desktop: v$(get_desktop_ver)"
+  printf "| %-*s | %-*s |\n" "$ENV_COL_W" "" "$VER_COL_W" "Mobile:  v$(get_mobile_ver)"
+  printf "| %-*s | %-*s |\n" "$ENV_COL_W" "production    $app_slug       $p_app" "$VER_COL_W" ""
+  printf "| %-*s | %-*s |\n" "$ENV_COL_W" "  - backend-production      $p_back" "$VER_COL_W" ""
+  printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
+  printf "| %-*s |\n" "$((MENU_W - 4))" "ACTIONS"
+  printf "| %-*s |\n" "$((MENU_W - 4))" "$act_dash"
+  printf "| %-*s |\n" "$((MENU_W - 4))" " 1 Web Ver        2 Desktop Ver        3 Mobile Ver        4 ALL Ver"
+  printf "| %-*s |\n" "$((MENU_W - 4))" " 5 Build          6 Dev FG             7 Android           8 Quit"
+  printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
 }
 
 set_version() {
@@ -197,28 +198,28 @@ set_version() {
   echo "✅ Set $target version to $version"
 }
 
-# Draw a submenu card (title + two-column options)
+# Draw a submenu card (title + two-column options); ASCII only
 draw_submenu() {
   local title="$1" opts="$2"  # opts = "1) Label|2) Label|..." (pairs separated by |)
-  local col_w=$(( (MENU_W - 4) / 2 )) max_content=$((MENU_W - 4))
+  local col_w=$(( (MENU_W - 4) / 2 )) max_content=$((MENU_W - 4)) w=$((MENU_W - 2))
   [ -t 1 ] && clear
-  local top_hr
-  top_hr=$(printf '╔%*s╗' "$((MENU_W-2))" "" | tr ' ' '═')
-  printf "%b%s%b\n" "${cyan:-}" "$top_hr" "${reset:-}"
-  printf "%b║ %-*s ║%b\n" "${bold:-}" "$max_content" "$title" "${reset:-}"
-  printf "%b╠%*s╣%b\n" "${cyan:-}" "$((MENU_W-2))" "" "${reset:-}" | tr ' ' '═'
+  local border_hr
+  border_hr=$(printf '%*s' "$w" "" | tr ' ' '-')
+  printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
+  printf "| %-*s |\n" "$max_content" "$title"
+  printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
   local i=0 left= right=
   while IFS='|' read -r part; do
     [ -z "$part" ] && continue
-    if [ $((i % 2)) -eq 0 ]; then left="$part"; else right="$part"; printf "║ %-*s %-*s ║\n" "$col_w" "$left" "$col_w" "$right"; fi
+    if [ $((i % 2)) -eq 0 ]; then left="$part"; else right="$part"; printf "| %-*s %-*s |\n" "$col_w" "$left" "$col_w" "$right"; fi
     i=$((i+1))
   done <<< "$(echo "$opts" | tr '|' '\n')"
-  [ $((i % 2)) -eq 1 ] && printf "║ %-*s %-*s ║\n" "$col_w" "$left" "$col_w" ""
-  printf "%b╚%*s╝%b\n" "${cyan:-}" "$((MENU_W-2))" "" "${reset:-}" | tr ' ' '═'
+  [ $((i % 2)) -eq 1 ] && printf "| %-*s %-*s |\n" "$col_w" "$left" "$col_w" ""
+  printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
 }
 
 build_menu() {
-  draw_submenu "🔨 Build" "1) Build web (vite)|2) Build desktop (electron)|3) Build Android|4) Build iOS|5) Build servers|6) Build all|7) Back"
+  draw_submenu "Build" "1) Build web (vite)|2) Build desktop (electron)|3) Build Android|4) Build iOS|5) Build servers|6) Build all|7) Back"
   echo ""; color yellow "Select (1-7): "; read -r choice
   case "$choice" in
     1) mtx_run "$0" compile vite ;;
@@ -232,7 +233,7 @@ build_menu() {
 }
 
 dev_menu() {
-  draw_submenu "▶️  Dev (foreground)" "1) Dev server only|2) Dev web (client)|3) Dev desktop|4) Dev mobile (vite)|5) Dev all (server+client+desktop)|6) Back"
+  draw_submenu "Dev (foreground)" "1) Dev server only|2) Dev web (client)|3) Dev desktop|4) Dev mobile (vite)|5) Dev all (server+client+desktop)|6) Back"
   echo ""; color yellow "Select (1-6): "; read -r choice
   case "$choice" in
     1) mtx_run npm run dev:server ;;
@@ -245,7 +246,7 @@ dev_menu() {
 }
 
 android_menu() {
-  draw_submenu "🤖 Android" "1) Build debug APK|2) Build APK + install via ADB|3) Install last APK via ADB|4) Run with Capacitor (Android Studio)|5) Back"
+  draw_submenu "Android" "1) Build debug APK|2) Build APK + install via ADB|3) Install last APK via ADB|4) Run with Capacitor (Android Studio)|5) Back"
   echo ""; color yellow "Select (1-5): "; read -r choice
   case "$choice" in
     1)
