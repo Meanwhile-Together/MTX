@@ -19,4 +19,7 @@ while [ -n "$walk" ] && [ "$walk" != "/" ]; do
   done
   walk="$(dirname "$walk")"
 done
+if [ -z "$MTX_WORKSPACE_FILE" ]; then
+  echo "workspace not found, workspace features disabled." >&2
+fi
 true
