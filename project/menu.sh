@@ -55,10 +55,11 @@ read_json() {
   command -v jq &>/dev/null && [ -f "$file" ] && jq -r "$expr" "$file" 2>/dev/null || true
 }
 
-# Menu card width (match mockup); ENV_COL_W + VER_COL_W + 7 = MENU_W
+# Menu card width (match mockup); pipe|content| no extra space so walls align with +
 MENU_W=82
+INNER_W=80
 ENV_COL_W=39
-VER_COL_W=36
+VER_COL_W=40
 
 # Header: owner / app-name
 get_framework_line() {
@@ -152,27 +153,27 @@ draw_menu_card() {
   local env_dash ver_dash act_dash
   env_dash=$(printf '%*s' "$ENV_COL_W" "" | tr ' ' '-')
   ver_dash=$(printf '%*s' "$VER_COL_W" "" | tr ' ' '-')
-  act_dash=$(printf '%*s' "$((MENU_W - 4))" "" | tr ' ' '-')
+  act_dash=$(printf '%*s' "$INNER_W" "" | tr ' ' '-')
 
-  # ASCII box: +--+ and | (no Unicode box-drawing)
+  # ASCII box: +--+ and | (no space after | so walls align with +)
   printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
-  printf "| %-*s |\n" "$((MENU_W - 4))" "Dev Helper . $(get_framework_line) . $(get_versions_line)"
+  printf "|%-*s|\n" "$INNER_W" "Dev Helper . $(get_framework_line) . $(get_versions_line)"
   printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
-  printf "| %-*s | %-*s |\n" "$ENV_COL_W" "ENVIRONMENTS" "$VER_COL_W" "VERSIONS"
-  printf "| %-*s | %-*s |\n" "$ENV_COL_W" "$env_dash" "$VER_COL_W" "$ver_dash"
-  printf "| %-*s | %-*s |\n" "$ENV_COL_W" "staging       $app_slug       $s_app" "$VER_COL_W" "Web:     v$(get_web_ver)"
-  printf "| %-*s | %-*s |\n" "$ENV_COL_W" "  - backend-staging          $s_back" "$VER_COL_W" "Desktop: v$(get_desktop_ver)"
-  printf "| %-*s | %-*s |\n" "$ENV_COL_W" "" "$VER_COL_W" "Mobile:  v$(get_mobile_ver)"
-  printf "| %-*s | %-*s |\n" "$ENV_COL_W" "production    $app_slug       $p_app" "$VER_COL_W" ""
-  printf "| %-*s | %-*s |\n" "$ENV_COL_W" "  - backend-production      $p_back" "$VER_COL_W" ""
+  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "ENVIRONMENTS" "$VER_COL_W" "VERSIONS"
+  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "$env_dash" "$VER_COL_W" "$ver_dash"
+  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "staging       $app_slug       $s_app" "$VER_COL_W" "Web:     v$(get_web_ver)"
+  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "  - backend-staging         $s_back" "$VER_COL_W" "Desktop: v$(get_desktop_ver)"
+  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "" "$VER_COL_W" "Mobile:  v$(get_mobile_ver)"
+  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "production    $app_slug       $p_app" "$VER_COL_W" ""
+  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "  - backend-production     $p_back" "$VER_COL_W" ""
   printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
-  printf "| %-*s |\n" "$((MENU_W - 4))" "ACTIONS"
-  printf "| %-*s |\n" "$((MENU_W - 4))" "$act_dash"
-  local act_col=$(( (MENU_W - 4) / 2 ))
-  printf "| %-*s %-*s |\n" "$act_col" " 1) Set web version" "$act_col" " 2) Set desktop version"
-  printf "| %-*s %-*s |\n" "$act_col" " 3) Set mobile version" "$act_col" " 4) Set ALL versions"
-  printf "| %-*s %-*s |\n" "$act_col" " 5) Build..." "$act_col" " 6) Dev (foreground)..."
-  printf "| %-*s %-*s |\n" "$act_col" " 7) Android helpers..." "$act_col" " 8) Quit"
+  printf "|%-*s|\n" "$INNER_W" "ACTIONS"
+  printf "|%-*s|\n" "$INNER_W" "$act_dash"
+  local act_col=$(( INNER_W / 2 ))
+  printf "|%-*s%-*s|\n" "$act_col" "1) Set web version" "$act_col" "2) Set desktop version"
+  printf "|%-*s%-*s|\n" "$act_col" "3) Set mobile version" "$act_col" "4) Set ALL versions"
+  printf "|%-*s%-*s|\n" "$act_col" "5) Build..." "$act_col" "6) Dev (foreground)..."
+  printf "|%-*s%-*s|\n" "$act_col" "7) Android helpers..." "$act_col" "8) Quit"
   printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
 }
 
