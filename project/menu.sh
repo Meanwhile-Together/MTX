@@ -156,9 +156,15 @@ draw_menu_card() {
   ver_dash=$(printf '%*s' "$VER_COL_W" "" | tr ' ' '-')
   act_dash=$(printf '%*s' "$INNER_W" "" | tr ' ' '-')
 
-  # ASCII box: +--+ and | (no space after | so walls align with +)
+  # ASCII box: +--+ ; header line has no walls, centered text
   printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
-  printf "|%-*s|\n" "$INNER_W" "Dev Helper . $(get_framework_line) . $(get_versions_line)"
+  local header_display header_plain len left right
+  header_display="Dev Helper . $(get_framework_line) . $(get_versions_line)"
+  header_plain="Dev Helper . $(get_app_slug) . $(get_versions_line)"
+  len=${#header_plain}
+  left=$(( (INNER_W - len) / 2 ))
+  right=$(( INNER_W - left - len ))
+  printf "%*s%s%*s\n" "$left" "" "$header_display" "$right" ""
   printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
   printf "|%-*s|%-*s|\n" "$ENV_COL_W" "ENVIRONMENTS" "$VER_COL_W" "VERSIONS"
   printf "|%-*s|%-*s|\n" "$ENV_COL_W" "$env_dash" "$VER_COL_W" "$ver_dash"
