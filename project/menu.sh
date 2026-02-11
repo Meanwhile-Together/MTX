@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # MTX project menu: project helper (versions, build, dev servers, Android)
 desc="Project helper menu: versions, build, dev servers, Android"
-nocapture=1
+nobanner=1
 set -e
 
 NODE_BIN=$(command -v node || true)

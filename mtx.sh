@@ -53,11 +53,11 @@ execDir="$(pwd)"
             [ -n "$line" ] && echo "$line"
         }
 
-        # Opt-in: script sets nocapture=1 in first 30 lines (e.g. for show_banner_if_24h: skip banner for interactive scripts)
-        get_nocapture() {
+        # Opt-in: script sets nobanner=1 in first 30 lines → skip 24h banner for that run only (so interactive runs don't show banner; it shows on a later run)
+        get_nobanner() {
             local f="$1"
             [ -f "$f" ] || return 1
-            head -30 "$f" 2>/dev/null | grep -qE '^(nocapture|no_capture)=1' || return 1
+            head -30 "$f" 2>/dev/null | grep -qE '^(nobanner|no_banner)=1' || return 1
         }
 
         # Preload includes (bolors etc.). Use scriptDir when installed, else dir when running from repo (before clone).
@@ -138,10 +138,10 @@ execDir="$(pwd)"
             echo "   » » » »  Z O O O O O M  » » » »   ( ( o ) )"
         }
 
-        # Show banner at most once per 24h (stamp in user cache). Skip if script has nocapture (interactive) so banner waits for another run.
+        # Show banner at most once per 24h (stamp in user cache). Skip if script has nobanner (interactive) so banner waits for another run.
         show_banner_if_24h() {
             local script_path="${1:-}"
-            [ -n "$script_path" ] && get_nocapture "$script_path" && return 0
+            [ -n "$script_path" ] && get_nobanner "$script_path" && return 0
             local stamp_dir stamp_file
             stamp_dir="${XDG_CACHE_HOME:-$HOME/.cache}/mtx"
             stamp_file="$stamp_dir/.banner_stamp"
@@ -230,7 +230,7 @@ case "$1" in
         echo "Options:"
         echo "   --help Show this help message"
         echo "   --version Print nnw version"
-        echo "   -v       Normal: script/precond echoes shown; mtx_run subprocesses quiet (default)"
+        echo "   -v       Normal: echo/echoc from scripts and preconds always print; only mtx_run subprocesses quiet (default)"
         echo "   -vv      More detail (debug messages)"
         echo "   -vvv     Full output from scripts"
         echo "   -vvvv    Trace: print every command run"
@@ -536,6 +536,7 @@ case "$1" in
                     ( set -x; source "$scriptDir/$script" $args )
                     exit $?
                 fi
+                # Script/precond stdout always shown (echo, echoc, etc.). Only mtx_run subprocesses are quiet at default.
                 source "$scriptDir/$script" $args
             else
                 if [ ! -z "$hoist_target" ]; then

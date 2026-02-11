@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # MTX create: interactive menu — new app name, then list deduplicated owners from all repos in workspace
 desc="Interactive create: new app name, then list owners from all workspace repos"
-nocapture=1
+nobanner=1
 set -e
 
 # Resolve workspace root: one level up from current dir (project root when mtx runs)
