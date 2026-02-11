@@ -124,7 +124,8 @@ get_production_backend_ok() {
   [ -n "$proj_id" ] && [ "$has_prd" = "true" ] && printf "1" || printf "0"
 }
 
-# Version strings for Web, Desktop, Mobile (ASCII only for alignment)
+# Version strings for Repo, Web, Desktop, Mobile (ASCII only for alignment)
+get_repo_ver() { printf "%s" "$(read_json_field "$ROOT_PKG" version 2>/dev/null || echo "-")"; }
 get_web_ver() { printf "%s" "$(read_json_field "$CLIENT_PKG" version 2>/dev/null || echo "-")"; }
 get_desktop_ver() { printf "%s" "$(read_json_field "$DESKTOP_PKG" version 2>/dev/null || echo "-")"; }
 get_mobile_ver() { printf "%s" "$(read_json_field "$MOBILE_PKG" version 2>/dev/null || echo "-")"; }
@@ -161,10 +162,10 @@ draw_menu_card() {
   printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
   printf "|%-*s|%-*s|\n" "$ENV_COL_W" "ENVIRONMENTS" "$VER_COL_W" "VERSIONS"
   printf "|%-*s|%-*s|\n" "$ENV_COL_W" "$env_dash" "$VER_COL_W" "$ver_dash"
-  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "staging       $app_slug       $s_app" "$VER_COL_W" "Web:     v$(get_web_ver)"
-  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "  - backend-staging         $s_back" "$VER_COL_W" "Desktop: v$(get_desktop_ver)"
-  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "" "$VER_COL_W" "Mobile:  v$(get_mobile_ver)"
-  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "production    $app_slug       $p_app" "$VER_COL_W" ""
+  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "staging       $app_slug       $s_app" "$VER_COL_W" "Repo:    v$(get_repo_ver)"
+  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "  - backend-staging         $s_back" "$VER_COL_W" "Web:     v$(get_web_ver)"
+  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "" "$VER_COL_W" "Desktop: v$(get_desktop_ver)"
+  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "production    $app_slug       $p_app" "$VER_COL_W" "Mobile:  v$(get_mobile_ver)"
   printf "|%-*s|%-*s|\n" "$ENV_COL_W" "  - backend-production      $p_back" "$VER_COL_W" ""
   printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
   printf "|%-*s|\n" "$INNER_W" "ACTIONS"
