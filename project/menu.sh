@@ -20,6 +20,8 @@ CLIENT_PKG="targets/client/package.json"
 DESKTOP_PKG="targets/desktop/package.json"
 MOBILE_PKG="targets/mobile/package.json"
 ROOT_PKG="package.json"
+APP_JSON="config/app.json"
+DEPLOY_JSON="config/deploy.json"
 
 ensure_file() {
   local path="$1"
@@ -45,6 +47,60 @@ write_json_field() {
 is_semver() {
   local v="$1"
   [[ "$v" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+}
+
+# Read JSON with jq (for arrays and conditions). Use read_json_field for simple paths without jq.
+read_json() {
+  local file="$1" expr="$2"
+  command -v jq &>/dev/null && [ -f "$file" ] && jq -r "$expr" "$file" 2>/dev/null || true
+}
+
+show_framework_deploy_status() {
+  echo ""
+  echoc cyan "📋 Framework & deploy:"
+  local owner slug proj_id platforms
+  owner=$(read_json "$APP_JSON" "(.app.owner // \"\")")
+  slug=$(read_json "$APP_JSON" "(.app.slug // \"\")")
+  [ -z "$owner" ] && owner=$(read_json_field "$APP_JSON" app.owner 2>/dev/null || true)
+  [ -z "$slug" ] && slug=$(read_json_field "$APP_JSON" app.slug 2>/dev/null || true)
+  if [ -n "$owner" ] && [ -n "$slug" ]; then
+    status ok "Project B app: $owner / $slug"
+  else
+    status fail "Not a Project B app (missing or empty config/app.json app.owner / app.slug)"
+  fi
+  if [ ! -f "$DEPLOY_JSON" ]; then
+    printf "  %bPlatforms:%b (no config/deploy.json)\n" "${dim:-}" "${reset:-}"
+    printf "  %bStaging:%b   ☐  %bProduction:%b  ☐  %bBackend:%b  ☐\n" "${dim:-}" "${reset:-}" "${dim:-}" "${reset:-}" "${dim:-}" "${reset:-}"
+    printf "  %bApps:%b       —\n" "${dim:-}" "${reset:-}"
+    return
+  fi
+  proj_id=$(read_json "$DEPLOY_JSON" "(.projectId // \"\")")
+  platforms=$(read_json "$DEPLOY_JSON" "(.platform // [] | join(\", \"))")
+  if [ -z "$platforms" ]; then platforms="none"; fi
+  printf "  %bPlatforms:%b %s\n" "${dim:-}" "${reset:-}" "$platforms"
+  # Deploy checkboxes: Staging / Production ✅ if env block + projectId; Backend ✅ if projectId set
+  local stg_ok prd_ok backend_ok s1 s2 s3 has_stg has_prd
+  has_stg=$(read_json "$DEPLOY_JSON" "(.staging != null) | tostring" 2>/dev/null || echo "false")
+  has_prd=$(read_json "$DEPLOY_JSON" "(.production != null) | tostring" 2>/dev/null || echo "false")
+  [ -n "$proj_id" ] && [ "$has_stg" = "true" ] && stg_ok=1 || stg_ok=
+  [ -n "$proj_id" ] && [ "$has_prd" = "true" ] && prd_ok=1 || prd_ok=
+  [ -n "$proj_id" ] && backend_ok=1 || backend_ok=
+  [ -n "$stg_ok" ] && s1="✅" || s1="☐"
+  [ -n "$prd_ok" ] && s2="✅" || s2="☐"
+  [ -n "$backend_ok" ] && s3="✅" || s3="☐"
+  printf "  %bStaging:%b   %s  %bProduction:%b  %s  %bBackend:%b  %s\n" "${dim:-}" "${reset:-}" "$s1" "${dim:-}" "${reset:-}" "$s2" "${dim:-}" "${reset:-}" "$s3"
+  # Apps: optional .apps[] in deploy.json
+  local apps_line
+  apps_line=$(read_json "$DEPLOY_JSON" "(.apps // [] | .[])")
+  if [ -n "$apps_line" ]; then
+    printf "  %bApps:%b\n" "${dim:-}" "${reset:-}"
+    while IFS= read -r app; do
+      [ -z "$app" ] && continue
+      printf "    ☐ %s\n" "$app"
+    done <<< "$apps_line"
+  else
+    printf "  %bApps:%b       — (optional: add \"apps\": [\"slug\", ...] to config/deploy.json)\n" "${dim:-}" "${reset:-}"
+  fi
 }
 
 show_versions() {
@@ -173,6 +229,7 @@ main_menu() {
   while true; do
     echo ""
     echoc bold "===== Dev Helper ====="
+    show_framework_deploy_status
     show_versions
     echo ""
     echoc cyan "Choose an action:"
