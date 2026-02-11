@@ -165,7 +165,7 @@ draw_menu_card() {
   printf "|%-*s|%-*s|\n" "$ENV_COL_W" "  - backend-staging         $s_back" "$VER_COL_W" "Desktop: v$(get_desktop_ver)"
   printf "|%-*s|%-*s|\n" "$ENV_COL_W" "" "$VER_COL_W" "Mobile:  v$(get_mobile_ver)"
   printf "|%-*s|%-*s|\n" "$ENV_COL_W" "production    $app_slug       $p_app" "$VER_COL_W" ""
-  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "  - backend-production     $p_back" "$VER_COL_W" ""
+  printf "|%-*s|%-*s|\n" "$ENV_COL_W" "  - backend-production      $p_back" "$VER_COL_W" ""
   printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
   printf "|%-*s|\n" "$INNER_W" "ACTIONS"
   printf "|%-*s|\n" "$INNER_W" "$act_dash"
