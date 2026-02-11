@@ -526,9 +526,7 @@ case "$1" in
                 if [ -d "$scriptDir/precond" ] && [ "$script" != "workspace.sh" ]; then
                     for pre in "$scriptDir"/precond/*.sh; do
                         [ -f "$pre" ] || continue
-                        ( source "$pre" )
-                        r=$?
-                        if [ $r -ne 0 ]; then exit $r; fi
+                        source "$pre" || { r=$?; exit $r; }
                     done
                 fi
                 [ $verbose -ge 2 ] && echo "$args"
