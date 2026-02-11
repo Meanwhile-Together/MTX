@@ -70,7 +70,7 @@ get_framework_line() {
   if [ -n "$owner" ] && [ -n "$slug" ]; then
     printf "%b%s/%s%b" "${green:-}" "$owner" "$slug" "${reset:-}"
   else
-    printf "%b—%b" "${dim:-}" "${reset:-}"
+    printf "%b-%b" "${dim:-}" "${reset:-}"
   fi
 }
 
@@ -123,10 +123,10 @@ get_production_backend_ok() {
   [ -n "$proj_id" ] && [ "$has_prd" = "true" ] && printf "1" || printf "0"
 }
 
-# Version strings for Web, Desktop, Mobile
-get_web_ver() { printf "%s" "$(read_json_field "$CLIENT_PKG" version 2>/dev/null || echo "—")"; }
-get_desktop_ver() { printf "%s" "$(read_json_field "$DESKTOP_PKG" version 2>/dev/null || echo "—")"; }
-get_mobile_ver() { printf "%s" "$(read_json_field "$MOBILE_PKG" version 2>/dev/null || echo "—")"; }
+# Version strings for Web, Desktop, Mobile (ASCII only for alignment)
+get_web_ver() { printf "%s" "$(read_json_field "$CLIENT_PKG" version 2>/dev/null || echo "-")"; }
+get_desktop_ver() { printf "%s" "$(read_json_field "$DESKTOP_PKG" version 2>/dev/null || echo "-")"; }
+get_mobile_ver() { printf "%s" "$(read_json_field "$MOBILE_PKG" version 2>/dev/null || echo "-")"; }
 
 # Draw the main menu card (mockup layout)
 draw_menu_card() {
