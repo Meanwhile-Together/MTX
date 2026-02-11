@@ -159,8 +159,8 @@ draw_menu_card() {
   # ASCII box: +--+ ; header line has no walls, centered text
   printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
   local header_display header_plain len left right
-  header_display="Dev Helper . $(get_framework_line) . $(get_versions_line)"
-  header_plain="Dev Helper . $(get_app_slug) . $(get_versions_line)"
+  header_display="mtx project . $(get_framework_line) . $(get_versions_line)"
+  header_plain="mtx project . $(get_app_slug) . $(get_versions_line)"
   len=${#header_plain}
   left=$(( (INNER_W - len) / 2 ))
   right=$(( INNER_W - left - len ))

@@ -123,8 +123,39 @@ execDir="$(pwd)"
             return $?
         }
 
+        print_banner() {
+            echo "o        .         o             o          ."
+            echo "   ███╗   ███╗     ████████╗    ██╗  ██╗     .         o"
+            echo "  ████╗ ████║ ===  ╚══██╔══╝ === ╚██╗██╔╝  .   o     ."
+            echo " ██╔████╔██║   ==     ██║    ==   ╚███╔╝     ( ( O ) )"
+            echo "██║╚██╔╝██║  =  °     ██║   =      ██╔██╗   o   .   °"
+            echo "██║ ╚═╝ ██║      .    ██║      .  ██╔╝ ██╗      O"
+            echo "██║     ██║  o        ██║    o    ╚═╝  ╚═╝  .      ."
+            echo "╚═╝     ╚═╝           ╚═╝                    °    o"
+            echo ""
+            echo "   » » » »  Z O O O O O M  » » » »   ( ( o ) )"
+        }
+
+        # Show banner at most once per 24h (stamp in user cache); always show on mtx help
+        show_banner_if_24h() {
+            local stamp_dir stamp_file
+            stamp_dir="${XDG_CACHE_HOME:-$HOME/.cache}/mtx"
+            stamp_file="$stamp_dir/.banner_stamp"
+            mkdir -p "$stamp_dir" 2>/dev/null || return 0
+            if [ -f "$stamp_file" ]; then
+                local now last
+                now=$(date +%s)
+                last=$(stat -c %Y "$stamp_file" 2>/dev/null || stat -f %m "$stamp_file" 2>/dev/null || echo "0")
+                [ $((now - last)) -lt 86400 ] && return 0
+            fi
+            print_banner
+            touch "$stamp_file" 2>/dev/null || true
+        }
+
 case "$1" in
     "help")
+        print_banner
+        echo ""
         echo "$installedName - A helpful script wrapper"
         echo
         echo "Usage: $installedName <command> [subcommand] [options]"
@@ -438,6 +469,7 @@ case "$1" in
                 fi
             fi
             if [ -f "$script" ]; then
+                show_banner_if_24h
                 debug "Running $script"
                 git -C "$scriptDir" reset --hard origin/main
                 chmod +x "$script"
