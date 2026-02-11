@@ -90,9 +90,13 @@ get_deploy_line() {
   [ "$apps_count" -gt 0 ] 2>/dev/null && stg_apps=1 || stg_apps=
   [ "$apps_count" -gt 0 ] 2>/dev/null && prd_apps=1 || prd_apps=
   if [ "$has_railway" = "true" ]; then
+    local sb sa pb pa
+    [ -n "$stg_back" ] && sb="✅" || sb="☐"
+    [ -n "$stg_apps" ] && sa="✅" || sa="☐"
+    [ -n "$prd_back" ] && pb="✅" || pb="☐"
+    [ -n "$prd_apps" ] && pa="✅" || pa="☐"
     printf "%brailway-staging%b Back %s Apps %s  %brailway-production%b Back %s Apps %s" \
-      "${dim:-}" "${reset:-}" "${stg_back:+✅}" "${stg_back:-☐}" "${stg_apps:+✅}" "${stg_apps:-☐}" \
-      "${dim:-}" "${reset:-}" "${prd_back:+✅}" "${prd_back:-☐}" "${prd_apps:+✅}" "${prd_apps:-☐}"
+      "${dim:-}" "${reset:-}" "$sb" "$sa" "${dim:-}" "${reset:-}" "$pb" "$pa"
   else
     printf "railway-staging Back ☐ Apps ☐  railway-production Back ☐ Apps ☐"
   fi
