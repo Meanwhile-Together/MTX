@@ -168,8 +168,14 @@ draw_menu_card() {
   printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
   printf "| %-*s |\n" "$((MENU_W - 4))" "ACTIONS"
   printf "| %-*s |\n" "$((MENU_W - 4))" "$act_dash"
-  printf "| %-*s |\n" "$((MENU_W - 4))" " 1 Web Ver        2 Desktop Ver        3 Mobile Ver        4 ALL Ver"
-  printf "| %-*s |\n" "$((MENU_W - 4))" " 5 Build          6 Dev FG             7 Android           8 Quit"
+  printf "| %-*s |\n" "$((MENU_W - 4))" " 1) Set web version"
+  printf "| %-*s |\n" "$((MENU_W - 4))" " 2) Set desktop version"
+  printf "| %-*s |\n" "$((MENU_W - 4))" " 3) Set mobile version"
+  printf "| %-*s |\n" "$((MENU_W - 4))" " 4) Set ALL versions"
+  printf "| %-*s |\n" "$((MENU_W - 4))" " 5) Build..."
+  printf "| %-*s |\n" "$((MENU_W - 4))" " 6) Dev (foreground)..."
+  printf "| %-*s |\n" "$((MENU_W - 4))" " 7) Android helpers..."
+  printf "| %-*s |\n" "$((MENU_W - 4))" " 8) Quit"
   printf "%b+%s+%b\n" "${cyan:-}" "$border_hr" "${reset:-}"
 }
 
