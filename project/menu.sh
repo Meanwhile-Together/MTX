@@ -16,11 +16,17 @@ if [[ -z "${NPM_BIN}" ]]; then
   exit 1
 fi
 
+# Precond 01-is-projectb sets MTX_IS_PROJECTB=1 when config/app.json has owner/slug
+if [[ -z "${MTX_IS_PROJECTB:-}" ]]; then
+  echo "❌ Not a Project B app (missing config/app.json or owner/slug). Run 'mtx project menu' from your project directory (e.g. project-b)." >&2
+  exit 1
+fi
+
+APP_JSON="config/app.json"
 CLIENT_PKG="targets/client/package.json"
 DESKTOP_PKG="targets/desktop/package.json"
 MOBILE_PKG="targets/mobile/package.json"
 ROOT_PKG="package.json"
-APP_JSON="config/app.json"
 DEPLOY_JSON="config/deploy.json"
 
 ensure_file() {
