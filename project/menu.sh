@@ -55,31 +55,32 @@ read_json() {
   command -v jq &>/dev/null && [ -f "$file" ] && jq -r "$expr" "$file" 2>/dev/null || true
 }
 
-show_framework_deploy_status() {
-  echo ""
-  echoc cyan "📋 Framework & deploy:"
-  local owner slug proj_id platforms
+# Menu card width (one horizontal "page")
+MENU_W=64
+
+# Build one-line summary of framework + deploy + versions for the menu header/status
+get_framework_line() {
+  local owner slug
   owner=$(read_json "$APP_JSON" "(.app.owner // \"\")")
   slug=$(read_json "$APP_JSON" "(.app.slug // \"\")")
   [ -z "$owner" ] && owner=$(read_json_field "$APP_JSON" app.owner 2>/dev/null || true)
   [ -z "$slug" ] && slug=$(read_json_field "$APP_JSON" app.slug 2>/dev/null || true)
   if [ -n "$owner" ] && [ -n "$slug" ]; then
-    status ok "Project B app: $owner / $slug"
+    printf "%b%s / %s%b" "${green:-}" "$owner" "$slug" "${reset:-}"
   else
-    status fail "Not a Project B app (missing or empty config/app.json app.owner / app.slug)"
+    printf "%bNot Project B%b" "${red:-}" "${reset:-}"
   fi
+}
+
+get_deploy_line() {
   if [ ! -f "$DEPLOY_JSON" ]; then
-    printf "  %bPlatforms:%b (no config/deploy.json)\n" "${dim:-}" "${reset:-}"
-    printf "  %bStaging:%b   ☐  %bProduction:%b  ☐  %bBackend:%b  ☐\n" "${dim:-}" "${reset:-}" "${dim:-}" "${reset:-}" "${dim:-}" "${reset:-}"
-    printf "  %bApps:%b       —\n" "${dim:-}" "${reset:-}"
+    printf "platforms: —  Stg ☐  Prd ☐  Back ☐  apps: —"
     return
   fi
+  local proj_id platforms has_stg has_prd stg_ok prd_ok backend_ok s1 s2 s3 apps_line
   proj_id=$(read_json "$DEPLOY_JSON" "(.projectId // \"\")")
   platforms=$(read_json "$DEPLOY_JSON" "(.platform // [] | join(\", \"))")
-  if [ -z "$platforms" ]; then platforms="none"; fi
-  printf "  %bPlatforms:%b %s\n" "${dim:-}" "${reset:-}" "$platforms"
-  # Deploy checkboxes: Staging / Production ✅ if env block + projectId; Backend ✅ if projectId set
-  local stg_ok prd_ok backend_ok s1 s2 s3 has_stg has_prd
+  [ -z "$platforms" ] && platforms="—"
   has_stg=$(read_json "$DEPLOY_JSON" "(.staging != null) | tostring" 2>/dev/null || echo "false")
   has_prd=$(read_json "$DEPLOY_JSON" "(.production != null) | tostring" 2>/dev/null || echo "false")
   [ -n "$proj_id" ] && [ "$has_stg" = "true" ] && stg_ok=1 || stg_ok=
@@ -88,33 +89,48 @@ show_framework_deploy_status() {
   [ -n "$stg_ok" ] && s1="✅" || s1="☐"
   [ -n "$prd_ok" ] && s2="✅" || s2="☐"
   [ -n "$backend_ok" ] && s3="✅" || s3="☐"
-  printf "  %bStaging:%b   %s  %bProduction:%b  %s  %bBackend:%b  %s\n" "${dim:-}" "${reset:-}" "$s1" "${dim:-}" "${reset:-}" "$s2" "${dim:-}" "${reset:-}" "$s3"
-  # Apps: optional .apps[] in deploy.json
-  local apps_line
-  apps_line=$(read_json "$DEPLOY_JSON" "(.apps // [] | .[])")
-  if [ -n "$apps_line" ]; then
-    printf "  %bApps:%b\n" "${dim:-}" "${reset:-}"
-    while IFS= read -r app; do
-      [ -z "$app" ] && continue
-      printf "    ☐ %s\n" "$app"
-    done <<< "$apps_line"
-  else
-    printf "  %bApps:%b       — (optional: add \"apps\": [\"slug\", ...] to config/deploy.json)\n" "${dim:-}" "${reset:-}"
-  fi
+  apps_line=$(read_json "$DEPLOY_JSON" "(.apps // [] | join(\", \"))")
+  [ -z "$apps_line" ] && apps_line="—"
+  printf "%b%s%b  Stg %s  Prd %s  Back %s  apps: %s" "${dim:-}" "$platforms" "${reset:-}" "$s1" "$s2" "$s3" "$apps_line"
 }
 
-show_versions() {
-  echo ""
-  echoc cyan "📦 Current versions:"
+get_versions_line() {
   local root_v web_v desk_v mob_v
-  root_v=$(read_json_field "$ROOT_PKG" version)
-  web_v=$(read_json_field "$CLIENT_PKG" version 2>/dev/null)
-  desk_v=$(read_json_field "$DESKTOP_PKG" version 2>/dev/null)
-  mob_v=$(read_json_field "$MOBILE_PKG" version 2>/dev/null)
-  printf -- "  - Repo           : %s\n" "${root_v:-n/a}"
-  printf -- "  - Web (client)   : %s\n" "${web_v:-n/a}"
-  printf -- "  - Desktop        : %s\n" "${desk_v:-n/a}"
-  printf -- "  - Mobile         : %s\n" "${mob_v:-n/a}"
+  root_v=$(read_json_field "$ROOT_PKG" version 2>/dev/null || true)
+  web_v=$(read_json_field "$CLIENT_PKG" version 2>/dev/null || true)
+  desk_v=$(read_json_field "$DESKTOP_PKG" version 2>/dev/null || true)
+  mob_v=$(read_json_field "$MOBILE_PKG" version 2>/dev/null || true)
+  printf "v %s · %s · %s · %s" "${root_v:-—}" "${web_v:-—}" "${desk_v:-—}" "${mob_v:-—}"
+}
+
+# Truncate or pad to width; strip newlines (for menu card lines)
+menu_fit() {
+  local w="$1" s="$2"
+  s=${s//$'\n'/ }
+  [ "${#s}" -gt "$w" ] && s="${s:0:$w}"
+  printf "%-*s" "$w" "$s"
+}
+
+# Draw the main menu card (one screen, horizontal feel)
+draw_menu_card() {
+  clear
+  local top_hr line content max_content=$((MENU_W - 4))
+  top_hr=$(printf '╔%*s╗' "$((MENU_W-2))" "" | tr ' ' '═')
+  printf "%b%s%b\n" "${cyan:-}" "$top_hr" "${reset:-}"
+  content="Dev Helper · $(get_framework_line) · $(get_versions_line)"
+  line=$(printf "║ %-*s ║" "$max_content" "$(menu_fit "$max_content" "$content")")
+  printf "%b%s%b\n" "${bold:-}" "$line" "${reset:-}"
+  printf "%b╠%*s╣%b\n" "${cyan:-}" "$((MENU_W-2))" "" "${reset:-}" | tr ' ' '═'
+  content=$(get_deploy_line)
+  line=$(printf "║ %-*s ║" "$max_content" "$(menu_fit "$max_content" "$content")")
+  printf "%b%s%b\n" "${dim:-}" "$line" "${reset:-}"
+  printf "%b╠%*s╣%b\n" "${cyan:-}" "$((MENU_W-2))" "" "${reset:-}" | tr ' ' '═'
+  # Two-column menu (1-4 left, 5-8 right)
+  printf "║ %-29s %-29s ║\n" "1) Set web version"       "5) Build..."
+  printf "║ %-29s %-29s ║\n" "2) Set desktop version" "6) Dev (foreground)..."
+  printf "║ %-29s %-29s ║\n" "3) Set mobile version"  "7) Android helpers..."
+  printf "║ %-29s %-29s ║\n" "4) Set ALL versions"    "8) Quit"
+  printf "%b╚%*s╝%b\n" "${cyan:-}" "$((MENU_W-2))" "" "${reset:-}" | tr ' ' '═'
 }
 
 set_version() {
@@ -227,20 +243,8 @@ android_menu() {
 
 main_menu() {
   while true; do
+    draw_menu_card
     echo ""
-    echoc bold "===== Dev Helper ====="
-    show_framework_deploy_status
-    show_versions
-    echo ""
-    echoc cyan "Choose an action:"
-    echo "  1) Set web version"
-    echo "  2) Set desktop version"
-    echo "  3) Set mobile version"
-    echo "  4) Set ALL versions"
-    echo "  5) Build..."
-    echo "  6) Dev (foreground)..."
-    echo "  7) Android helpers..."
-    echo "  8) Quit"
     color yellow "Select (1-8): "; read -r ans
     case "$ans" in
       1) read -rp "New web version (X.Y.Z): " v; [[ -z "$v" ]] || set_version web "$v" ;;
