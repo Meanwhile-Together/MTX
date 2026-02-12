@@ -157,6 +157,10 @@ execDir="$(pwd)"
         }
 
 case "$1" in
+    "banner")
+        print_banner
+        exit 0
+        ;;
     "help")
         print_banner
         echo ""
@@ -229,6 +233,7 @@ case "$1" in
         fi
         echo "Options:"
         echo "   --help Show this help message"
+        echo "   --banner Display banner and exit"
         echo "   --version Print nnw version"
         echo "   -v       Normal: echo/echoc from scripts and preconds always print; only mtx_run subprocesses quiet (default)"
         echo "   -vv      More detail (debug messages)"
@@ -247,6 +252,10 @@ case "$1" in
                 version=1
                 debug "Version flag detected, will print version and exit"
                 shift
+                ;;
+            "--banner")
+                print_banner
+                exit 0
                 ;;
             -vvvv)
                 verbose=4
