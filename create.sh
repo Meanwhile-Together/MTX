@@ -4,8 +4,8 @@ desc="Interactive create: new app name, then list owners from all workspace repo
 nobanner=1
 set -e
 
-# Resolve workspace root: one level up from current dir (project root when mtx runs)
-WORKSPACE_ROOT="$(cd .. && pwd)"
+# Use workspace from precond 02 when set (dir containing .code-workspace), else parent of cwd
+WORKSPACE_ROOT="${MTX_WORKSPACE_ROOT:-$(cd .. && pwd)}"
 
 # Collect owner from config/app.json (jq or fallback)
 get_owner() {
