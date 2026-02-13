@@ -109,6 +109,7 @@ TF_VARS=(
 # Terraform provider needs ACCOUNT token to create services (project tokens get "serviceCreate Not Authorized").
 # Project tokens are used only for deploy (railway up) later.
 if [ "$HAS_RAILWAY" = "true" ]; then
+    APP_OWNER=$(jq -r '.app.owner // ""' "$PROJECT_ROOT/config/app.json" 2>/dev/null || echo "")
     RAILWAY_TOKEN_VALUE=""
     if [ -n "${RAILWAY_TOKEN:-}" ]; then
         echo -e "${GREEN}✅${NC} RAILWAY_TOKEN found in environment"
@@ -123,8 +124,9 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         RAILWAY_TOKEN_VALUE="$TF_VAR_railway_token"
         TF_VARS+=(-var="railway_token=$TF_VAR_railway_token")
     else
-        echo -e "${YELLOW}⚠️${NC}  Railway token not found - Terraform will prompt for it"
-        echo -e "${CYAN}   Note: Input will not be shown for security${NC}"
+        echo -e "${RED}❌ Railway token required. Set RAILWAY_TOKEN or RAILWAY_ACCOUNT_TOKEN in .env (project root).${NC}"
+        echo -e "${CYAN}   Get an account token from https://railway.app/account/tokens${NC}"
+        exit 1
     fi
 
     # Project token for module (fallback); deploy step uses project token for railway up
@@ -138,8 +140,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
     if [ -n "${RAILWAY_WORKSPACE_ID:-}" ]; then
         echo -e "${GREEN}✅${NC} RAILWAY_WORKSPACE_ID found in environment: $RAILWAY_WORKSPACE_ID"
         TF_VARS+=(-var="railway_workspace_id=$RAILWAY_WORKSPACE_ID")
-    elif [ -n "$RAILWAY_TOKEN_VALUE" ]; then
-        APP_OWNER=$(jq -r '.app.owner // ""' "$PROJECT_ROOT/config/app.json" 2>/dev/null || echo "")
+    else
         echo -e "${BLUE}ℹ️${NC}  Resolving Railway workspace from app owner: ${APP_OWNER:-<first available>}"
         WORKSPACE_QUERY='{"query":"query { me { workspaces { id name } } }"}'
         WORKSPACE_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
@@ -161,22 +162,36 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 ' 2>/dev/null)
                 echo -e "${GREEN}✅${NC} Found workspace: $WORKSPACE_NAME (ID: $RAILWAY_WORKSPACE_ID)"
                 TF_VARS+=(-var="railway_workspace_id=$RAILWAY_WORKSPACE_ID")
-            else
-                echo -e "${YELLOW}⚠️${NC}  Could not resolve workspace from Railway API"
-                echo -e "${YELLOW}   Terraform will prompt for railway_workspace_id"
             fi
-        else
-            echo -e "${YELLOW}⚠️${NC}  Could not fetch workspaces (API call failed)"
-            echo -e "${YELLOW}   Terraform will prompt for railway_workspace_id"
         fi
-    else
-        echo -e "${YELLOW}⚠️${NC}  No Railway token found - cannot resolve workspace from owner"
-        echo -e "${YELLOW}   Terraform will prompt for both token and workspace ID"
+        if [ -z "${RAILWAY_WORKSPACE_ID:-}" ] || [ "$RAILWAY_WORKSPACE_ID" = "null" ]; then
+            echo -e "${RED}❌ Could not resolve Railway workspace. Set RAILWAY_WORKSPACE_ID in .env or ensure config/app.json app.owner matches a Railway workspace name.${NC}"
+            exit 1
+        fi
     fi
-    
-    # Pass existing project ID if available (to use existing project). Use env-specific ID when set (staging vs production).
+
+    # Resolve project from API when not set in env: find existing project by name (app.owner) or leave unset so Terraform creates one
+    if [ -z "${RAILWAY_PROJECT_ID_FOR_RUN:-}" ] && [ -n "${RAILWAY_WORKSPACE_ID:-}" ] && [ -n "$RAILWAY_TOKEN_VALUE" ]; then
+        PROJECTS_QUERY=$(printf '{"query":"query($wid: String!) { workspace(workspaceId: $wid) { projects(first: 50) { edges { node { id name } } } } }", "variables": {"wid": "%s"}}' "$RAILWAY_WORKSPACE_ID")
+        PROJECTS_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+            -H "Authorization: Bearer $RAILWAY_TOKEN_VALUE" \
+            -H "Content-Type: application/json" \
+            -d "$PROJECTS_QUERY" 2>/dev/null)
+        if [ $? -eq 0 ] && [ -n "$PROJECTS_RESPONSE" ]; then
+            # Parse .data.workspace.projects or .data.workspace.team.projects (API shape can vary)
+            RAILWAY_PROJECT_ID_FOR_RUN=$(echo "$PROJECTS_RESPONSE" | jq -r --arg owner "${APP_OWNER:-}" '
+                (.data.workspace.projects // .data.workspace.team.projects).edges[]? | .node | select((.name | ascii_downcase) == ($owner | ascii_downcase)) | .id // empty
+            ' 2>/dev/null | head -1)
+            if [ -n "$RAILWAY_PROJECT_ID_FOR_RUN" ] && [ "$RAILWAY_PROJECT_ID_FOR_RUN" != "null" ]; then
+                echo -e "${GREEN}✅${NC} Using existing project (config/app.json owner): $RAILWAY_PROJECT_ID_FOR_RUN"
+            else
+                echo -e "${CYAN}ℹ️${NC}  No project named \"${APP_OWNER:-default-owner}\" in workspace; Terraform will create it."
+            fi
+        fi
+    fi
+
+    # Pass existing project ID if available (from env or API resolution)
     if [ -n "${RAILWAY_PROJECT_ID_FOR_RUN:-}" ]; then
-        echo -e "${GREEN}✅${NC} Using project for $ENVIRONMENT: $RAILWAY_PROJECT_ID_FOR_RUN"
         TF_VARS+=(-var="railway_owner_project_id=$RAILWAY_PROJECT_ID_FOR_RUN")
     fi
     

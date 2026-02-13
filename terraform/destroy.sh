@@ -5,6 +5,12 @@ set -e
 
 PROJECT_ROOT="$(pwd)"
 SCRIPT_DIR="$PROJECT_ROOT/terraform"
+ENV_FILE="$PROJECT_ROOT/.env"
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    source "$ENV_FILE"
+    set +a
+fi
 
 # Colors
 GREEN='\033[0;32m'
@@ -92,14 +98,15 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         RAILWAY_TOKEN_VALUE="$TF_VAR_railway_token"
         TF_VARS+=(-var="railway_token=$TF_VAR_railway_token")
     else
-        echo -e "${YELLOW}⚠️${NC}  Railway token not found - Terraform will prompt for it"
+        echo -e "${RED}❌ Railway token required. Set RAILWAY_TOKEN or RAILWAY_ACCOUNT_TOKEN in .env (project root).${NC}"
+        exit 1
     fi
-    
-    # Resolve workspace ID from app owner name (config/app.json); no manual RAILWAY_WORKSPACE_ID needed
+
+    # Resolve workspace ID from app owner name (config/app.json)
     if [ -n "${RAILWAY_WORKSPACE_ID:-}" ]; then
         echo -e "${GREEN}✅${NC} RAILWAY_WORKSPACE_ID found in environment: $RAILWAY_WORKSPACE_ID"
         TF_VARS+=(-var="railway_workspace_id=$RAILWAY_WORKSPACE_ID")
-    elif [ -n "$RAILWAY_TOKEN_VALUE" ]; then
+    else
         APP_OWNER=$(jq -r '.app.owner // ""' "$PROJECT_ROOT/config/app.json" 2>/dev/null || echo "")
         echo -e "${BLUE}ℹ️${NC}  Resolving Railway workspace from app owner: ${APP_OWNER:-<first available>}"
         WORKSPACE_QUERY='{"query":"query { me { workspaces { id name } } }"}'
@@ -107,7 +114,6 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             -H "Authorization: Bearer $RAILWAY_TOKEN_VALUE" \
             -H "Content-Type: application/json" \
             -d "$WORKSPACE_QUERY" 2>/dev/null)
-        
         if [ $? -eq 0 ] && [ -n "$WORKSPACE_RESPONSE" ]; then
             RAILWAY_WORKSPACE_ID=$(echo "$WORKSPACE_RESPONSE" | jq -r --arg owner "${APP_OWNER:-}" '
                 .data.me.workspaces as $ws |
@@ -122,17 +128,12 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 ' 2>/dev/null)
                 echo -e "${GREEN}✅${NC} Found workspace: $WORKSPACE_NAME (ID: $RAILWAY_WORKSPACE_ID)"
                 TF_VARS+=(-var="railway_workspace_id=$RAILWAY_WORKSPACE_ID")
-            else
-                echo -e "${YELLOW}⚠️${NC}  Could not resolve workspace from Railway API"
-                echo -e "${YELLOW}   Terraform will prompt for railway_workspace_id"
             fi
-        else
-            echo -e "${YELLOW}⚠️${NC}  Could not fetch workspaces (API call failed)"
-            echo -e "${YELLOW}   Terraform will prompt for railway_workspace_id"
         fi
-    else
-        echo -e "${YELLOW}⚠️${NC}  No Railway token found - cannot resolve workspace from owner"
-        echo -e "${YELLOW}   Terraform will prompt for both token and workspace ID"
+        if [ -z "${RAILWAY_WORKSPACE_ID:-}" ] || [ "$RAILWAY_WORKSPACE_ID" = "null" ]; then
+            echo -e "${RED}❌ Could not resolve Railway workspace. Set RAILWAY_WORKSPACE_ID in .env or ensure config/app.json app.owner matches a Railway workspace name.${NC}"
+            exit 1
+        fi
     fi
 else
     echo -e "${RED}❌ Railway is required. Add \"railway\" to config/deploy.json platform array.${NC}"
