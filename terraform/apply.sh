@@ -216,15 +216,17 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         fi
     fi
 
-    # Resolve project from API when not set in env: find existing project by name (app.owner) or leave unset so Terraform creates one
-    if [ -z "${RAILWAY_PROJECT_ID_FOR_RUN:-}" ] && [ -n "${RAILWAY_WORKSPACE_ID:-}" ] && [ -n "$RAILWAY_TOKEN_VALUE" ]; then
+    # Resolve project: .env is source of truth when set (avoids creating duplicates). Only discover from API when .env has no project ID.
+    if [ -n "${RAILWAY_PROJECT_ID:-}" ] && [ "$RAILWAY_PROJECT_ID" != "null" ]; then
+        RAILWAY_PROJECT_ID_FOR_RUN="$RAILWAY_PROJECT_ID"
+        echo -e "${GREEN}✅${NC} Using project from .env: $RAILWAY_PROJECT_ID_FOR_RUN (no new project will be created)"
+    elif [ -z "${RAILWAY_PROJECT_ID_FOR_RUN:-}" ] && [ -n "${RAILWAY_WORKSPACE_ID:-}" ] && [ -n "$RAILWAY_TOKEN_VALUE" ]; then
         PROJECTS_QUERY=$(printf '{"query":"query($wid: String!) { workspace(workspaceId: $wid) { projects(first: 50) { edges { node { id name } } } } }", "variables": {"wid": "%s"}}' "$RAILWAY_WORKSPACE_ID")
         PROJECTS_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
             -H "Authorization: Bearer $RAILWAY_TOKEN_VALUE" \
             -H "Content-Type: application/json" \
             -d "$PROJECTS_QUERY" 2>/dev/null)
         if [ $? -eq 0 ] && [ -n "$PROJECTS_RESPONSE" ]; then
-            # Parse .data.workspace.projects or .data.workspace.team.projects (API shape can vary)
             RAILWAY_PROJECT_ID_FOR_RUN=$(echo "$PROJECTS_RESPONSE" | jq -r --arg owner "${APP_OWNER:-}" '
                 (.data.workspace.projects // .data.workspace.team.projects).edges[]? | .node | select((.name | ascii_downcase) == ($owner | ascii_downcase)) | .id // empty
             ' 2>/dev/null | head -1)
@@ -319,14 +321,19 @@ if ! terraform init -reconfigure -input=false; then
     exit 1
 fi
 
-# When using an existing project, import it so Terraform tracks it (never destroy).
-# If we don't import, Terraform would create a second project; after import, apply only updates in place.
+# When using an existing project, import it so Terraform tracks it. Without import, apply would create a duplicate project.
+# Import must succeed or we abort — we never create a second project when we already have one in .env.
 if [ "$HAS_RAILWAY" = "true" ] && [ -n "${RAILWAY_PROJECT_ID_FOR_RUN:-}" ] && [ "$RAILWAY_PROJECT_ID_FOR_RUN" != "null" ]; then
     if ! terraform state list 2>/dev/null | grep -qF 'module.railway_owner[0].railway_project.owner[0]'; then
-        echo -e "${CYAN}ℹ️  Importing existing Railway project into state (no destroy, deploy-only)...${NC}"
-        if terraform import -input=false "${TF_VARS[@]}" 'module.railway_owner[0].railway_project.owner[0]' "$RAILWAY_PROJECT_ID_FOR_RUN" 2>/dev/null; then
-            echo -e "${GREEN}✅ Project imported; Terraform will not destroy it.${NC}"
+        echo -e "${CYAN}ℹ️  Importing existing Railway project into state (so Terraform will not create a duplicate)...${NC}"
+        if ! terraform import -input=false "${TF_VARS[@]}" 'module.railway_owner[0].railway_project.owner[0]' "$RAILWAY_PROJECT_ID_FOR_RUN"; then
+            echo ""
+            echo -e "${RED}❌ Import failed. Terraform would create a new project with the same name if we continued.${NC}"
+            echo -e "${YELLOW}   Fix the error above (e.g. token access, project ID) and re-run.${NC}"
+            echo -e "${YELLOW}   Or remove RAILWAY_PROJECT_ID from ${ENV_FILE} only if you intend to create a new project.${NC}"
+            exit 1
         fi
+        echo -e "${GREEN}✅ Project imported; apply will not create a duplicate.${NC}"
     fi
 fi
 
