@@ -146,6 +146,12 @@ echo ""
 # Change to terraform directory
 cd "$SCRIPT_DIR"
 
+# Ensure backend and providers are initialized (idempotent; no-op if already inited)
+if ! terraform init -reconfigure -input=false; then
+    echo -e "${RED}❌ terraform init failed${NC}"
+    exit 1
+fi
+
 # Run terraform destroy
 if ! terraform destroy "${TF_VARS[@]}"; then
     echo -e "${RED}❌ Terraform destroy failed${NC}"

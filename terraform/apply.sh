@@ -236,6 +236,13 @@ echo ""
 # Change to terraform directory
 cd "$SCRIPT_DIR"
 
+# Ensure backend and providers are initialized (idempotent; no-op if already inited)
+if ! terraform init -reconfigure -input=false; then
+    echo ""
+    echo -e "${RED}❌ terraform init failed${NC}"
+    exit 1
+fi
+
 # Remove legacy single "backend" resource from state if present (we now use backend-staging / backend-production).
 if terraform state list 2>/dev/null | grep -q 'module.railway_owner\[0\].railway_service.backend\[0\]'; then
     echo -e "${CYAN}ℹ️  Removing legacy backend from state (replaced by backend-staging / backend-production)...${NC}"
@@ -294,6 +301,14 @@ if [ $TERRAFORM_EXIT -ne 0 ] && grep -q "already exists in this project" "$TF_AP
     echo ""
     terraform apply -auto-approve "${TF_VARS[@]}"
     TERRAFORM_EXIT=$?
+fi
+# If apply failed due to backend not initialized, run init and retry once (idempotent recovery)
+if [ $TERRAFORM_EXIT -ne 0 ] && [ -f "$TF_APPLY_LOG" ] && grep -q "Backend initialization required\|please run \"terraform init\"" "$TF_APPLY_LOG" 2>/dev/null; then
+    echo ""
+    echo -e "${CYAN}🔄 Backend not initialized; running terraform init and retrying apply...${NC}"
+    if terraform init -reconfigure -input=false && terraform apply -auto-approve "${TF_VARS[@]}"; then
+        TERRAFORM_EXIT=0
+    fi
 fi
 rm -f "$TF_APPLY_LOG"
 
