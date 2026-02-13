@@ -454,7 +454,7 @@ case "$1" in
                 if [ $((cmdEndIndex - 1)) -gt 0 ]; then
                     debug "It was a dir! Lets list the contents for the user."
                     script=${@:1:cmdEndIndex-1}
-                    script="${script// //}"
+                    script="${script// /\/}"
                     error "Script '$script' is a directory."
                     info "Available scripts and subdirectories in this directory are:"
                     info "Scripts are $(color green "green") and directories are $(color yellow "yellow")"
@@ -471,7 +471,7 @@ case "$1" in
                 fi
             else
                 script=${@:1:cmdEndIndex-1}
-                script="${script// //}.sh"
+                script="${script// /\/}.sh"
                 # Prefer subfolder script when both name.sh and name/ exist and user passed a subcommand (e.g. mtx compile vite → compile/vite.sh)
                 if [ $cmdEndIndex -le $# ]; then
                     nextArg="${!cmdEndIndex}"
