@@ -430,6 +430,13 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         echo -e "${GREEN}✅ Linked to Railway service${NC}"
         echo ""
         
+        # Ensure dependencies (e.g. Prisma) are installed before build
+        if [ ! -f "node_modules/.bin/prisma" ] && [ -f "package.json" ]; then
+            echo -e "${BLUE}ℹ️  Prisma/dependencies not found, running npm install...${NC}"
+            npm install || { echo -e "${RED}❌ npm install failed${NC}"; exit 1; }
+            echo ""
+        fi
+        
         # Build the project
         echo -e "${BLUE}🔨 Building project...${NC}"
         npm run build:server || {
@@ -979,6 +986,12 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 trap restore_railway_json EXIT
             fi
             
+            # Ensure dependencies are installed before backend build
+            if [ ! -f "node_modules/.bin/prisma" ] && [ -f "package.json" ]; then
+                echo -e "${BLUE}ℹ️  Prisma/dependencies not found, running npm install...${NC}"
+                npm install || { echo -e "${RED}❌ npm install failed${NC}"; exit 1; }
+                echo ""
+            fi
             # Build backend server first (artifact for deploy; Railway may also build on its side using backend config)
             echo -e "${BLUE}🔨 Building backend server...${NC}"
             BACKEND_BUILD_EXIT=0
