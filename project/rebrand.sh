@@ -10,6 +10,24 @@ if [[ -z "${MTX_IS_PROJECTB:-}" ]]; then
   exit 1
 fi
 
+# Ensure we run from project root (directory containing config/app.json) so find/list paths are correct
+PROJECT_ROOT=""
+if [[ -f "config/app.json" ]]; then
+  PROJECT_ROOT="$(pwd)"
+fi
+if [[ -z "$PROJECT_ROOT" ]]; then
+  # Try parent (e.g. workspace root with project-bridge as subdir)
+  for d in . .. ../project-bridge; do
+    if [[ -f "${d}/config/app.json" ]]; then
+      PROJECT_ROOT="$(cd "$d" && pwd)"
+      break
+    fi
+  done
+fi
+if [[ -n "$PROJECT_ROOT" ]]; then
+  cd "$PROJECT_ROOT" || exit 1
+fi
+
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
@@ -185,15 +203,19 @@ j.dependencies=bump(j.dependencies);
 j.devDependencies=bump(j.devDependencies);
 if(j.peerDependencies) j.peerDependencies=bump(j.peerDependencies);
 if(j.optionalDependencies) j.optionalDependencies=bump(j.optionalDependencies);
-fs.writeFileSync(f,JSON.stringify(j,null,2)+'\n');
+let out=JSON.stringify(j,null,2)+'\n';
+out=out.replace(new RegExp('@'+from.replace(/[.*+?^\${}()|[\]\\\\]/g,'\\\\$&')+'/','g'), '@'+to+'/');
+fs.writeFileSync(f,out);
 " 2>/dev/null || true
   }
-  for pkg in shared/package.json application/package.json engine/package.json ui/package.json targets/client/package.json targets/desktop/package.json targets/mobile/package.json targets/server/package.json; do
+  # Update every package.json in the repo (not just a fixed list)
+  while IFS= read -r -d '' pkg; do
     update_pkg_scope_json "$pkg" "$SCOPE_OLD" "$SCOPE_NEW" || true
-  done
+  done < <(find . -type f -name "package.json" -not -path "*/node_modules/*" -print0 2>/dev/null || true)
+  # Replace scope in all source, config, docs, and workflow files
   while IFS= read -r -d '' f; do
     [ -f "$f" ] && sed_inplace "s|@${SCOPE_OLD}/|@${SCOPE_NEW}/|g" "$f"
-  done < <(find . -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.json" -o -name "*.mjs" -o -name "*.cjs" \) -not -path "*/node_modules/*" -not -path "*/dist/*" -not -path "*/build/*" -not -path "*/.git/*" -print0 2>/dev/null || true)
+  done < <(find . -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.mts" -o -name "*.cts" -o -name "*.js" -o -name "*.jsx" -o -name "*.json" -o -name "*.mjs" -o -name "*.cjs" -o -name "*.md" -o -name "*.html" -o -name "*.yml" -o -name "*.yaml" \) -not -path "*/node_modules/*" -not -path "*/dist/*" -not -path "*/build/*" -not -path "*/.git/*" -print0 2>/dev/null || true)
   echo -e "${GREEN}✅ Scope updated; re-running npm install${NC}"
   npm install
 fi
