@@ -23,4 +23,9 @@ if [ -z "$ENV" ]; then
 fi
 
 [ -n "${FORCE_BACKEND:-}" ] && export FORCE_BACKEND
-"$0" terraform apply "$ENV"
+# Run project's terraform/apply.sh (cwd = project root when invoked via mtx)
+if [ -n "${FORCE_BACKEND:-}" ]; then
+  ./terraform/apply.sh --force-backend "$ENV"
+else
+  ./terraform/apply.sh "$ENV"
+fi

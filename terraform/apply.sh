@@ -412,16 +412,25 @@ if [ "$HAS_RAILWAY" = "true" ]; then
     fi
     PROJECT_ID=$(terraform output -raw railway_project_id 2>/dev/null || echo "")
     
-    # Get environment from script argument (staging or production)
-    # ENVIRONMENT already set from script args (default staging)
+    # Explicit deploy target: always deploy app to the chosen environment's app service; ensure backend exists and deploy from repo when present
+    APP_SERVICE_NAME_FOR_ENV="$APP_SLUG-$ENVIRONMENT"
+    BACKEND_SERVICE_NAME_FOR_ENV="backend-$ENVIRONMENT"
+    echo -e "${CYAN}Deploy target (environment: $ENVIRONMENT):${NC}"
+    echo -e "  App:    $APP_SERVICE_NAME_FOR_ENV ${GREEN}(service id: ${SERVICE_ID:-<none>})${NC}"
+    echo -e "  Backend: $BACKEND_SERVICE_NAME_FOR_ENV ${GREEN}(service id: ${BACKEND_SERVICE_ID:-<none>})${NC}"
+    if [ -z "$BACKEND_SERVICE_ID" ] || [ "$BACKEND_SERVICE_ID" = "null" ]; then
+        echo -e "  ${YELLOW}Backend service for $ENVIRONMENT not found; only app will be deployed. Re-run apply to create backend-$ENVIRONMENT if needed.${NC}"
+    else
+        echo -e "  Backend will be deployed from current repo to $BACKEND_SERVICE_NAME_FOR_ENV after app deploy."
+    fi
+    echo ""
     
     if [ -z "$SERVICE_ID" ] || [ "$SERVICE_ID" = "null" ]; then
-        echo -e "${YELLOW}⚠️  Could not get Railway service ID from Terraform outputs${NC}"
+        echo -e "${YELLOW}⚠️  Could not get Railway app service ID for $ENVIRONMENT${NC}"
         echo "Skipping code deployment"
     else
-        echo -e "${GREEN}✅ Found Railway service: $SERVICE_ID${NC}"
-        echo -e "${GREEN}✅ Found Railway project: $PROJECT_ID${NC}"
-        echo -e "${GREEN}✅ Deploying to environment: $ENVIRONMENT${NC}"
+        echo -e "${GREEN}✅ Deploying app to $APP_SERVICE_NAME_FOR_ENV ($SERVICE_ID) for environment $ENVIRONMENT${NC}"
+        echo -e "${GREEN}✅ Project: $PROJECT_ID${NC}"
         echo ""
         
         # Navigate to project root
@@ -445,20 +454,18 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             export RAILWAY_API_TOKEN="$RAILWAY_TOKEN_VALUE"
         fi
         
-        # Link directory to Railway service
+        # Explicitly link to this environment's app service so we deploy to the correct one (not another env's service)
         if [ ! -d ".railway" ]; then
-            echo -e "${BLUE}🔗 Linking directory to Railway service...${NC}"
+            echo -e "${BLUE}🔗 Linking to app service $APP_SERVICE_NAME_FOR_ENV...${NC}"
             railway link --service "$SERVICE_ID" --project "$PROJECT_ID" 2>/dev/null || {
-                # Fallback: create .railway directory manually
                 mkdir -p .railway
                 echo "$SERVICE_ID" > .railway/service
                 echo "$PROJECT_ID" > .railway/project
             }
         else
-            # Verify link is correct
             LINKED_SERVICE=$(cat .railway/service 2>/dev/null || echo "")
             if [ "$LINKED_SERVICE" != "$SERVICE_ID" ]; then
-                echo -e "${YELLOW}⚠️  Re-linking to correct service...${NC}"
+                echo -e "${BLUE}🔗 Re-linking to app service $APP_SERVICE_NAME_FOR_ENV (was linked to different service)...${NC}"
                 rm -rf .railway
                 railway link --service "$SERVICE_ID" --project "$PROJECT_ID" 2>/dev/null || {
                     mkdir -p .railway
@@ -467,7 +474,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 }
             fi
         fi
-        echo -e "${GREEN}✅ Linked to Railway service${NC}"
+        echo -e "${GREEN}✅ Linked to $APP_SERVICE_NAME_FOR_ENV${NC}"
         echo ""
         
         # Ensure dependencies (e.g. Prisma) are installed before build
@@ -1000,15 +1007,14 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         echo -e "${BLUE}🔗 Ensuring public domain for app service...${NC}"
         (railway domain --json 2>/dev/null || railway domain 2>/dev/null) || true
         
-        # Backend deploy uses only Terraform output (same project/env we just applied). Service IDs are never persisted to .env.
+        # Ensure backend exists for this env: deploy backend code from current repo to backend-<env> (when service exists)
         BACKEND_DEPLOY_ID="$BACKEND_SERVICE_ID"
-        [ -n "${FORCE_BACKEND:-}" ] && [ -n "$BACKEND_DEPLOY_ID" ] && echo -e "${CYAN}ℹ️  --force-backend: using backend service $BACKEND_DEPLOY_ID${NC}"
+        [ -n "${FORCE_BACKEND:-}" ] && [ -n "$BACKEND_DEPLOY_ID" ] && echo -e "${CYAN}ℹ️  --force-backend: will redeploy backend to $BACKEND_SERVICE_NAME_FOR_ENV${NC}"
         if [ -n "$BACKEND_DEPLOY_ID" ] && [ "$BACKEND_DEPLOY_ID" != "null" ]; then
             echo ""
+            echo -e "${BLUE}🚀 Ensuring backend for $ENVIRONMENT: deploying from current repo to $BACKEND_SERVICE_NAME_FOR_ENV ($BACKEND_DEPLOY_ID)...${NC}"
             if [ -n "${FORCE_BACKEND:-}" ]; then
-                echo -e "${BLUE}🚀 Forcing backend redeploy to Railway ($ENVIRONMENT environment)...${NC}"
-            else
-                echo -e "${BLUE}🚀 Deploying backend service to Railway ($ENVIRONMENT environment)...${NC}"
+                echo -e "${CYAN}   (--force-backend: forcing redeploy)${NC}"
             fi
             
             # Railway uses root railway.json for build/start. Use backend-server config for backend deploys.
