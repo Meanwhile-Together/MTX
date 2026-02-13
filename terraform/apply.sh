@@ -324,7 +324,7 @@ fi
 if [ "$HAS_RAILWAY" = "true" ] && [ -n "${RAILWAY_PROJECT_ID_FOR_RUN:-}" ] && [ "$RAILWAY_PROJECT_ID_FOR_RUN" != "null" ]; then
     if ! terraform state list 2>/dev/null | grep -qF 'module.railway_owner[0].railway_project.owner[0]'; then
         echo -e "${CYAN}ℹ️  Importing existing Railway project into state (no destroy, deploy-only)...${NC}"
-        if terraform import 'module.railway_owner[0].railway_project.owner[0]' "$RAILWAY_PROJECT_ID_FOR_RUN" 2>/dev/null; then
+        if terraform import -input=false "${TF_VARS[@]}" 'module.railway_owner[0].railway_project.owner[0]' "$RAILWAY_PROJECT_ID_FOR_RUN" 2>/dev/null; then
             echo -e "${GREEN}✅ Project imported; Terraform will not destroy it.${NC}"
         fi
     fi
