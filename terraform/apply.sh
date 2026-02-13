@@ -3,11 +3,26 @@
 desc="Apply Terraform (Railway etc.); deploy app and backend"
 set -e
 
-PROJECT_ROOT="$(pwd)"
+# Resolve project root (directory containing config/app.json) so .env is always loaded from the right place
+PROJECT_ROOT=""
+if [ -f "config/app.json" ]; then
+  PROJECT_ROOT="$(pwd)"
+fi
+if [ -z "$PROJECT_ROOT" ] && [ -f "../config/app.json" ]; then
+  PROJECT_ROOT="$(cd .. && pwd)"
+fi
+if [ -z "$PROJECT_ROOT" ]; then
+  for d in . .. ../project-bridge; do
+    [ -f "${d}/config/app.json" ] && PROJECT_ROOT="$(cd "$d" && pwd)" && break
+  done
+fi
+[ -z "$PROJECT_ROOT" ] && PROJECT_ROOT="$(pwd)"
+cd "$PROJECT_ROOT" || exit 1
+
 SCRIPT_DIR="$PROJECT_ROOT/terraform"
+ENV_FILE="$PROJECT_ROOT/.env"
 
 # Load .env if it exists (for RAILWAY_ACCOUNT_TOKEN and other tokens)
-ENV_FILE="$PROJECT_ROOT/.env"
 if [ -f "$ENV_FILE" ]; then
     set -a
     source "$ENV_FILE"
@@ -129,37 +144,35 @@ if [ "$HAS_RAILWAY" = "true" ]; then
     APP_OWNER=$(jq -r '.app.owner // ""' "$PROJECT_ROOT/config/app.json" 2>/dev/null || echo "")
     RAILWAY_TOKEN_VALUE=""
     if [ -n "${RAILWAY_TOKEN:-}" ]; then
-        echo -e "${GREEN}✅${NC} RAILWAY_TOKEN found in environment"
         RAILWAY_TOKEN_VALUE="$RAILWAY_TOKEN"
-        TF_VARS+=(-var="railway_token=$RAILWAY_TOKEN")
     elif [ -n "${RAILWAY_ACCOUNT_TOKEN:-}" ]; then
-        echo -e "${GREEN}✅${NC} RAILWAY_ACCOUNT_TOKEN found in environment"
         RAILWAY_TOKEN_VALUE="$RAILWAY_ACCOUNT_TOKEN"
-        TF_VARS+=(-var="railway_token=$RAILWAY_ACCOUNT_TOKEN")
     elif [ -n "${TF_VAR_railway_token:-}" ]; then
-        echo -e "${GREEN}✅${NC} TF_VAR_railway_token found"
         RAILWAY_TOKEN_VALUE="$TF_VAR_railway_token"
-        TF_VARS+=(-var="railway_token=$TF_VAR_railway_token")
-    else
-        RAILWAY_TOKEN_URL="https://railway.app/account/tokens"
-        echo ""
-        echo -e "${YELLOW}🔐 Railway account token needed for this run.${NC}"
-        echo -e "${CYAN}   Set RAILWAY_TOKEN or RAILWAY_ACCOUNT_TOKEN in .env (project root) to skip this prompt next time.${NC}"
-        echo -e "${BLUE}🔗 Get an account token: ${RAILWAY_TOKEN_URL}${NC}"
-        echo -e "${YELLOW}   (input is hidden for security)${NC}"
-        while true; do
-            read -r -sp "Paste your Railway account token (or Ctrl+C to cancel): " RAILWAY_TOKEN_VALUE
-            echo ""
-            if [ -n "$RAILWAY_TOKEN_VALUE" ]; then
-                TF_VARS+=(-var="railway_token=$RAILWAY_TOKEN_VALUE")
-                echo -e "${GREEN}✅ Using provided token.${NC}"
-                set_env_var_in_file "RAILWAY_ACCOUNT_TOKEN" "$RAILWAY_TOKEN_VALUE"
-                echo -e "${CYAN}   Saved RAILWAY_ACCOUNT_TOKEN to .env for idempotent re-runs.${NC}"
-                break
-            fi
-            echo -e "${YELLOW}   No token entered. Try again or open: ${RAILWAY_TOKEN_URL}${NC}"
-        done
     fi
+    if [ -z "$RAILWAY_TOKEN_VALUE" ] || [ "$RAILWAY_TOKEN_VALUE" = "null" ]; then
+        if [ -t 0 ]; then
+            echo -e "${YELLOW}🔐 Railway account token needed (one-time). It will be saved to .env for future deploys.${NC}"
+            echo -e "${BLUE}🔗 Get an account token: https://railway.app/account/tokens${NC}"
+            echo -e "${CYAN}   (input is hidden; token will be stored in ${ENV_FILE})${NC}"
+            read -r -sp "Paste your Railway account token: " RAILWAY_TOKEN_VALUE
+            echo ""
+            if [ -z "$RAILWAY_TOKEN_VALUE" ]; then
+                echo -e "${RED}❌ No token entered. Exiting.${NC}"
+                exit 1
+            fi
+            set_env_var_in_file "RAILWAY_ACCOUNT_TOKEN" "$RAILWAY_TOKEN_VALUE"
+            echo -e "${GREEN}✅ Token saved to .env — future deploys will use it automatically.${NC}"
+        else
+            echo -e "${RED}❌ Railway account token required. Set RAILWAY_ACCOUNT_TOKEN in ${ENV_FILE} (get from https://railway.app/account/tokens).${NC}"
+            exit 1
+        fi
+    else
+        # Persist so second deploy (e.g. new shell) never needs token again
+        set_env_var_in_file "RAILWAY_ACCOUNT_TOKEN" "$RAILWAY_TOKEN_VALUE"
+    fi
+    TF_VARS+=(-var="railway_token=$RAILWAY_TOKEN_VALUE")
+    echo -e "${GREEN}✅${NC} Railway account token ready"
 
     # Project token for module (fallback); deploy step uses project token for railway up
     if [ "$ENVIRONMENT" = "staging" ] && [ -n "${RAILWAY_PROJECT_TOKEN_STAGING:-}" ]; then
@@ -193,6 +206,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     .name // empty
                 ' 2>/dev/null)
                 echo -e "${GREEN}✅${NC} Found workspace: $WORKSPACE_NAME (ID: $RAILWAY_WORKSPACE_ID)"
+                set_env_var_in_file "RAILWAY_WORKSPACE_ID" "$RAILWAY_WORKSPACE_ID"
                 TF_VARS+=(-var="railway_workspace_id=$RAILWAY_WORKSPACE_ID")
             fi
         fi
@@ -305,6 +319,17 @@ if ! terraform init -reconfigure -input=false; then
     exit 1
 fi
 
+# When using an existing project, import it so Terraform tracks it (never destroy).
+# If we don't import, Terraform would create a second project; after import, apply only updates in place.
+if [ "$HAS_RAILWAY" = "true" ] && [ -n "${RAILWAY_PROJECT_ID_FOR_RUN:-}" ] && [ "$RAILWAY_PROJECT_ID_FOR_RUN" != "null" ]; then
+    if ! terraform state list 2>/dev/null | grep -qF 'module.railway_owner[0].railway_project.owner[0]'; then
+        echo -e "${CYAN}ℹ️  Importing existing Railway project into state (no destroy, deploy-only)...${NC}"
+        if terraform import 'module.railway_owner[0].railway_project.owner[0]' "$RAILWAY_PROJECT_ID_FOR_RUN" 2>/dev/null; then
+            echo -e "${GREEN}✅ Project imported; Terraform will not destroy it.${NC}"
+        fi
+    fi
+fi
+
 # Remove legacy single "backend" resource from state if present (we now use backend-staging / backend-production).
 if terraform state list 2>/dev/null | grep -q 'module.railway_owner\[0\].railway_service.backend\[0\]'; then
     echo -e "${CYAN}ℹ️  Removing legacy backend from state (replaced by backend-staging / backend-production)...${NC}"
@@ -411,6 +436,22 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         [ -z "$BACKEND_SERVICE_ID" ] || [ "$BACKEND_SERVICE_ID" = "null" ] && [ -n "${EXISTING_BACKEND_PRODUCTION_ID:-}" ] && BACKEND_SERVICE_ID="$EXISTING_BACKEND_PRODUCTION_ID"
     fi
     PROJECT_ID=$(terraform output -raw railway_project_id 2>/dev/null || echo "")
+    # If project ID changed (e.g. Terraform just created a new project), clear project tokens — they're for the old project
+    OLD_PROJECT_ID=""
+    if [ -f "$ENV_FILE" ] && grep -q "^RAILWAY_PROJECT_ID=" "$ENV_FILE" 2>/dev/null; then
+        OLD_PROJECT_ID=$(grep "^RAILWAY_PROJECT_ID=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+    fi
+    if [ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "null" ] && [ -n "$OLD_PROJECT_ID" ] && [ "$OLD_PROJECT_ID" != "$PROJECT_ID" ]; then
+        clear_env_var_in_file "RAILWAY_PROJECT_TOKEN_STAGING" "true"
+        clear_env_var_in_file "RAILWAY_PROJECT_TOKEN_PRODUCTION" "true"
+        unset RAILWAY_PROJECT_TOKEN_STAGING RAILWAY_PROJECT_TOKEN_PRODUCTION
+        echo -e "${YELLOW}🔄 Project ID changed (new project created). Cleared old project tokens; you'll be prompted for new ones for this project.${NC}"
+        echo ""
+    fi
+    # Persist current project ID for next run
+    if [ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "null" ]; then
+        set_env_var_in_file "RAILWAY_PROJECT_ID" "$PROJECT_ID"
+    fi
     
     # Explicit deploy target: always deploy app to the chosen environment's app service; ensure backend exists and deploy from repo when present
     APP_SERVICE_NAME_FOR_ENV="$APP_SLUG-$ENVIRONMENT"
@@ -933,10 +974,10 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 DEPLOY_SUCCESS=true
                 echo -e "${GREEN}✅ Deployment successful!${NC}"
             else
-                # Check if it was a token error
-                if echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "Invalid RAILWAY_TOKEN|invalid.*token|token.*invalid"; then
+                # Check if it was a token error (wrong project, expired, or Unauthorized)
+                if echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "Unauthorized|Invalid RAILWAY_TOKEN|invalid.*token|token.*invalid|valid and has access"; then
                     echo ""
-                    echo -e "${RED}❌ Token validation failed - the ${ENVIRONMENT^^} token is invalid or expired${NC}"
+                    echo -e "${RED}❌ Token validation failed - the ${ENVIRONMENT^^} token is invalid, for a different project, or expired${NC}"
                     echo ""
                     
                     # Determine which token variable to update
