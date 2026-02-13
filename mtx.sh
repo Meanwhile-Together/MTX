@@ -119,7 +119,7 @@ execDir="$(pwd)"
 
         isScriptInstalled() {
             local script_name="$1"
-            grep -q "^$script_name$" "$packageListFile"
+            grep -qE "^$script_name( |$)" "$packageListFile"
             return $?
         }
 
@@ -509,14 +509,21 @@ case "$1" in
                     #     exit 5
                     # fi
                     debug "Hoisting script as $hoist_target..."
+                    # Wrapper script so hoisted command runs via mtx (execDir, preconds, same context as "mtx <path>")
+                    script_words="${script%.sh}"
+                    script_words="${script_words//\// }"
+                    wrapper_content="#!/bin/bash
+# mtx-hoist: $script
+exec $installedName $script_words \"\$@\"
+"
                     if command -v sudo &>/dev/null; then
-                        sudo ln -sf "$scriptDir/$script" "$binDir/$hoist_target"
+                        echo "$wrapper_content" | sudo tee "$binDir/$hoist_target" >/dev/null
                         sudo chmod +x "$binDir/$hoist_target"
                     else
-                        ln -sf "$scriptDir/$script" "$binDir/$hoist_target"
+                        echo "$wrapper_content" > "$binDir/$hoist_target"
                         chmod +x "$binDir/$hoist_target"
                     fi
-                    echo "$hoist_target" >> "$packageListFile"
+                    echo "$hoist_target $script" >> "$packageListFile"
                     success "Hoisted $script as $hoist_target"
                     exit 0
                 fi
@@ -524,16 +531,28 @@ case "$1" in
                 if [ $submerge -eq 1 ]; then
                     debug "Submerging all hoisted instances of $script..."
                     script_path="$scriptDir/$script"
-                    while read -r alias; do
-                        if [ "$(readlink -f "$binDir/$alias")" = "$(readlink -f "$script_path")" ]; then
-                            if command -v sudo &>/dev/null; then
-                                sudo rm -f "$binDir/$alias"
-                            else
-                                rm -f "$binDir/$alias"
-                            fi
-                            sed -i "/^$alias$/d" "$packageListFile"
-                            success "Removed hoisted instance: $alias"
+                    while IFS= read -r line; do
+                        alias="${line%% *}"
+                        installed_script="${line#* }"
+                        installed_script="${installed_script%% *}"
+                        [ -n "$alias" ] || continue
+                        if [ -z "$installed_script" ]; then
+                            # Old format: one word per line; check symlink target
+                            [ -L "$binDir/$alias" ] && [ "$(readlink -f "$binDir/$alias" 2>/dev/null)" = "$(readlink -f "$script_path")" ] || continue
+                        else
+                            [ "$installed_script" = "$script" ] || continue
                         fi
+                        if command -v sudo &>/dev/null; then
+                            sudo rm -f "$binDir/$alias"
+                        else
+                            rm -f "$binDir/$alias"
+                        fi
+                        if [ -z "$installed_script" ]; then
+                            sed -i "/^$alias$/d" "$packageListFile"
+                        else
+                            sed -i "\|^$alias $script$|d" "$packageListFile"
+                        fi
+                        success "Removed hoisted instance: $alias"
                     done < "$packageListFile"
                     success "All hoisted instances of $script have been removed"
                     exit 0

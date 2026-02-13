@@ -124,9 +124,22 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         RAILWAY_TOKEN_VALUE="$TF_VAR_railway_token"
         TF_VARS+=(-var="railway_token=$TF_VAR_railway_token")
     else
-        echo -e "${RED}❌ Railway token required. Set RAILWAY_TOKEN or RAILWAY_ACCOUNT_TOKEN in .env (project root).${NC}"
-        echo -e "${CYAN}   Get an account token from https://railway.app/account/tokens${NC}"
-        exit 1
+        RAILWAY_TOKEN_URL="https://railway.app/account/tokens"
+        echo ""
+        echo -e "${YELLOW}🔐 Railway account token needed for this run.${NC}"
+        echo -e "${CYAN}   Set RAILWAY_TOKEN or RAILWAY_ACCOUNT_TOKEN in .env (project root) to skip this prompt next time.${NC}"
+        echo -e "${BLUE}🔗 Get an account token: ${RAILWAY_TOKEN_URL}${NC}"
+        echo -e "${YELLOW}   (input is hidden for security)${NC}"
+        while true; do
+            read -r -sp "Paste your Railway account token (or Ctrl+C to cancel): " RAILWAY_TOKEN_VALUE
+            echo ""
+            if [ -n "$RAILWAY_TOKEN_VALUE" ]; then
+                TF_VARS+=(-var="railway_token=$RAILWAY_TOKEN_VALUE")
+                echo -e "${GREEN}✅ Using provided token.${NC}"
+                break
+            fi
+            echo -e "${YELLOW}   No token entered. Try again or open: ${RAILWAY_TOKEN_URL}${NC}"
+        done
     fi
 
     # Project token for module (fallback); deploy step uses project token for railway up
