@@ -34,6 +34,23 @@ clear_env_var_in_file() {
     fi
 }
 
+# Set an env var in .env (create file or update existing line) for idempotent re-runs
+set_env_var_in_file() {
+    local key="$1"
+    local value="$2"
+    local line="${key}=${value}"
+    if [ ! -f "$ENV_FILE" ]; then
+        echo "$line" >> "$ENV_FILE"
+        return
+    fi
+    if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+        grep -v "^${key}=" "$ENV_FILE" > "${ENV_FILE}.tmp" && mv "${ENV_FILE}.tmp" "$ENV_FILE"
+        echo "$line" >> "$ENV_FILE"
+    else
+        echo "$line" >> "$ENV_FILE"
+    fi
+}
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -136,6 +153,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             if [ -n "$RAILWAY_TOKEN_VALUE" ]; then
                 TF_VARS+=(-var="railway_token=$RAILWAY_TOKEN_VALUE")
                 echo -e "${GREEN}✅ Using provided token.${NC}"
+                set_env_var_in_file "RAILWAY_ACCOUNT_TOKEN" "$RAILWAY_TOKEN_VALUE"
+                echo -e "${CYAN}   Saved RAILWAY_ACCOUNT_TOKEN to .env for idempotent re-runs.${NC}"
                 break
             fi
             echo -e "${YELLOW}   No token entered. Try again or open: ${RAILWAY_TOKEN_URL}${NC}"
