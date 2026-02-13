@@ -446,15 +446,24 @@ case "$1" in
                 printVersion
             fi
 
-            cmdEndIndex=$(isolateScript "$@")
+            # Strip --hoist=* and --submerge from anywhere in args so they work after script path (e.g. mtx project menu --hoist=myalias)
+            SCRIPT_ARGS=()
+            for a in "$@"; do
+                case "$a" in
+                    --hoist=*) hoist_target="${a#*=}"; debug "Hoist flag detected, will hoist script as $hoist_target" ;;
+                    --submerge) submerge=1; debug "Submerge flag detected, will remove all hoisted instances of current script" ;;
+                    *) SCRIPT_ARGS+=("$a") ;;
+                esac
+            done
+
+            cmdEndIndex=$(isolateScript "${SCRIPT_ARGS[@]}")
             debug "cmdEndIndex: $cmdEndIndex"
             if [ $((cmdEndIndex - 1)) -lt 0 ]; then
                 debug "Wasn't a script, lets see if its a dir."
-                cmdEndIndex=$(isolateDir "$@")
+                cmdEndIndex=$(isolateDir "${SCRIPT_ARGS[@]}")
                 if [ $((cmdEndIndex - 1)) -gt 0 ]; then
                     debug "It was a dir! Lets list the contents for the user."
-                    script=${@:1:cmdEndIndex-1}
-                    script="${script// /\/}"
+                    script=$(IFS=/; echo "${SCRIPT_ARGS[*]:0:cmdEndIndex-1}")
                     error "Script '$script' is a directory."
                     info "Available scripts and subdirectories in this directory are:"
                     info "Scripts are $(color green "green") and directories are $(color yellow "yellow")"
@@ -470,11 +479,10 @@ case "$1" in
                     success "We're done here."
                 fi
             else
-                script=${@:1:cmdEndIndex-1}
-                script="${script// /\/}.sh"
+                script=$(IFS=/; echo "${SCRIPT_ARGS[*]:0:cmdEndIndex-1}.sh")
                 # Prefer subfolder script when both name.sh and name/ exist and user passed a subcommand (e.g. mtx compile vite → compile/vite.sh)
-                if [ $cmdEndIndex -le $# ]; then
-                    nextArg="${!cmdEndIndex}"
+                if [ $cmdEndIndex -le ${#SCRIPT_ARGS[@]} ]; then
+                    nextArg="${SCRIPT_ARGS[cmdEndIndex-1]}"
                     baseScript="${script%.sh}"
                     if [ -f "$baseScript/$nextArg.sh" ]; then
                         script="$baseScript/$nextArg.sh"
@@ -488,8 +496,8 @@ case "$1" in
                 git -C "$scriptDir" reset --hard origin/main
                 chmod +x "$script"
                 args=""
-                if [ $cmdEndIndex -le $# ]; then
-                    for a in "${@:cmdEndIndex}"; do
+                if [ $cmdEndIndex -le ${#SCRIPT_ARGS[@]} ]; then
+                    for a in "${SCRIPT_ARGS[@]:cmdEndIndex-1}"; do
                         args="$args $a"
                     done
                 fi
