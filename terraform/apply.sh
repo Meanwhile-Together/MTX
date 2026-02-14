@@ -322,15 +322,29 @@ if ! terraform init -reconfigure -input=false; then
 fi
 
 # When using an existing project, import it so Terraform tracks it. Without import, apply would create a duplicate project.
-# Import must succeed or we abort — we never create a second project when we already have one in .env.
+# Use TF_VAR_* env vars for import (avoid passing token on command line — prevents quote/special-char breakage).
+# Import must succeed and project must appear in state, or we abort.
 if [ "$HAS_RAILWAY" = "true" ] && [ -n "${RAILWAY_PROJECT_ID_FOR_RUN:-}" ] && [ "$RAILWAY_PROJECT_ID_FOR_RUN" != "null" ]; then
     if ! terraform state list 2>/dev/null | grep -qF 'module.railway_owner[0].railway_project.owner[0]'; then
         echo -e "${CYAN}ℹ️  Importing existing Railway project into state (so Terraform will not create a duplicate)...${NC}"
-        if ! terraform import -input=false "${TF_VARS[@]}" 'module.railway_owner[0].railway_project.owner[0]' "$RAILWAY_PROJECT_ID_FOR_RUN"; then
+        export TF_VAR_environment="$ENVIRONMENT"
+        export TF_VAR_railway_token="$RAILWAY_TOKEN_VALUE"
+        export TF_VAR_railway_workspace_id="$RAILWAY_WORKSPACE_ID"
+        export TF_VAR_railway_owner_project_id="$RAILWAY_PROJECT_ID_FOR_RUN"
+        if [ "$ENVIRONMENT" = "staging" ] && [ -n "${RAILWAY_PROJECT_TOKEN_STAGING:-}" ]; then
+            export TF_VAR_railway_project_token="$RAILWAY_PROJECT_TOKEN_STAGING"
+        elif [ "$ENVIRONMENT" = "production" ] && [ -n "${RAILWAY_PROJECT_TOKEN_PRODUCTION:-}" ]; then
+            export TF_VAR_railway_project_token="$RAILWAY_PROJECT_TOKEN_PRODUCTION"
+        fi
+        if ! terraform import -input=false 'module.railway_owner[0].railway_project.owner[0]' "$RAILWAY_PROJECT_ID_FOR_RUN"; then
             echo ""
             echo -e "${RED}❌ Import failed. Terraform would create a new project with the same name if we continued.${NC}"
             echo -e "${YELLOW}   Fix the error above (e.g. token access, project ID) and re-run.${NC}"
             echo -e "${YELLOW}   Or remove RAILWAY_PROJECT_ID from ${ENV_FILE} only if you intend to create a new project.${NC}"
+            exit 1
+        fi
+        if ! terraform state list 2>/dev/null | grep -qF 'module.railway_owner[0].railway_project.owner[0]'; then
+            echo -e "${RED}❌ Import reported success but project is not in state. Aborting to avoid creating a duplicate project.${NC}"
             exit 1
         fi
         echo -e "${GREEN}✅ Project imported; apply will not create a duplicate.${NC}"
@@ -1140,7 +1154,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                             [ -n "${FORCE_BACKEND:-}" ] && APPLY_ARGS=("--force-backend" "$ENVIRONMENT")
                             echo -e "${BLUE}   Re-running apply to create new backend and deploy.${NC}"
                             echo ""
-                            "$0" terraform apply "${APPLY_ARGS[@]}"
+                            exec "$0" "${APPLY_ARGS[@]}"
                         fi
                     fi
                 fi
