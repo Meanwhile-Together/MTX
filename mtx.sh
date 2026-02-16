@@ -362,12 +362,12 @@ case "$1" in
                 exit 2
             fi
 
+            # git remote update = fetch from remote, update local refs (nothing is pushed)
             if git -C "$scriptDir" remote update &>/dev/null; then
                 if ! git -C "$scriptDir" diff --ignore-space-at-eol --quiet origin/main; then
-                    info "Remote repository has changes."
+                    info "New changes on remote; pulling..."
                     shaBefore=$(git -C "$scriptDir" rev-parse HEAD)
-                    info "Pre update SHA: $(color yellow "$shaBefore")"
-                    info "Updating local repository..."
+                    info "Pre-update SHA: $(color yellow "$shaBefore")"
                     if [ $verbose -ge 3 ]; then
                         git -C "$scriptDir" fetch --all
                     else
@@ -385,7 +385,7 @@ case "$1" in
                         chmod +x "$scriptDir/$wrapperName"
                         ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName"
                     fi
-                    success "Local repository has been updated from remote repository."
+                    success "Pulled latest from remote."
                     shaNow=$(git -C "$scriptDir" rev-parse HEAD)
                     info "Post update SHA: $(color yellow "$shaNow")"
                     if [ -n "$shaBefore" ] && [ "$shaBefore" != "$shaNow" ]; then
@@ -394,13 +394,13 @@ case "$1" in
                     fi
                     print_banner
                 else
-                    success "Local repository is up-to-date with remote repository."
+                    success "Already up to date."
                 fi
             else
                 if [ ! -d "$scriptDir/.git" ]; then
                     info "Cloning repository..."
                 else
-                    error "Failed to update. Recloning repository..."
+                    error "Could not fetch from remote. Recloning..."
                 fi
                 if ! git clone --depth 1 "$domain/$repo" "$scriptDir"; then
                     error "Failed to clone repository. Check permissions and network."
