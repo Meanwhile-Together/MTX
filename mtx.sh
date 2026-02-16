@@ -63,8 +63,13 @@ execDir="$(pwd)"
             head -30 "$f" 2>/dev/null | grep -qE '^(nobanner|no_banner)=1' || return 1
         }
 
-        # Preload includes (bolors etc.). Use scriptDir when installed, else dir when running from repo (before clone).
-        if [ -d "$scriptDir/includes" ]; then
+        # Preload includes (bolors etc.). When running installer from repo (dir != binDir), use local includes.
+        # Otherwise use installed copy so mtx help etc. use the installed bolors.
+        if [ "$dir" != "$binDir" ] && [ -d "$dir/includes" ]; then
+            for file in "$dir/includes"/*.sh; do
+                [ -f "$file" ] && source "$file"
+            done
+        elif [ -d "$scriptDir/includes" ]; then
             for file in "$scriptDir/includes"/*.sh; do
                 [ -f "$file" ] && source "$file"
             done
