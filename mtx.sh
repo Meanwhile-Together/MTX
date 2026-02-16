@@ -337,9 +337,10 @@ case "$1" in
                 exit 7
             fi
             if command -v sudo &>/dev/null; then
-                sudo mkdir -p "$binDir"
+                sudo mkdir -p "$binDir" || { error "Could not create $binDir. Run: sudo mkdir -p $binDir"; exit 8; }
+                [ -d "$binDir" ] || { error "Directory $binDir does not exist after mkdir"; exit 8; }
                 sudo rm -f "$binDir/$installedName"
-                sudo ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName" || { error "Failed to create symlink in $binDir (try running with sudo)"; exit 8; }
+                sudo ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName" || { error "Failed to create symlink. Try running the script with sudo."; exit 8; }
                 sudo chmod +x "$scriptDir/$wrapperName"
             else
                 mkdir -p "$binDir"
