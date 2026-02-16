@@ -387,7 +387,10 @@ case "$1" in
                 fi
             else
                 error "Error updating remote repository. Cloning new repository..."
-                git -C "$scriptDir" clone --depth 1 "$domain/$repo" "$scriptDir"
+                if ! git clone --depth 1 "$domain/$repo" "$scriptDir"; then
+                    error "Failed to clone repository. Check permissions and network."
+                    exit 3
+                fi
             fi
         }
 
