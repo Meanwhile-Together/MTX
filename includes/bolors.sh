@@ -73,18 +73,18 @@ bg_white_bright='\033[107m'
 # Other:
 disable_proportional_spacing="\e[50m"
 
-# Enhanced color functions
+# Enhanced color functions (printf for portability: BSD echo on macOS ignores -e)
 color() {
     local c="$1"
     shift
-    echo -ne "${!c}$*${reset}"
+    printf '%b%s%b' "${!c}" "$*" "${reset}"
 }
 c() { color "$@"; }
 
 echoc() {
     local c="$1"
     shift
-    echo -ne "${!c}$*${reset}\n"
+    printf '%b%s%b\n' "${!c}" "$*" "${reset}"
 }
 
 # Logging system
