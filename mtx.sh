@@ -348,11 +348,11 @@ case "$1" in
                 ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName" || { error "Failed to create symlink in $binDir"; exit 8; }
                 chmod +x "$scriptDir/$wrapperName"
             fi
-            success "$(color magenta "$wrapperName") as $(color yellow "$displayName") installed"
-            success "      As?                 '$installedName'"
-            success "      Where?              $binDir/$installedName"
-            success "      Repo link?          $domain/$repo"
-            success "Ready to roooollout!"
+            success "$displayName installed successfully"
+            success "  Command:  $(color yellow "$installedName")"
+            success "  Location: $binDir/$installedName"
+            success "  Source:   $domain/$repo"
+            success "  Next:     $(color green "$installedName help")"
         }
 
         updateCheck() {
