@@ -316,14 +316,16 @@ case "$1" in
         fi
 
         installWrapper() {
+            # Use id -gn for group: macOS primary group is "staff", not $USER
+            ug="$USER:$(id -gn 2>/dev/null || echo staff)"
             if command -v sudo &>/dev/null; then
                 sudo rm -rf "$scriptDir"
                 sudo mkdir -p "$scriptDir"
-                sudo chown $USER:$USER "$scriptDir"
+                sudo chown "$ug" "$scriptDir"
             else
                 rm -rf "$scriptDir"
                 mkdir -p "$scriptDir"
-                chown $USER:$USER "$scriptDir"
+                chown "$ug" "$scriptDir"
             fi
             updateCheck
             if command -v sudo &>/dev/null; then
