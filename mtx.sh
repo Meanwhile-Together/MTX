@@ -7,7 +7,8 @@ displayName="MTX"
 slugName=$(echo "$displayName" | awk '{print tolower($0)}')
 repo="Meanwhile-Together/MTX"
 installedName="$slugName"
-binDir="/usr/bin"
+# macOS SIP protects /usr/bin; use /usr/local/bin (not protected)
+[ "$(uname -s)" = "Darwin" ] && binDir="/usr/local/bin" || binDir="/usr/bin"
 scriptDir="/etc/$slugName"
 packageListFile="$scriptDir/.installed_packages"
 wrapperName="mtx.sh"
