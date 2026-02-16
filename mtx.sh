@@ -552,8 +552,10 @@ exec $installedName $script_words \"\$@\"
                         installed_script="${installed_script%% *}"
                         [ -n "$alias" ] || continue
                         if [ -z "$installed_script" ]; then
-                            # Old format: one word per line; check symlink target
-                            [ -L "$binDir/$alias" ] && [ "$(readlink -f "$binDir/$alias" 2>/dev/null)" = "$(readlink -f "$script_path")" ] || continue
+                            # Old format: one word per line; check symlink target (readlink -f is GNU-only; skip check on macOS/BSD)
+                            target=$(readlink -f "$binDir/$alias" 2>/dev/null)
+                            script_canon=$(readlink -f "$script_path" 2>/dev/null)
+                            [ -z "$target" ] || [ -z "$script_canon" ] || [ "$target" != "$script_canon" ] && continue
                         else
                             [ "$installed_script" = "$script" ] || continue
                         fi
@@ -563,9 +565,9 @@ exec $installedName $script_words \"\$@\"
                             rm -f "$binDir/$alias"
                         fi
                         if [ -z "$installed_script" ]; then
-                            sed -i "/^$alias$/d" "$packageListFile"
+                            grep -v -F -x "$alias" "$packageListFile" > "$packageListFile.tmp" && mv "$packageListFile.tmp" "$packageListFile"
                         else
-                            sed -i "\|^$alias $script$|d" "$packageListFile"
+                            grep -v -F -x "$alias $script" "$packageListFile" > "$packageListFile.tmp" && mv "$packageListFile.tmp" "$packageListFile"
                         fi
                         success "Removed hoisted instance: $alias"
                     done < "$packageListFile"
