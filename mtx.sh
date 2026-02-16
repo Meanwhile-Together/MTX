@@ -324,8 +324,10 @@ case "$1" in
         fi
 
         installWrapper() {
-            # Use id -gn for group: macOS primary group is "staff", not $USER
-            ug="$USER:$(id -gn 2>/dev/null || echo staff)"
+            # When running via sudo, $USER is root; use SUDO_USER so we chown to the actual user
+            run_user="${SUDO_USER:-$USER}"
+            run_group=$(id -gn "$run_user" 2>/dev/null || echo staff)
+            ug="$run_user:$run_group"
             if command -v sudo &>/dev/null; then
                 sudo rm -rf "$scriptDir"
                 sudo mkdir -p "$scriptDir"
