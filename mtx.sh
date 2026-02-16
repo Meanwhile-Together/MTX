@@ -413,16 +413,24 @@ case "$1" in
                 else
                     error "Could not fetch from remote. Recloning..."
                 fi
-                if ! git clone --depth 1 "$domain/$repo" "$scriptDir"; then
-                    error "Failed to clone repository. Check permissions and network."
-                    exit 3
-                fi
-                # Clone ran as root; chown to $USER so git doesn't complain about dubious ownership when user runs mtx
-                ug="${ug:-$USER:$(id -gn 2>/dev/null || echo staff)}"
-                if command -v sudo &>/dev/null; then
-                    sudo chown -R "$ug" "$scriptDir"
+                clone_as_user=""
+                [ "$(id -u 2>/dev/null)" = "0" ] && [ -n "${SUDO_USER:-}" ] && clone_as_user="$SUDO_USER"
+                if [ -n "$clone_as_user" ]; then
+                    if ! sudo -u "$clone_as_user" git clone --depth 1 "$domain/$repo" "$scriptDir"; then
+                        error "Failed to clone repository. Check permissions and network."
+                        exit 3
+                    fi
                 else
-                    chown -R "$ug" "$scriptDir"
+                    if ! git clone --depth 1 "$domain/$repo" "$scriptDir"; then
+                        error "Failed to clone repository. Check permissions and network."
+                        exit 3
+                    fi
+                    ug="${ug:-$USER:$(id -gn 2>/dev/null || echo staff)}"
+                    if command -v sudo &>/dev/null; then
+                        sudo chown -R "$ug" "$scriptDir"
+                    else
+                        chown -R "$ug" "$scriptDir"
+                    fi
                 fi
             fi
         }
