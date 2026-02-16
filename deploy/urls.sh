@@ -128,7 +128,7 @@ if [ -n "$BACKEND_SERVICE_ID" ] && [ "$BACKEND_SERVICE_ID" != "null" ]; then
   fi
 fi
 
-# Print URLs (link to app, get domain; link to backend, get domain)
+# Print URLs: get domain from railway domain (or status) for each service
 echo ""
 echo -e "${GREEN}Deploy URLs ($ENVIRONMENT):${NC}"
 print_service_url() {
@@ -136,14 +136,29 @@ print_service_url() {
   local sid="$2"
   [ -z "$sid" ] || [ "$sid" = "null" ] && return
   local out
-  out=$(cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$sid" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && railway domain --service "$sid" --environment "$ENVIRONMENT" --json 2>/dev/null) || \
+  # Ensure .railway link then get domain (railway domain generates or returns existing)
+  (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$sid" > .railway/service && echo "$ENVIRONMENT" > .railway/environment)
+  out=$(cd "$PROJECT_ROOT" && railway domain --service "$sid" --environment "$ENVIRONMENT" --json 2>/dev/null) || \
   out=$(cd "$PROJECT_ROOT" && railway domain --service "$sid" --environment "$ENVIRONMENT" 2>/dev/null) || true
+  local url=""
   if [ -n "$out" ]; then
-    local url
-    url=$(echo "$out" | jq -r '.domain // . // empty' 2>/dev/null)
-    [ -z "$url" ] && url="$out"
-    url=$(echo "$url" | tr -d '\n' | sed 's|^https\?://||')
-    [ -n "$url" ] && echo "  $name: https://$url"
+    url=$(echo "$out" | jq -r '.domain // .url // .host // . // empty' 2>/dev/null)
+    [ -z "$url" ] && url=$(echo "$out" | tr -d '\n\r' | sed -n 's/.*\([a-zA-Z0-9.-]*\.up\.railway\.app\).*/\1/p')
+    [ -z "$url" ] && url=$(echo "$out" | head -1 | tr -d '\n\r')
+  fi
+  if [ -z "$url" ]; then
+    out=$(cd "$PROJECT_ROOT" && railway status --json 2>/dev/null) || true
+    url=$(echo "$out" | jq -r '.deployment.domain // .domain // .publicUrl // empty' 2>/dev/null)
+  fi
+  if [ -z "$url" ] || [ "$url" = "null" ]; then
+    out=$(cd "$PROJECT_ROOT" && railway variable list --service "$sid" --environment "$ENVIRONMENT" --json 2>/dev/null) || true
+    url=$(echo "$out" | jq -r 'if type == "object" and has("RAILWAY_PUBLIC_DOMAIN") then .RAILWAY_PUBLIC_DOMAIN elif type == "array" then (.[] | select(.name == "RAILWAY_PUBLIC_DOMAIN") | .value) else empty end' 2>/dev/null)
+  fi
+  url=$(echo "$url" | tr -d '\n\r' | sed 's|^https\?://||' | sed 's|/.*||')
+  if [ -n "$url" ] && [ "$url" != "null" ]; then
+    echo "  $name: https://$url"
+  else
+    echo -e "  ${YELLOW}$name: (run 'railway domain' in project after linking to service to generate)${NC}"
   fi
 }
 print_service_url "App"     "$SERVICE_ID"
