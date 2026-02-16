@@ -101,8 +101,8 @@ execDir="$(pwd)"
             }
         fi
 
-        # Create package list file if it doesn't exist (scriptDir must exist)
-        if [ -d "$scriptDir" ] && [ ! -f "$packageListFile" ]; then
+        # Create package list file if it doesn't exist (scriptDir must exist and be writable)
+        if [ -d "$scriptDir" ] && [ -w "$scriptDir" ] && [ ! -f "$packageListFile" ]; then
             touch "$packageListFile"
         fi
 
@@ -331,15 +331,18 @@ case "$1" in
                 chown "$ug" "$scriptDir"
             fi
             updateCheck
+            touch "$packageListFile" 2>/dev/null || true
             if [ ! -f "$scriptDir/$wrapperName" ]; then
                 error "Install failed: $wrapperName not found in $scriptDir"
                 exit 7
             fi
             if command -v sudo &>/dev/null; then
+                sudo mkdir -p "$binDir"
                 sudo rm -f "$binDir/$installedName"
                 sudo ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName" || { error "Failed to create symlink in $binDir (try running with sudo)"; exit 8; }
                 sudo chmod +x "$scriptDir/$wrapperName"
             else
+                mkdir -p "$binDir"
                 rm -f "$binDir/$installedName"
                 ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName" || { error "Failed to create symlink in $binDir"; exit 8; }
                 chmod +x "$scriptDir/$wrapperName"
