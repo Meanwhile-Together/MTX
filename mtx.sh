@@ -32,9 +32,11 @@ fi
 # 1: Error due to "uninstall" and "reinstall" flags being set at the same time.
 # 2: Error due to the script directory not existing.
 # 3: Error updating remote repository, and couldn't clone a new repository.
-# 4: Script not found for installation
+# 4: Script not found for installation (hoist)
 # 5: Script already installed
 # 6: Script not in package list for uninstallation
+# 7: Wrapper script missing after clone/update
+# 8: Failed to create symlink in binDir
 
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 execDir="$(pwd)"
@@ -328,13 +330,17 @@ case "$1" in
                 chown "$ug" "$scriptDir"
             fi
             updateCheck
+            if [ ! -f "$scriptDir/$wrapperName" ]; then
+                error "Install failed: $wrapperName not found in $scriptDir"
+                exit 7
+            fi
             if command -v sudo &>/dev/null; then
                 sudo rm -f "$binDir/$installedName"
-                sudo ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName" >/dev/null
+                sudo ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName" || { error "Failed to create symlink in $binDir (try running with sudo)"; exit 8; }
                 sudo chmod +x "$scriptDir/$wrapperName"
             else
                 rm -f "$binDir/$installedName"
-                ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName" >/dev/null
+                ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName" || { error "Failed to create symlink in $binDir"; exit 8; }
                 chmod +x "$scriptDir/$wrapperName"
             fi
             success "$(color magenta "$wrapperName") as $(color yellow "$displayName") installed"
