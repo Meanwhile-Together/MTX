@@ -29,3 +29,7 @@ if [ -n "${FORCE_BACKEND:-}" ]; then
 else
   ./terraform/apply.sh "$ENV"
 fi
+# After successful deploy, ensure deploy URLs and print them (same as mtx deploy urls)
+if [ -f "./deploy/urls.sh" ]; then
+  ./deploy/urls.sh "$ENV"
+fi
