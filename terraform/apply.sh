@@ -74,6 +74,10 @@ CYAN='\033[0;36m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+# Subroutine: ensure Railway public domain for a service (used after deploy and by deploy/urls.sh)
+# shellcheck source=ensure-railway-domain.sh
+[ -f "$SCRIPT_DIR/ensure-railway-domain.sh" ] && source "$SCRIPT_DIR/ensure-railway-domain.sh"
+
 echo -e "${BLUE}🚀 Terraform Apply - Smart API Key Detection${NC}"
 echo "=========================================="
 echo ""
@@ -519,20 +523,22 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         # Explicitly link to this environment's app service so we deploy to the correct one (not another env's service)
         if [ ! -d ".railway" ]; then
             echo -e "${BLUE}🔗 Linking to app service $APP_SERVICE_NAME_FOR_ENV...${NC}"
-            railway link --service "$SERVICE_ID" --project "$PROJECT_ID" 2>/dev/null || {
+            railway link --service "$SERVICE_ID" --project "$PROJECT_ID" --environment "$ENVIRONMENT" 2>/dev/null || {
                 mkdir -p .railway
                 echo "$SERVICE_ID" > .railway/service
                 echo "$PROJECT_ID" > .railway/project
+                echo "$ENVIRONMENT" > .railway/environment
             }
         else
             LINKED_SERVICE=$(cat .railway/service 2>/dev/null || echo "")
             if [ "$LINKED_SERVICE" != "$SERVICE_ID" ]; then
                 echo -e "${BLUE}🔗 Re-linking to app service $APP_SERVICE_NAME_FOR_ENV (was linked to different service)...${NC}"
                 rm -rf .railway
-                railway link --service "$SERVICE_ID" --project "$PROJECT_ID" 2>/dev/null || {
+                railway link --service "$SERVICE_ID" --project "$PROJECT_ID" --environment "$ENVIRONMENT" 2>/dev/null || {
                     mkdir -p .railway
                     echo "$SERVICE_ID" > .railway/service
                     echo "$PROJECT_ID" > .railway/project
+                    echo "$ENVIRONMENT" > .railway/environment
                 }
             fi
         fi
@@ -1067,7 +1073,11 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         
         # Ensure app service has a Railway-provided public domain (*.railway.app). Terraform provider has no domain resource; use CLI.
         echo -e "${BLUE}🔗 Ensuring public domain for app service...${NC}"
-        (railway domain --json 2>/dev/null || railway domain 2>/dev/null) || true
+        if type ensure_railway_domain &>/dev/null; then
+            ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT" "app" || true
+        else
+            (railway domain --json 2>/dev/null || railway domain 2>/dev/null) || true
+        fi
         
         # Ensure backend exists for this env: deploy backend code from current repo to backend-<env> (when service exists)
         BACKEND_DEPLOY_ID="$BACKEND_SERVICE_ID"
@@ -1132,7 +1142,11 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     rm -f "$PROJECT_ROOT/.railway-backend-invalidated"
                     # Ensure backend service has a Railway-provided public domain (*.railway.app)
                     echo -e "${BLUE}🔗 Ensuring public domain for backend service...${NC}"
-                    (railway domain --json 2>/dev/null || railway domain 2>/dev/null) || true
+                    if type ensure_railway_domain &>/dev/null; then
+                        ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$BACKEND_DEPLOY_ID" "$ENVIRONMENT" "backend" || true
+                    else
+                        (railway domain --json 2>/dev/null || railway domain 2>/dev/null) || true
+                    fi
                 else
                     echo -e "${YELLOW}⚠️  Backend deployment failed${NC}"
                     if echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "404|Failed to upload code"; then
