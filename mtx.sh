@@ -383,6 +383,10 @@ case "$1" in
                     else
                         git -C "$scriptDir" reset --hard origin/main --quiet
                     fi
+                    if [ "$(id -u 2>/dev/null)" = "0" ]; then
+                        ug="${ug:-$USER:$(id -gn 2>/dev/null || echo staff)}"
+                        chown -R "$ug" "$scriptDir" 2>/dev/null || true
+                    fi
                     if command -v sudo &>/dev/null; then
                         sudo chmod +x "$scriptDir/$wrapperName"
                         sudo ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName"
@@ -410,6 +414,13 @@ case "$1" in
                 if ! git clone --depth 1 "$domain/$repo" "$scriptDir"; then
                     error "Failed to clone repository. Check permissions and network."
                     exit 3
+                fi
+                # Clone ran as root; chown to $USER so git doesn't complain about dubious ownership when user runs mtx
+                ug="${ug:-$USER:$(id -gn 2>/dev/null || echo staff)}"
+                if command -v sudo &>/dev/null; then
+                    sudo chown -R "$ug" "$scriptDir"
+                else
+                    chown -R "$ug" "$scriptDir"
                 fi
             fi
         }
