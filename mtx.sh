@@ -397,7 +397,11 @@ case "$1" in
                     success "Local repository is up-to-date with remote repository."
                 fi
             else
-                error "Error updating remote repository. Cloning new repository..."
+                if [ ! -d "$scriptDir/.git" ]; then
+                    info "Cloning repository..."
+                else
+                    error "Failed to update. Recloning repository..."
+                fi
                 if ! git clone --depth 1 "$domain/$repo" "$scriptDir"; then
                     error "Failed to clone repository. Check permissions and network."
                     exit 3
