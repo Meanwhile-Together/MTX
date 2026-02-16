@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Ensure Railway public domains for app and backend, then print deploy URLs.
+# Standalone: run via "mtx deploy urls" or "mtx deploy urls [staging|production]" anytime;
+# also invoked automatically at the end of "mtx deploy".
 desc="Ensure deploy URLs (Railway domains) and print app/backend URLs for an environment"
 nobanner=1
 set -e
@@ -105,52 +107,93 @@ if [ -f "$MTX_ROOT/terraform/ensure-railway-domain.sh" ]; then
   source "$MTX_ROOT/terraform/ensure-railway-domain.sh"
 fi
 
+# Parse domain from CLI/API output (JSON, plain hostname, or line containing *.up.railway.app)
+# Usage: parse_domain [stdin or $1]
+parse_domain() {
+  local out
+  if [ -n "${1:-}" ]; then
+    out="$1"
+  else
+    out=$(cat)
+  fi
+  local url=""
+  [ -z "$out" ] && return
+  url=$(echo "$out" | jq -r '.domain // .url // .host // . // empty' 2>/dev/null)
+  [ -z "$url" ] && url=$(echo "$out" | tr -d '\n\r' | sed -n 's/.*\([a-zA-Z0-9.-]*\.up\.railway\.app\).*/\1/p')
+  [ -z "$url" ] && url=$(echo "$out" | head -1 | tr -d '\n\r')
+  url=$(echo "$url" | tr -d '\n\r' | sed 's|^https\?://||' | sed 's|/.*||')
+  [ -n "$url" ] && [ "$url" != "null" ] && echo "$url"
+}
+
+# Get service domain via Railway GraphQL API (project token)
+get_domain_via_api() {
+  local project_id="$1"
+  local service_id="$2"
+  local token="$3"
+  local query
+  query=$(printf '{"query":"query { project(id: \"%s\") { services { edges { node { id serviceDomains { edges { node { domain } } } } } } } }"}' "$project_id")
+  local res
+  res=$(curl -s -S -X POST "https://backboard.railway.com/graphql/v2" \
+    -H "Authorization: Bearer $token" \
+    -H "Content-Type: application/json" \
+    -d "$query" 2>/dev/null)
+  local domain
+  domain=$(echo "$res" | jq -r --arg sid "$service_id" '
+    .data.project.services.edges[] | select(.node.id == $sid) | .node.serviceDomains.edges[0].node.domain // empty
+  ' 2>/dev/null)
+  # Alternate schema: domains on node directly
+  [ -z "$domain" ] && domain=$(echo "$res" | jq -r --arg sid "$service_id" '
+    .data.project.services.edges[] | select(.node.id == $sid) | .node.domains.edges[0].node.domain // empty
+  ' 2>/dev/null)
+  [ -n "$domain" ] && [ "$domain" != "null" ] && echo "$domain"
+}
+
 echo -e "${CYAN}🔗 Ensure deploy URLs ($ENVIRONMENT)${NC}"
 echo ""
 
-# Ensure app domain
+# Ensure app domain and capture output for display
+APP_DOMAIN=""
 if [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "null" ]; then
   echo -e "${BLUE}  App service...${NC}"
   if type ensure_railway_domain &>/dev/null; then
-    ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT" "app" || true
+    APP_DOMAIN=$(ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT" "app" 2>/dev/null | parse_domain) || true
   else
-    (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && railway domain --service "$SERVICE_ID" --environment "$ENVIRONMENT" 2>/dev/null) || true
+    APP_DOMAIN=$(cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && railway domain --service "$SERVICE_ID" --environment "$ENVIRONMENT" 2>/dev/null | parse_domain) || true
   fi
 fi
 
-# Ensure backend domain
+# Ensure backend domain and capture output for display
+BACKEND_DOMAIN=""
 if [ -n "$BACKEND_SERVICE_ID" ] && [ "$BACKEND_SERVICE_ID" != "null" ]; then
   echo -e "${BLUE}  Backend service...${NC}"
   if type ensure_railway_domain &>/dev/null; then
-    ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$BACKEND_SERVICE_ID" "$ENVIRONMENT" "backend" || true
+    BACKEND_DOMAIN=$(ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$BACKEND_SERVICE_ID" "$ENVIRONMENT" "backend" 2>/dev/null | parse_domain) || true
   else
-    (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$BACKEND_SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && railway domain --service "$BACKEND_SERVICE_ID" --environment "$ENVIRONMENT" 2>/dev/null) || true
+    BACKEND_DOMAIN=$(cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$BACKEND_SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && railway domain --service "$BACKEND_SERVICE_ID" --environment "$ENVIRONMENT" 2>/dev/null | parse_domain) || true
   fi
 fi
 
-# Print URLs: get domain from railway domain (or status) for each service
+# If ensure didn't return a domain, try Railway API (same token)
+[ -z "$APP_DOMAIN" ] && APP_DOMAIN=$(get_domain_via_api "$PROJECT_ID" "$SERVICE_ID" "$RAILWAY_TOKEN" 2>/dev/null) || true
+[ -z "$BACKEND_DOMAIN" ] && BACKEND_DOMAIN=$(get_domain_via_api "$PROJECT_ID" "$BACKEND_SERVICE_ID" "$RAILWAY_TOKEN" 2>/dev/null) || true
+
+# Print URLs (use captured/API domains; fallback to CLI once more per service)
 echo ""
 echo -e "${GREEN}Deploy URLs ($ENVIRONMENT):${NC}"
 print_service_url() {
   local name="$1"
   local sid="$2"
+  local preferred="$3"
   [ -z "$sid" ] || [ "$sid" = "null" ] && return
-  local out
-  # Ensure .railway link then get domain (railway domain generates or returns existing)
-  (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$sid" > .railway/service && echo "$ENVIRONMENT" > .railway/environment)
-  out=$(cd "$PROJECT_ROOT" && railway domain --service "$sid" --environment "$ENVIRONMENT" --json 2>/dev/null) || \
-  out=$(cd "$PROJECT_ROOT" && railway domain --service "$sid" --environment "$ENVIRONMENT" 2>/dev/null) || true
-  local url=""
-  if [ -n "$out" ]; then
-    url=$(echo "$out" | jq -r '.domain // .url // .host // . // empty' 2>/dev/null)
-    [ -z "$url" ] && url=$(echo "$out" | tr -d '\n\r' | sed -n 's/.*\([a-zA-Z0-9.-]*\.up\.railway\.app\).*/\1/p')
-    [ -z "$url" ] && url=$(echo "$out" | head -1 | tr -d '\n\r')
+  local url="$preferred"
+  if [ -z "$url" ]; then
+    local out
+    (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$sid" > .railway/service && echo "$ENVIRONMENT" > .railway/environment)
+    out=$(cd "$PROJECT_ROOT" && railway domain --service "$sid" --environment "$ENVIRONMENT" --json 2>/dev/null) || \
+    out=$(cd "$PROJECT_ROOT" && railway domain --service "$sid" --environment "$ENVIRONMENT" 2>/dev/null) || true
+    url=$(parse_domain "$out")
   fi
   if [ -z "$url" ]; then
-    out=$(cd "$PROJECT_ROOT" && railway status --json 2>/dev/null) || true
-    url=$(echo "$out" | jq -r '.deployment.domain // .domain // .publicUrl // empty' 2>/dev/null)
-  fi
-  if [ -z "$url" ] || [ "$url" = "null" ]; then
     out=$(cd "$PROJECT_ROOT" && railway variable list --service "$sid" --environment "$ENVIRONMENT" --json 2>/dev/null) || true
     url=$(echo "$out" | jq -r 'if type == "object" and has("RAILWAY_PUBLIC_DOMAIN") then .RAILWAY_PUBLIC_DOMAIN elif type == "array" then (.[] | select(.name == "RAILWAY_PUBLIC_DOMAIN") | .value) else empty end' 2>/dev/null)
   fi
@@ -161,6 +204,6 @@ print_service_url() {
     echo -e "  ${YELLOW}$name: (run 'railway domain' in project after linking to service to generate)${NC}"
   fi
 }
-print_service_url "App"     "$SERVICE_ID"
-print_service_url "Backend" "$BACKEND_SERVICE_ID"
+print_service_url "App"     "$SERVICE_ID" "$APP_DOMAIN"
+print_service_url "Backend" "$BACKEND_SERVICE_ID" "$BACKEND_DOMAIN"
 echo ""
