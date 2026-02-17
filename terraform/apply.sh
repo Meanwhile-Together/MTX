@@ -66,6 +66,16 @@ set_env_var_in_file() {
     fi
 }
 
+# Persist is-master / master auth env when set (for deploy asadmin; backend uses RUN_AS_MASTER, MASTER_JWT_SECRET)
+if [ -n "${RUN_AS_MASTER:-}" ]; then
+    set_env_var_in_file "RUN_AS_MASTER" "$RUN_AS_MASTER"
+fi
+if [ -n "${MASTER_JWT_SECRET:-}" ]; then
+    set_env_var_in_file "MASTER_JWT_SECRET" "$MASTER_JWT_SECRET"
+fi
+[ -n "${MASTER_AUTH_ISSUER:-}" ] && set_env_var_in_file "MASTER_AUTH_ISSUER" "$MASTER_AUTH_ISSUER"
+[ -n "${MASTER_CORS_ORIGINS:-}" ] && set_env_var_in_file "MASTER_CORS_ORIGINS" "$MASTER_CORS_ORIGINS"
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -1146,6 +1156,14 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                         ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$BACKEND_DEPLOY_ID" "$ENVIRONMENT" "backend" || true
                     else
                         (railway domain --json 2>/dev/null || railway domain 2>/dev/null) || true
+                    fi
+                    # When deploy asadmin: set is-master env on backend (RUN_AS_MASTER, MASTER_JWT_SECRET, etc.)
+                    if [ -n "${RUN_AS_MASTER:-}" ] || [ -n "${MASTER_JWT_SECRET:-}" ]; then
+                        echo -e "${BLUE}🔐 Setting master/admin env on backend service...${NC}"
+                        [ -n "${RUN_AS_MASTER:-}" ] && (railway variables set "RUN_AS_MASTER=$RUN_AS_MASTER" 2>/dev/null && echo -e "${GREEN}✅ RUN_AS_MASTER set on $BACKEND_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RUN_AS_MASTER via CLI${NC}"
+                        [ -n "${MASTER_JWT_SECRET:-}" ] && (railway variables set "MASTER_JWT_SECRET=$MASTER_JWT_SECRET" 2>/dev/null && echo -e "${GREEN}✅ MASTER_JWT_SECRET set on $BACKEND_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set MASTER_JWT_SECRET via CLI; set in Railway Dashboard if needed${NC}"
+                        [ -n "${MASTER_AUTH_ISSUER:-}" ] && railway variables set "MASTER_AUTH_ISSUER=$MASTER_AUTH_ISSUER" 2>/dev/null || true
+                        [ -n "${MASTER_CORS_ORIGINS:-}" ] && railway variables set "MASTER_CORS_ORIGINS=$MASTER_CORS_ORIGINS" 2>/dev/null || true
                     fi
                 else
                     echo -e "${YELLOW}⚠️  Backend deployment failed${NC}"
