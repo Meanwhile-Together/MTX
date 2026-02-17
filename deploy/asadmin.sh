@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Deploy as master admin: same as "mtx deploy" but sets RUN_AS_MASTER and ensures
-# MASTER_JWT_SECRET (and related env) are passed via env, persisted to .env and Terraform, and set on Railway backend.
+# MASTER_JWT_SECRET (and related env) are passed via env, persisted to .env and Railway backend.
 desc="Deploy as master admin (RUN_AS_MASTER); persists is-master env to .env and Railway backend"
 nobanner=1
 set -e
 
+# Always use MTX scripts (this script lives in MTX/deploy/)
+MTX_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
 # Switch that signals to the server this is the main master (mounts /auth; apply.sh persists to .env and sets on Railway)
 export RUN_AS_MASTER=true
 
-# Resolve project root to load .env for MASTER_JWT_SECRET
+# Resolve project root to load .env for MASTER_JWT_SECRET (., .., or sibling dirs with config/app.json)
 PROJECT_ROOT=""
 if [ -f "config/app.json" ]; then
   PROJECT_ROOT="$(pwd)"
@@ -17,7 +20,7 @@ if [ -z "$PROJECT_ROOT" ] && [ -f "../config/app.json" ]; then
   PROJECT_ROOT="$(cd .. && pwd)"
 fi
 if [ -z "$PROJECT_ROOT" ]; then
-  for d in . .. ../project-bridge; do
+  for d in . ..; do
     [ -f "${d}/config/app.json" ] && PROJECT_ROOT="$(cd "$d" && pwd)" && break
   done
 fi
@@ -70,11 +73,12 @@ if [ -z "$ENV" ]; then
 fi
 
 [ -n "${FORCE_BACKEND:-}" ] && export FORCE_BACKEND
+# Run MTX's apply.sh (never project's copy)
 if [ -n "${FORCE_BACKEND:-}" ]; then
-  ./terraform/apply.sh --force-backend "$ENV"
+  "$MTX_ROOT/terraform/apply.sh" --force-backend "$ENV"
 else
-  ./terraform/apply.sh "$ENV"
+  "$MTX_ROOT/terraform/apply.sh" "$ENV"
 fi
-if [ -f "./deploy/urls.sh" ]; then
-  ./deploy/urls.sh "$ENV"
+if [ -f "$MTX_ROOT/deploy/urls.sh" ]; then
+  "$MTX_ROOT/deploy/urls.sh" "$ENV"
 fi

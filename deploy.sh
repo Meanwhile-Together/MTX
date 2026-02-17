@@ -4,6 +4,9 @@ desc="Interactive deploy menu (choose staging or production), then terraform app
 nobanner=1
 set -e
 
+# Always use MTX scripts (this script lives in MTX root)
+MTX_ROOT="$(cd "$(dirname "$0")" && pwd)"
+
 # Only use $1 as env if it's a valid environment; otherwise show menu (avoids "deploy" or other junk as env)
 ENV=""
 case "${1:-}" in
@@ -23,13 +26,13 @@ if [ -z "$ENV" ]; then
 fi
 
 [ -n "${FORCE_BACKEND:-}" ] && export FORCE_BACKEND
-# Run project's terraform/apply.sh (cwd = project root when invoked via mtx)
+# Run MTX's terraform/apply.sh (never project's copy)
 if [ -n "${FORCE_BACKEND:-}" ]; then
-  ./terraform/apply.sh --force-backend "$ENV"
+  "$MTX_ROOT/terraform/apply.sh" --force-backend "$ENV"
 else
-  ./terraform/apply.sh "$ENV"
+  "$MTX_ROOT/terraform/apply.sh" "$ENV"
 fi
 # After successful deploy, ensure deploy URLs and print them (same as mtx deploy urls)
-if [ -f "./deploy/urls.sh" ]; then
-  ./deploy/urls.sh "$ENV"
+if [ -f "$MTX_ROOT/deploy/urls.sh" ]; then
+  "$MTX_ROOT/deploy/urls.sh" "$ENV"
 fi

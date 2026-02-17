@@ -3,6 +3,9 @@
 desc="Apply Terraform (Railway etc.); deploy app and backend"
 set -e
 
+# Directory where this script lives (MTX/terraform); use for sourcing subroutines, not project's terraform
+APPLY_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
 # Resolve project root (directory containing config/app.json) so .env is always loaded from the right place
 PROJECT_ROOT=""
 if [ -f "config/app.json" ]; then
@@ -84,9 +87,9 @@ CYAN='\033[0;36m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# Subroutine: ensure Railway public domain for a service (used after deploy and by deploy/urls.sh)
+# Subroutine: ensure Railway public domain (source from MTX/terraform, not project dir)
 # shellcheck source=ensure-railway-domain.sh
-[ -f "$SCRIPT_DIR/ensure-railway-domain.sh" ] && source "$SCRIPT_DIR/ensure-railway-domain.sh"
+[ -f "$APPLY_SCRIPT_DIR/ensure-railway-domain.sh" ] && source "$APPLY_SCRIPT_DIR/ensure-railway-domain.sh"
 
 echo -e "${BLUE}🚀 Terraform Apply - Smart API Key Detection${NC}"
 echo "=========================================="
