@@ -1083,10 +1083,12 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         
         # Ensure app service has a Railway-provided public domain (*.railway.app). Terraform provider has no domain resource; use CLI.
         echo -e "${BLUE}🔗 Ensuring public domain for app service...${NC}"
+        export RAILWAY_TOKEN="$PROJECT_TOKEN"
+        unset RAILWAY_API_TOKEN
         if type ensure_railway_domain &>/dev/null; then
             ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT" "app" || true
         else
-            (railway domain --json 2>/dev/null || railway domain 2>/dev/null) || true
+            (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && railway domain 2>/dev/null) || true
         fi
         
         # Ensure backend exists for this env: deploy backend code from current repo to backend-<env> (when service exists)
@@ -1152,10 +1154,12 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     rm -f "$PROJECT_ROOT/.railway-backend-invalidated"
                     # Ensure backend service has a Railway-provided public domain (*.railway.app)
                     echo -e "${BLUE}🔗 Ensuring public domain for backend service...${NC}"
+                    export RAILWAY_TOKEN="$BACKEND_DEPLOY_TOKEN"
+                    unset RAILWAY_API_TOKEN
                     if type ensure_railway_domain &>/dev/null; then
                         ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$BACKEND_DEPLOY_ID" "$ENVIRONMENT" "backend" || true
                     else
-                        (railway domain --json 2>/dev/null || railway domain 2>/dev/null) || true
+                        (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$BACKEND_DEPLOY_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && railway domain 2>/dev/null) || true
                     fi
                     # When deploy asadmin: set the master switch first (server reads RUN_AS_MASTER to run as main master), then secret
                     if [ -n "${RUN_AS_MASTER:-}" ] || [ -n "${MASTER_JWT_SECRET:-}" ]; then

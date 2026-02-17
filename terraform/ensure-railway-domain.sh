@@ -31,15 +31,23 @@ ensure_railway_domain() {
     echo "$project_id"   > .railway/project
     echo "$service_id"   > .railway/service
     echo "$environment" > .railway/environment
+    # Ensure CLI has a proper link (some versions need this before domain)
+    railway link --project "$project_id" --service "$service_id" --environment "$environment" 2>/dev/null || true
 
+    # Generate public domain: "railway domain" with no args uses .railway link and creates *.up.railway.app for this service
     local out
-    out=$(railway domain --service "$service_id" --environment "$environment" --json 2>/dev/null) || \
-    out=$(railway domain --service "$service_id" --environment "$environment" 2>/dev/null) || true
+    out=$(railway domain 2>/dev/null) || true
+    if [ -z "$out" ] || ! echo "$out" | grep -qE 'railway\.app|\.up\.'; then
+        out=$(railway domain --service "$service_id" --environment "$environment" --json 2>/dev/null) || \
+        out=$(railway domain --service "$service_id" --environment "$environment" 2>/dev/null) || true
+    fi
 
     cd "$saved_pwd" || true
 
     if [ -n "$out" ]; then
         echo "$out"
+    else
+        echo -e "${YELLOW}⚠️  No domain output for $label; run 'railway domain' in project root with service linked to generate.${NC}" >&2
     fi
     return 0
 }
