@@ -66,9 +66,9 @@ set_env_var_in_file() {
     fi
 }
 
-# Persist is-master / master auth env when set (for deploy asadmin; backend uses RUN_AS_MASTER, MASTER_JWT_SECRET)
+# Persist is-master switch and secret when set (for deploy asadmin; server reads RUN_AS_MASTER to run as main master)
 if [ -n "${RUN_AS_MASTER:-}" ]; then
-    set_env_var_in_file "RUN_AS_MASTER" "$RUN_AS_MASTER"
+    set_env_var_in_file "RUN_AS_MASTER" "true"
 fi
 if [ -n "${MASTER_JWT_SECRET:-}" ]; then
     set_env_var_in_file "MASTER_JWT_SECRET" "$MASTER_JWT_SECRET"
@@ -1157,10 +1157,14 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     else
                         (railway domain --json 2>/dev/null || railway domain 2>/dev/null) || true
                     fi
-                    # When deploy asadmin: set is-master env on backend (RUN_AS_MASTER, MASTER_JWT_SECRET, etc.)
+                    # When deploy asadmin: set the master switch first (server reads RUN_AS_MASTER to run as main master), then secret
                     if [ -n "${RUN_AS_MASTER:-}" ] || [ -n "${MASTER_JWT_SECRET:-}" ]; then
-                        echo -e "${BLUE}🔐 Setting master/admin env on backend service...${NC}"
-                        [ -n "${RUN_AS_MASTER:-}" ] && (railway variables set "RUN_AS_MASTER=$RUN_AS_MASTER" 2>/dev/null && echo -e "${GREEN}✅ RUN_AS_MASTER set on $BACKEND_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RUN_AS_MASTER via CLI${NC}"
+                        echo -e "${BLUE}🔐 Setting master switch and secret on backend service...${NC}"
+                        # Switch that signals to the server this is the main master (mounts /auth, etc.)
+                        if [ -n "${RUN_AS_MASTER:-}" ]; then
+                            RUN_AS_MASTER_VAL="true"
+                            (railway variables set "RUN_AS_MASTER=$RUN_AS_MASTER_VAL" 2>/dev/null && echo -e "${GREEN}✅ RUN_AS_MASTER=$RUN_AS_MASTER_VAL (master server) set on $BACKEND_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RUN_AS_MASTER via CLI${NC}"
+                        fi
                         [ -n "${MASTER_JWT_SECRET:-}" ] && (railway variables set "MASTER_JWT_SECRET=$MASTER_JWT_SECRET" 2>/dev/null && echo -e "${GREEN}✅ MASTER_JWT_SECRET set on $BACKEND_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set MASTER_JWT_SECRET via CLI; set in Railway Dashboard if needed${NC}"
                         [ -n "${MASTER_AUTH_ISSUER:-}" ] && railway variables set "MASTER_AUTH_ISSUER=$MASTER_AUTH_ISSUER" 2>/dev/null || true
                         [ -n "${MASTER_CORS_ORIGINS:-}" ] && railway variables set "MASTER_CORS_ORIGINS=$MASTER_CORS_ORIGINS" 2>/dev/null || true

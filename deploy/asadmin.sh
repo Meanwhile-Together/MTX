@@ -5,7 +5,7 @@ desc="Deploy as master admin (RUN_AS_MASTER); persists is-master env to .env and
 nobanner=1
 set -e
 
-# Ensure is-master setting is passed via env (apply.sh will persist to .env and set on Railway backend)
+# Switch that signals to the server this is the main master (mounts /auth; apply.sh persists to .env and sets on Railway)
 export RUN_AS_MASTER=true
 
 # Resolve project root to load .env for MASTER_JWT_SECRET
