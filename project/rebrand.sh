@@ -78,25 +78,35 @@ if [ -f "shared/package.json" ]; then
   EXISTING_SCOPE=$(jq -r '.name // ""' shared/package.json 2>/dev/null | sed -n 's/^@\([^/]*\)\/.*/\1/p' || echo "")
 fi
 
-# Prompts (with defaults from existing)
-read -rp "Project display name [${EXISTING_APP_NAME:-My Application}]: " PROJECT_NAME
-PROJECT_NAME="${PROJECT_NAME:-${EXISTING_APP_NAME:-My Application}}"
+# Non-interactive: when MTX_REBRAND_NONINTERACTIVE=1 and PROJECT_NAME + OWNER are set, skip prompts (used by mtx create)
+if [ -n "${MTX_REBRAND_NONINTERACTIVE:-}" ] && [ -n "${PROJECT_NAME:-}" ] && [ -n "${OWNER:-}" ]; then
+  PACKAGE_ID="${PACKAGE_ID:-${EXISTING_PACKAGE_ID:-com.example.app}}"
+  APP_SLUG=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*\|-*$//g')
+  [ -z "$APP_SLUG" ] && APP_SLUG="app"
+  SCOPE_NEW="${SCOPE_NEW:-${EXISTING_SCOPE:-$APP_SLUG}}"
+  ROOT_NAME_NEW="${ROOT_NAME_NEW:-${EXISTING_ROOT_NAME:-$APP_SLUG}}"
+  REBRAND_SKIP_CAPACITOR=1
+else
+  # Prompts (with defaults from existing)
+  read -rp "Project display name [${EXISTING_APP_NAME:-My Application}]: " PROJECT_NAME
+  PROJECT_NAME="${PROJECT_NAME:-${EXISTING_APP_NAME:-My Application}}"
 
-read -rp "Owner (e.g. GitHub org/user) [${EXISTING_OWNER:-}]: " OWNER
-OWNER="${OWNER:-$EXISTING_OWNER}"
+  read -rp "Owner (e.g. GitHub org/user) [${EXISTING_OWNER:-}]: " OWNER
+  OWNER="${OWNER:-$EXISTING_OWNER}"
 
-read -rp "Package ID (reverse-DNS, e.g. com.example.app) [${EXISTING_PACKAGE_ID:-com.example.app}]: " PACKAGE_ID
-PACKAGE_ID="${PACKAGE_ID:-${EXISTING_PACKAGE_ID:-com.example.app}}"
+  read -rp "Package ID (reverse-DNS, e.g. com.example.app) [${EXISTING_PACKAGE_ID:-com.example.app}]: " PACKAGE_ID
+  PACKAGE_ID="${PACKAGE_ID:-${EXISTING_PACKAGE_ID:-com.example.app}}"
 
-read -rp "NPM scope (without @) [${EXISTING_SCOPE:-app}]: " SCOPE_NEW
-SCOPE_NEW="${SCOPE_NEW:-${EXISTING_SCOPE:-app}}"
+  read -rp "NPM scope (without @) [${EXISTING_SCOPE:-app}]: " SCOPE_NEW
+  SCOPE_NEW="${SCOPE_NEW:-${EXISTING_SCOPE:-app}}"
 
-read -rp "Root package name [${EXISTING_ROOT_NAME:-app}]: " ROOT_NAME_NEW
-ROOT_NAME_NEW="${ROOT_NAME_NEW:-$EXISTING_ROOT_NAME}"
+  read -rp "Root package name [${EXISTING_ROOT_NAME:-app}]: " ROOT_NAME_NEW
+  ROOT_NAME_NEW="${ROOT_NAME_NEW:-$EXISTING_ROOT_NAME}"
 
-# Slug from project name
-APP_SLUG=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*\|-*$//g')
-[ -z "$APP_SLUG" ] && APP_SLUG="app"
+  # Slug from project name
+  APP_SLUG=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*\|-*$//g')
+  [ -z "$APP_SLUG" ] && APP_SLUG="app"
+fi
 
 echo ""
 echo -e "${CYAN}Applying names...${NC}"
@@ -220,7 +230,7 @@ fs.writeFileSync(f,out);
   npm install
 fi
 
-# Capacitor: add platforms (Node >= 20) and optional cap sync (same flow as project-b setup.sh)
+# Capacitor: add platforms (Node >= 20) and optional cap sync (same flow as project-b setup.sh); skip when MTX_REBRAND_NONINTERACTIVE
 add_platform_if_needed() {
   local platform="$1"
   local dir="targets/mobile/$platform"
@@ -232,7 +242,7 @@ add_platform_if_needed() {
   (cd targets/mobile && npx cap add "$platform")
 }
 NODE_MAJOR=$(node -v 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p' || echo "0")
-if [[ -f "targets/mobile/capacitor.config.ts" ]] && [[ "${NODE_MAJOR:-0}" -ge 20 ]]; then
+if [[ -z "${REBRAND_SKIP_CAPACITOR:-}" ]] && [[ -f "targets/mobile/capacitor.config.ts" ]] && [[ "${NODE_MAJOR:-0}" -ge 20 ]]; then
   read -rp "Capacitor platforms to add (android, ios, or both) [android]: " CAP_PLATFORMS_RAW
   CAP_PLATFORMS_RAW="${CAP_PLATFORMS_RAW:-android}"
   for p in $(echo "$CAP_PLATFORMS_RAW" | tr ',' ' '); do
@@ -256,7 +266,7 @@ if [[ -f "targets/mobile/capacitor.config.ts" ]] && [[ "${NODE_MAJOR:-0}" -ge 20
       (cd targets/mobile && npx cap sync) || true
     fi
   fi
-elif [[ -f "targets/mobile/capacitor.config.ts" ]] && [[ "${NODE_MAJOR:-0}" -lt 20 ]]; then
+elif [[ -z "${REBRAND_SKIP_CAPACITOR:-}" ]] && [[ -f "targets/mobile/capacitor.config.ts" ]] && [[ "${NODE_MAJOR:-0}" -lt 20 ]]; then
   echo -e "${CYAN}⚠️  Node $(node -v) < 20. Skipping Capacitor platform add/sync.${NC}"
 fi
 
