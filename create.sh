@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# MTX create: new app from project-bridge — pick/enter owner, clone from GitHub, rebrand, create repo, push
+# MTX create: new app from project-bridge — pick/enter owner, clone from GitHub, rebrand, create repo, push.
+# Idempotent: if project folder exists with config, only updates config/rebrand/git as needed; never re-clones.
 desc="Create new app: clone project-bridge from GitHub, rebrand, create repo in Meanwhile-Together and push"
 nobanner=1
 set -e
@@ -23,6 +24,79 @@ get_owner() {
 # Slugify: lower case, non-alphanumeric → hyphen, trim hyphens
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*\|-*$//g'
+}
+
+# Ensure gh is authenticated; run gh auth login and wait until gh auth status succeeds.
+ensure_gh_auth() {
+  if ! command -v gh &>/dev/null; then
+    return 1
+  fi
+  while true; do
+    if gh auth status &>/dev/null; then
+      return 0
+    fi
+    echo ""
+    echoc yellow "gh is not logged in. Complete authentication (browser or token)."
+    if ! gh auth login; then
+      warn "gh auth login failed or was cancelled."
+      return 1
+    fi
+  done
+}
+
+# Update config/app.json app.name, app.owner, app.slug (preserve rest of JSON). Idempotent.
+update_app_config() {
+  local dir="$1"
+  local app_json="${dir}/config/app.json"
+  mkdir -p "${dir}/config"
+  if [ ! -f "$app_json" ]; then
+    if command -v jq &>/dev/null; then
+      jq -n \
+        --arg name "$NEW_APP_NAME" \
+        --arg owner "$CHOSEN_OWNER" \
+        --arg slug "$APP_SLUG" \
+        '{ app: { name: $name, owner: $owner, slug: $slug, version: "1.0.0" } }' > "$app_json"
+    else
+      cat > "$app_json" <<EOF
+{
+  "app": {
+    "name": "$NEW_APP_NAME",
+    "owner": "$CHOSEN_OWNER",
+    "slug": "$APP_SLUG",
+    "version": "1.0.0"
+  }
+}
+EOF
+    fi
+    return
+  fi
+  if command -v jq &>/dev/null; then
+    jq ".app.name = \"$NEW_APP_NAME\" | .app.owner = \"$CHOSEN_OWNER\" | .app.slug = \"$APP_SLUG\"" "$app_json" > "$app_json.tmp" && mv "$app_json.tmp" "$app_json"
+  else
+    NODE_APP_JSON="$app_json" NNAME="$NEW_APP_NAME" NOWNER="$CHOSEN_OWNER" NSLUG="$APP_SLUG" node -e "
+const fs=require('fs');
+const p=process.env.NODE_APP_JSON;
+const j=JSON.parse(fs.readFileSync(p,'utf8'));
+if(!j.app) j.app={};
+j.app.name=process.env.NNAME;
+j.app.owner=process.env.NOWNER;
+j.app.slug=process.env.NSLUG;
+fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');
+" 2>/dev/null || true
+  fi
+}
+
+# Run rebrand in dir (non-interactive). Idempotent.
+run_rebrand() {
+  local dir="$1"
+  (
+    cd "$dir"
+    export MTX_IS_PROJECTB=1
+    export MTX_REBRAND_NONINTERACTIVE=1
+    export PROJECT_NAME="$NEW_APP_NAME"
+    export OWNER="$CHOSEN_OWNER"
+    mtx project rebrand
+  ) || { warn "Rebrand failed."; return 1; }
 }
 
 # --- 1) App name ---
@@ -104,67 +178,80 @@ echo ""
 echoc cyan "App: $(color yellow "$NEW_APP_NAME") (slug: $APP_SLUG) — Owner: $CHOSEN_OWNER"
 echo ""
 
-# --- 3) Target path and clone from GitHub ---
 FORK_PATH="$WORKSPACE_ROOT/$APP_SLUG"
+EXISTING_PROJECT=0
 if [ -d "$FORK_PATH" ]; then
-  warn "Directory already exists: $FORK_PATH. Remove it or choose a different app name."
-  exit 1
-fi
-
-echoc cyan "Cloning $TEMPLATE_REPO from GitHub into $APP_SLUG..."
-if ! git clone --depth 1 "$TEMPLATE_URL" "$FORK_PATH"; then
-  warn "Clone failed. Check network and that $TEMPLATE_URL exists and is accessible."
-  exit 1
-fi
-rm -rf "$FORK_PATH/.git"
-echo ""
-
-# --- 5) Update config/app.json and run rebrand ---
-echoc cyan "Updating app identity and running rebrand..."
-mkdir -p "$FORK_PATH/config"
-# Update app name/owner/slug in copied config (preserve rest of app.json)
-if [ -f "$FORK_PATH/config/app.json" ]; then
-  if command -v jq &>/dev/null; then
-    jq ".app.name = \"$NEW_APP_NAME\" | .app.owner = \"$CHOSEN_OWNER\" | .app.slug = \"$APP_SLUG\"" "$FORK_PATH/config/app.json" > "$FORK_PATH/config/app.json.tmp" && mv "$FORK_PATH/config/app.json.tmp" "$FORK_PATH/config/app.json"
+  if [ -f "$FORK_PATH/config/app.json" ]; then
+    EXISTING_PROJECT=1
+    echoc cyan "Using existing project at $FORK_PATH (idempotent update)."
   else
-    NODE_APP_JSON="$FORK_PATH/config/app.json" NNAME="$NEW_APP_NAME" NOWNER="$CHOSEN_OWNER" NSLUG="$APP_SLUG" node -e "
-const fs=require('fs');
-const p=process.env.NODE_APP_JSON;
-const j=JSON.parse(fs.readFileSync(p,'utf8'));
-if(!j.app) j.app={};
-j.app.name=process.env.NNAME;
-j.app.owner=process.env.NOWNER;
-j.app.slug=process.env.NSLUG;
-fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');
-" 2>/dev/null || true
+    warn "Directory $FORK_PATH exists but has no config/app.json. Remove it or choose a different app name."
+    exit 1
   fi
 fi
 
-(
-  cd "$FORK_PATH"
-  export MTX_IS_PROJECTB=1
-  export MTX_REBRAND_NONINTERACTIVE=1
-  export PROJECT_NAME="$NEW_APP_NAME"
-  export OWNER="$CHOSEN_OWNER"
-  mtx project rebrand
-) || { warn "Rebrand failed."; exit 1; }
+if [ "$EXISTING_PROJECT" -eq 0 ]; then
+  # --- Clone from GitHub (only when folder does not exist) ---
+  echoc cyan "Cloning $TEMPLATE_REPO from GitHub into $APP_SLUG..."
+  if ! git clone --depth 1 "$TEMPLATE_URL" "$FORK_PATH"; then
+    warn "Clone failed. Check network and that $TEMPLATE_URL exists and is accessible."
+    exit 1
+  fi
+  rm -rf "$FORK_PATH/.git"
+  echo ""
+fi
+
+# --- Update config/app.json (idempotent: always set name/owner/slug) ---
+echoc cyan "Ensuring app identity in config..."
+update_app_config "$FORK_PATH"
 echo ""
 
-# --- 6) Create GitHub repo and push ---
-echoc cyan "Creating repository $GITHUB_ORG/$APP_SLUG and pushing..."
+# --- Rebrand (idempotent: safe to run every time) ---
+echoc cyan "Running rebrand..."
+run_rebrand "$FORK_PATH" || exit 1
+echo ""
+
+# --- Git: ensure repo, remote, commit, push (idempotent) ---
 if ! command -v gh &>/dev/null; then
-  warn "gh CLI not found. Create the repo manually: $GITHUB_ORG/$APP_SLUG then run from $FORK_PATH: git init && git add . && git commit -m '...' && git remote add origin git@github.com:$GITHUB_ORG/$APP_SLUG.git && git push -u origin main"
+  warn "gh CLI not found. From $FORK_PATH run: git init && git add . && git commit -m '...' && git remote add origin git@github.com:$GITHUB_ORG/$APP_SLUG.git && git push -u origin main"
   exit 1
 fi
 
+ensure_gh_auth || { warn "gh authentication required for create/push."; exit 1; }
+
 (
   cd "$FORK_PATH"
-  git init -q
-  git add .
-  git commit -q -m "Initial: fork from project-bridge, rebrand to $NEW_APP_NAME"
+  NEED_INIT=0
+  if [ ! -d .git ]; then
+    git init -q
+    git branch -M main
+    NEED_INIT=1
+  fi
+
+  # Ensure remote origin points to target repo (SSH so push works with SSH keys)
+  WANT_REMOTE="git@github.com:${GITHUB_ORG}/${APP_SLUG}.git"
+  CURRENT_REMOTE=$(git remote get-url origin 2>/dev/null || true)
+  if [ -z "$CURRENT_REMOTE" ] || [ "$CURRENT_REMOTE" != "$WANT_REMOTE" ] && [ "$CURRENT_REMOTE" != "https://github.com/${GITHUB_ORG}/${APP_SLUG}.git" ]; then
+    git remote remove origin 2>/dev/null || true
+    git remote add origin "$WANT_REMOTE"
+  fi
+
+  # Commit if there are changes
+  if [ -n "$(git status --porcelain)" ]; then
+    git add .
+    git commit -q -m "mtx create: rebrand to $NEW_APP_NAME (idempotent sync)"
+  fi
+
   git branch -M main
-  gh repo create "$GITHUB_ORG/$APP_SLUG" --private --source=. --remote=origin --push
-) || { warn "Git / gh repo create failed."; exit 1; }
+
+  # Create repo on GitHub if it doesn't exist, then push
+  if ! gh repo view "$GITHUB_ORG/$APP_SLUG" &>/dev/null; then
+    echoc cyan "Creating repository $GITHUB_ORG/$APP_SLUG..."
+    gh repo create "$GITHUB_ORG/$APP_SLUG" --private --source=. --remote=origin --push
+  else
+    git push -u origin main 2>/dev/null || git push origin main
+  fi
+) || { warn "Git / gh push failed."; exit 1; }
 
 echo ""
 echoc green "Done. New app repo: https://github.com/$GITHUB_ORG/$APP_SLUG"
