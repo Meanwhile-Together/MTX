@@ -197,7 +197,8 @@ if [ "$EXISTING_PROJECT" -eq 0 ]; then
     warn "Clone failed. Check network and that $TEMPLATE_URL exists and is accessible."
     exit 1
   fi
-  rm -rf "$FORK_PATH/.git"
+  # Keep .git so the new repo can be a real fork (same history as project-bridge)
+  (cd "$FORK_PATH" && git remote rename origin upstream 2>/dev/null || true)
   echo ""
 fi
 
@@ -221,18 +222,31 @@ ensure_gh_auth || { warn "gh authentication required for create/push."; exit 1; 
 
 (
   cd "$FORK_PATH"
-  NEED_INIT=0
+  WANT_REMOTE="git@github.com:${GITHUB_ORG}/${APP_SLUG}.git"
+  WANT_REMOTE_HTTPS="https://github.com/${GITHUB_ORG}/${APP_SLUG}.git"
+
   if [ ! -d .git ]; then
     git init -q
     git branch -M main
-    NEED_INIT=1
   fi
 
-  # Ensure remote origin points to target repo (SSH so push works with SSH keys)
-  WANT_REMOTE="git@github.com:${GITHUB_ORG}/${APP_SLUG}.git"
+  # Create the GitHub repo as a fork of project-bridge if it doesn't exist
+  if ! gh repo view "$GITHUB_ORG/$APP_SLUG" &>/dev/null; then
+    echoc cyan "Creating fork $GITHUB_ORG/$APP_SLUG (fork of $GITHUB_ORG/$TEMPLATE_REPO)..."
+    if ! gh repo fork "$GITHUB_ORG/$TEMPLATE_REPO" --org "$GITHUB_ORG" --fork-name "$APP_SLUG" --clone=false 2>/dev/null; then
+      # Same-org fork may be disabled; create repo and push (no fork link)
+      echoc dim "Fork in same org not available; creating repository $GITHUB_ORG/$APP_SLUG..."
+      gh repo create "$GITHUB_ORG/$APP_SLUG" --private --description "App: $NEW_APP_NAME (from project-bridge)"
+    fi
+  fi
+
+  # Ensure remote origin points to the fork (set-url if origin exists, else add — avoids "already exists" error)
   CURRENT_REMOTE=$(git remote get-url origin 2>/dev/null || true)
-  if [ -z "$CURRENT_REMOTE" ] || [ "$CURRENT_REMOTE" != "$WANT_REMOTE" ] && [ "$CURRENT_REMOTE" != "https://github.com/${GITHUB_ORG}/${APP_SLUG}.git" ]; then
-    git remote remove origin 2>/dev/null || true
+  if [ "$CURRENT_REMOTE" = "$WANT_REMOTE" ] || [ "$CURRENT_REMOTE" = "$WANT_REMOTE_HTTPS" ]; then
+    : # already correct
+  elif [ -n "$CURRENT_REMOTE" ]; then
+    git remote set-url origin "$WANT_REMOTE"
+  else
     git remote add origin "$WANT_REMOTE"
   fi
 
@@ -244,13 +258,8 @@ ensure_gh_auth || { warn "gh authentication required for create/push."; exit 1; 
 
   git branch -M main
 
-  # Create repo on GitHub if it doesn't exist, then push
-  if ! gh repo view "$GITHUB_ORG/$APP_SLUG" &>/dev/null; then
-    echoc cyan "Creating repository $GITHUB_ORG/$APP_SLUG..."
-    gh repo create "$GITHUB_ORG/$APP_SLUG" --private --source=. --remote=origin --push
-  else
-    git push -u origin main 2>/dev/null || git push origin main
-  fi
+  # Push (fork already exists at this point)
+  git push -u origin main 2>/dev/null || git push origin main
 ) || { warn "Git / gh push failed."; exit 1; }
 
 echo ""
