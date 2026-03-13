@@ -350,12 +350,17 @@ guided_setup() {
         if [ "$deploy_confirm" = "y" ] || [ "$deploy_confirm" = "Y" ]; then
             go_to_project_root
             
-            # Get project and service IDs from Terraform
+            # Get project and service IDs from Terraform (same output names as project-bridge terraform/apply.sh)
             cd terraform
             PROJECT_ID=$(terraform output -raw railway_project_id 2>/dev/null || echo "")
-            SERVICE_ID=$(terraform output -raw railway_service_id 2>/dev/null || echo "")
-            BACKEND_SERVICE_ID=$(terraform output -raw railway_backend_service_id 2>/dev/null || echo "")
             ENVIRONMENT="${ENVIRONMENT:-staging}"
+            if [ "$ENVIRONMENT" = "production" ]; then
+                SERVICE_ID=$(terraform output -raw railway_app_service_id_production 2>/dev/null || echo "")
+                BACKEND_SERVICE_ID=$(terraform output -raw railway_backend_production_service_id 2>/dev/null || echo "")
+            else
+                SERVICE_ID=$(terraform output -raw railway_app_service_id_staging 2>/dev/null || echo "")
+                BACKEND_SERVICE_ID=$(terraform output -raw railway_backend_staging_service_id 2>/dev/null || echo "")
+            fi
             
             if [ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "null" ] && [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "null" ]; then
                 go_to_project_root
@@ -673,7 +678,7 @@ while true; do
                 export PATH="$HOME/.railway/bin:$PATH"
             fi
             
-            # Get project and service IDs from Terraform
+            # Get project and service IDs from Terraform (same output names as project-bridge terraform/apply.sh)
             cd terraform
             if [ ! -f "terraform.tfstate" ] || [ ! -s "terraform.tfstate" ]; then
                 echo -e "${RED}❌ Terraform state not found${NC}"
@@ -683,8 +688,12 @@ while true; do
             fi
             
             PROJECT_ID=$(terraform output -raw railway_project_id 2>/dev/null || echo "")
-            SERVICE_ID=$(terraform output -raw railway_service_id 2>/dev/null || echo "")
             ENVIRONMENT="${ENVIRONMENT:-staging}"
+            if [ "$ENVIRONMENT" = "production" ]; then
+                SERVICE_ID=$(terraform output -raw railway_app_service_id_production 2>/dev/null || echo "")
+            else
+                SERVICE_ID=$(terraform output -raw railway_app_service_id_staging 2>/dev/null || echo "")
+            fi
             
             if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ]; then
                 echo -e "${RED}❌ Could not get Railway project ID from Terraform${NC}"
