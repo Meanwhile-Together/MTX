@@ -11,9 +11,10 @@ This guide is for adding new scripts to MTX so they appear in `mtx help` and run
 - **Script file:** Put your script in that category as `<name>.sh`. So `dev/run-electron.sh` is run with `mtx dev run-electron`.
 - **Subcommands only:** If a category has no `category.sh` and only `category/*.sh`, those appear as subcommands (e.g. `mtx compile android-debug`). If there is both `deploy.sh` and `deploy/*.sh`, the wrapper merges them so the directory’s scripts show as subcommands of `deploy`.
 
-- **Top-level with paired subfolder:** If you have both `compile.sh` and `compile/`, the **top-level script must not take arguments**. When the user runs `mtx compile` (no subcommand), only `compile.sh` runs—it may show usage or perform the default action (e.g. build all). Other targets live in `compile/*.sh` (e.g. `mtx compile vite`, `mtx compile android`). Do not dispatch on `$1` in the top-level script.
+- **Top-level with paired subfolder (default pattern):** If you have both `compile.sh` and `compile/`, the common pattern is that `compile.sh` does usage/default behavior and `compile/*.sh` holds subcommands.
+- **Single-file dispatcher (allowed):** For very small command surfaces, a top-level command may dispatch on `$1` directly (for example `run.sh` handling `mtx run dev|desktop|android|web|server`). Use this only when it reduces complexity.
 
-So: pick or create a category dir (e.g. `dev/`), add `<something>.sh`, and the command is `mtx dev something`.
+So: either pick/create a category dir (e.g. `dev/`) and add `<something>.sh` (`mtx dev something`), or use a single dispatcher script when a command is intentionally centralized (`mtx run <target>`).
 
 ---
 

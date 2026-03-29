@@ -48,7 +48,7 @@ Summary of changes from the MTX repository git history. Use this for context whe
 **Error handling and workspace**
 
 - mtx.sh: checks for missing dependencies; improved logging for debugging; docs updated for error handling.
-- workspace.sh: removed "dogfood" then "archive" from repo list; workspace clones MTX, project-bridge, test, client-a, cicd (five repos) and creates Meanwhile-Together.code-workspace.
+- workspace.sh: removed "dogfood" then "archive" from repo list. Current workspace clones MTX, project-bridge, and client-a, then creates Meanwhile-Together.code-workspace.
 
 ---
 

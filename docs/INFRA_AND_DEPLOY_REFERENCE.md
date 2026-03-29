@@ -163,7 +163,7 @@ mtx deploy production
 
 ## 10. Related Docs
 
-- **MTX:** `docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md` (holistic flow: mtx create, admin vs payload deploy, instant provisioning), `terraform/FLOW.md` (state and logic flows), `docs/getting-started.md`, `docs/script-patterns.md`, `docs/mtx-patterns.md`.
+- **MTX:** [adr/ADR-001-airlock-single-app-then-multi-host.md](adr/ADR-001-airlock-single-app-then-multi-host.md) (locked architecture: airlock single-app, then multi-app host), [MTX_DEPLOY_CONTRACT.md](MTX_DEPLOY_CONTRACT.md), [SERVICE_LANE_SEPARATION.md](SERVICE_LANE_SEPARATION.md), `docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md` (holistic flow: mtx create, admin vs payload deploy, instant provisioning), `terraform/FLOW.md` (state and logic flows), `docs/getting-started.md`, `docs/script-patterns.md`, `docs/mtx-patterns.md`.
 - **project-bridge:** `docs/logic/deployment-flow.md` (deploy flow summary), `docs/MTX_AND_PROJECT_B.md` (MTX ↔ project-bridge relationship, script patterns), `docs/OUTSTANDING_WORK.md` (task list: GitHub/CI alignment, apply.sh source, docs, packages).
 
 This document is the single place to see how MTX and project-bridge together implement infra and deploy; use the related docs above for deeper detail on tokens, builds, or script patterns.

@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# MTX run android: build Android debug APK (optional: ADB install)
-desc="Build Android debug APK"
-set -e
-echo "🔨 Android debug..." >&2
-mtx_run npm run build:android:debug
-echo "✅ android done" >&2

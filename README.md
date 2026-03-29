@@ -24,6 +24,11 @@ This repo is meant to be forked or used as a template: change the config (or run
 
 The wrapper checks the repo for updates on each run and resets to the remote branch when needed.
 
+## Architecture (Meanwhile-Together)
+
+- **ADR:** [docs/adr/ADR-001-airlock-single-app-then-multi-host.md](docs/adr/ADR-001-airlock-single-app-then-multi-host.md) — airlock single-app host first, then multi-app host; MTX as deploy SOT.
+- **Deploy contract:** [docs/MTX_DEPLOY_CONTRACT.md](docs/MTX_DEPLOY_CONTRACT.md) · **Service lanes:** [docs/SERVICE_LANE_SEPARATION.md](docs/SERVICE_LANE_SEPARATION.md)
+
 ## Caveat Emptor
 
 ```

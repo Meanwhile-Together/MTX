@@ -23,7 +23,10 @@ Child scripts are **dev/*.sh**, **setup/*.sh**, **deploy/*.sh**, etc.—the scri
 
 - **Don't use `exec`.** `exec` replaces the shell process with the command, so control never returns to the caller, traps and cleanup never run, and the wrapper can't rely on the script process exiting normally. Run the command normally (e.g. `npm run build`) so the script exits after the command and the caller gets control back.
 
-- **Don't give a top-level script arguments when it has a paired subfolder.** If you have both `compile.sh` and `compile/`, then `compile.sh` must not take arguments. Subcommands live in `compile/*.sh`; the top-level script runs when the user invokes `mtx compile` with no subcommand and may show usage or perform the default action (e.g. build all). Arguments belong to the subfolder scripts.
+- **Don't mix patterns accidentally.** If you have both `compile.sh` and `compile/`, prefer one clear model:
+  - default model: top-level script handles default/usage and subcommands live in `compile/*.sh`; or
+  - dispatcher model: top-level script intentionally handles `$1` for a small fixed set (for example `run.sh` with `dev|desktop|android|web|server`).
+  Pick one model and keep docs/help aligned.
 
 - **Don't require the caller to set or export variables for you.** Scripts should work with the environment mtx gives them (cwd = project root). If you need to "remember" where project root is after you `cd` away, derive it (e.g. walk up to find `package.json`) or use relative paths like `..` and `../config`.
 
@@ -60,5 +63,5 @@ Child scripts are **dev/*.sh**, **setup/*.sh**, **deploy/*.sh**, etc.—the scri
 | No `desc` in first 30 lines | Add `desc="One-line description"` near top for help menu |
 | Skip 24h banner when this script runs (e.g. interactive menu) | Add `nobanner=1` in first 30 lines (optional) |
 | `exec npm run ...` (or any `exec`) | Run the command normally so the script exits and caller gets control back |
-| Top-level script with paired subfolder taking arguments (e.g. `compile.sh` with `$1`) | No arguments; subcommands live in the subfolder (e.g. `compile/client.sh`); top-level shows usage only |
+| Top-level and subfolder with unclear ownership of arguments | Use one explicit model: subfolder subcommands, or a documented top-level dispatcher |
 | Noisy subprocess (npm, compile) | `mtx_run npm run build` / `mtx_run "$0" compile vite` so at `-v` runs stay quiet; at `-vvv` output shows |
