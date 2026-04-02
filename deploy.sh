@@ -4,8 +4,10 @@ desc="Interactive deploy menu (choose staging or production), then terraform app
 nobanner=1
 set -e
 
-# Always use MTX scripts (this script lives in MTX root)
-MTX_ROOT="$(cd "$(dirname "$0")" && pwd)"
+# Always use MTX scripts (this script lives in MTX root).
+# Use BASH_SOURCE so this resolves correctly even when sourced by the mtx wrapper
+# (where $0 is typically /usr/bin/mtx).
+MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 # Only use $1 as env if it's a valid environment; otherwise show menu (avoids "deploy" or other junk as env)
 ENV=""

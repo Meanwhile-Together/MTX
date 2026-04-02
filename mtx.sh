@@ -484,7 +484,9 @@ case "$1" in
             #     sudo chown $USER:$USER "$scriptDir"
             debug "Script is in $binDir, checking wrapper to see if its outdated..."
             cd "$scriptDir"
-            if [ -z "${MTX_SKIP_UPDATE:-}" ]; then
+            # Non-interactive runs cannot satisfy sudo/update prompts reliably.
+            # Preserve normal interactive behavior, but skip auto-update when no TTY.
+            if [ -z "${MTX_SKIP_UPDATE:-}" ] && [ -t 0 ] && [ -t 1 ]; then
                 updateCheck
             fi
 
