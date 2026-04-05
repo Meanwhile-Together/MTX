@@ -47,7 +47,18 @@ Tags: #onboarding #deploy #mtx #project-bridge #docs #npm-scripts
 After entering the sudo password, `mtx deploy staging` completed the update but then entered an infinite loop. Every iteration prints `HEAD is now at 80f9319 fix: improve MTX_ROOT resolution and update update-check logic` followed by `workspace not found, workspace features disabled`, repeating endlessly until Ctrl+C.
 
 ### Cause
-The command was run **from inside the MTX repo directory** instead of from the project-bridge root. MTX expects `cwd` to be the project root (the directory containing `config/app.json`). When run from the wrong directory, something in the reset/precondition/dispatch cycle causes the wrapper to re-execute itself instead of running the deploy script.
+Observed in two scenarios:
+1. Running `mtx deploy staging` **from inside the MTX repo directory** instead of from the project-bridge root.
+2. Running from the **correct directory (project-bridge)** but when the auto-update pulls new changes to the MTX wrapper. After `git reset --hard` applies the update, the wrapper re-sources itself and enters an infinite loop of reset + precondition + re-dispatch.
+
+**Root cause:** `mtx.sh` modifies itself while bash is executing it. When `updateCheck` runs `git reset --hard origin/main` and the remote has new commits, the file at `/etc/mtx/mtx.sh` gets rewritten on disk. But bash is still reading from that same file — its internal file-position pointer becomes invalid because the bytes have shifted. Bash continues reading from the wrong offset in the new file, lands at an earlier section of the script, and re-executes the reset, creating an infinite loop.
+
+This only triggers when the update actually changes `mtx.sh` (or nearby files that shift byte offsets). When there are no new commits, `git reset --hard` is a no-op and the file doesn't change, so bash's pointer stays valid.
+
+**Fix options for Nick:**
+- Read the entire wrapper into memory before running the update (e.g. wrap the body in a function and call it at the end so bash parses the whole file before executing).
+- After updating, `exec` into the new version of the script cleanly instead of continuing execution from the modified file.
+- Move the update logic into a separate script that the wrapper calls, so the currently-executing file is never the one being rewritten.
 
 ### Friction
 - **No guard against running from the wrong directory.** MTX should detect this and print a clear error instead of looping.
