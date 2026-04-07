@@ -20,13 +20,13 @@ This document describes the **desired end-to-end flow**: how a **new app** is cr
 |------------------------|-------------------------|
 | **New app** = fork of project-bridge (clone, rebrand, new repo). Every app is its own full project-bridge repo. | **New app** = **payload**. An app is fundamentally a **payload**: a bundle (path, package, or git) that the server **hosts** and serves. You do **not** need to fork project-bridge to create a new app. |
 | project-bridge = “the framework” as in “the repo you fork to get an app.” | **project-bridge = central framework that runs and hosts** — one (or few) deployments of project-bridge **point to** many payloads (apps) via `config/server.json`. |
-| **mtx create** = only path: clone project-bridge → rebrand → fork → push. | **mtx create** may still support a **fork path** (full standalone deployment), but the **primary** way to create a new app is to **create a payload** and register it on the host (add to `server.apps`; source can be path, package, or **git** so the app can live in its own repo). |
+| **mtx create** = only path: clone project-bridge → rebrand → fork → push. | **`mtx create`** (see §2.2) creates a **payload** repo from **`payload-basic`** (or `MTX_PAYLOAD_TEMPLATE_REPO`) — not a project-bridge fork. The **primary** way to add an app to an **existing** host is still **create/register a payload** in `server.apps` (path, package, or git). |
 
 **Implications:**
 
 - **One host, many apps:** A single project-bridge deployment can serve many apps by listing multiple payloads in `server.apps` (with optional `domains` / `pathPrefix` for routing).
 - **Creating a new app** = (1) Create the payload (copy template or scaffold, implement views/routes), (2) Add an entry to **config/server.json** under `server.apps` with `id`, `name`, `slug`, `source` (path, package, or git), (3) Restart/redeploy the host so the new payload is loaded. No server code change; no fork of project-bridge required.
-- **Fork path** (optional): For a **full standalone** deployment (your own infra, your own project-bridge instance), **mtx create** can still clone/fork project-bridge and rebrand — but that is **one** option, not the only or primary definition of “new app.”
+- **Full project-bridge clone** (optional): For a **standalone host** repo, clone/rebrand **project-bridge** manually or from your own template — **`mtx create`** does **not** do this today (see §2.2).
 
 ---
 
@@ -46,11 +46,11 @@ This document describes the **desired end-to-end flow**: how a **new app** is cr
 
 ## 2. Creating a New App: Payload vs Fork
 
-**In the current model, “new app” = new payload** (hosted by project-bridge). Optionally, a **full standalone** deployment can still be created by forking project-bridge via **mtx create**.
+**In the current model, “new app” = new payload** (hosted by project-bridge). **`mtx create`** scaffolds a **payload** repo (§2.2). A **full standalone project-bridge** deployment is a separate, manual process.
 
 ### 2.1 Primary path: new app = new payload (no fork)
 
-1. **Create the payload** — Copy a payload template (e.g. client-portal or `_template`), or scaffold a minimal payload (views, routes, schema as needed). The payload can live in the **same repo** as project-bridge (e.g. under `application/src/payloads/` or a path pointed to by config) or in its **own repo**.
+1. **Create the payload** — Copy a payload template (e.g. **`payload-basic`**, client-portal), or scaffold a minimal payload (views, routes, schema as needed). The payload can live in the **same repo** as project-bridge (e.g. under **`demo/`** or a path pointed to by config) or in its **own repo**.
 2. **Register on the host** — Add an entry to **config/server.json** under `server.apps` (or `payloads`) with `id`, `name`, `slug`, and **source**:
    - **path** — e.g. `"./payloads/my-app"` (relative to project root).
    - **package** — e.g. `"@org/my-payload"` (resolved from `node_modules`).
@@ -59,36 +59,35 @@ This document describes the **desired end-to-end flow**: how a **new app** is cr
 
 **Optional future:** `npm run create-payload` or `mtx payload create` could scaffold a payload folder and optionally add the `server.apps` entry (see project-bridge PAYLOAD_CREATION_AND_SERVER_CONFIG.md).
 
-### 2.2 Optional path: full standalone deployment (mtx create = fork)
+### 2.2 `mtx create` today: new **payload** repo from a template (not a project-bridge fork)
 
-For a **separate** project-bridge instance (your own infra, your own repo), **mtx create** still performs the **fork-based** flow:
+**Implemented behavior** ([`MTX/create.sh`](https://github.com/Meanwhile-Together/MTX/blob/main/create.sh)):
 
-1. **Prompt for app name** — Slug derived from name.
-2. **Resolve owner** — From workspace or user input; ensure `gh` auth.
-3. **Clone or reuse** — Clone **project-bridge** from GitHub into `<workspace>/<slug>/` (or idempotent update if dir exists with `config/app.json`).
-4. **Config + rebrand** — Set `config/app.json` (name, owner, slug); run `mtx project rebrand`.
-5. **GitHub repo** — Create repo as fork of project-bridge (or `gh repo create`) with name = slug; set `origin`; commit and push.
+1. **Template** — Clones **`payload-basic`** by default (`MTX_PAYLOAD_TEMPLATE_REPO` overrides; `MTX_GITHUB_ORG` defaults to `Meanwhile-Together`), or uses a local clone at `$WORKSPACE_ROOT/$TEMPLATE_REPO`.
+2. **Naming** — Repo name is forced to **`payload-*`** via `ensure_payload_prefix`.
+3. **Metadata** — Rewrites `package.json` / `README` for the new slug; **`gh repo create`** + push when `gh` is available.
+4. **Registration** — Script prints a **`server.apps`** snippet for **project-bridge** `config/server.json` so the host can load the new payload (path/package/git as you choose).
 
-Result: a **full project-bridge repo** you can deploy on its own (`mtx deploy` from that repo). This is **one** way to get an “app” — a whole host deployment — not the only way. The **primary** notion of “new app” is a **payload** on an existing host.
+A **standalone full project-bridge fork** is **not** what `create.sh` does today; that remains a **manual** or separate flow if you need an entire host repo. Target **customer `client-*` repos** from [docs/finalize/06_TARGET_ARCHITECTURE_LOCKED.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/finalize/06_TARGET_ARCHITECTURE_LOCKED.md) are **future MTX/template work**, not `create.sh` yet.
 
 ### 2.3 Principles (updated)
 
 - **project-bridge = central host** — It **runs and hosts**; it points to payloads (apps) via `config/server.json`. You do not need to fork it to create a new app.
 - **Payload = app** — Creating a new app is creating a payload and registering it (path, package, or git); the host serves it.
-- **Fork path** — Optional for standalone deployments; **mtx create** supports it, but the main flow is payload-based.
+- **Standalone host** — Forking **project-bridge** for a whole new deployment is **not** what **`mtx create`** automates; use **payload** registration + **`mtx deploy`** on a host repo, or maintain a full clone manually.
 - **CICD repo** — Deprecated; deploy is via MTX and/or project-bridge’s own workflows.
 
 ---
 
 ## 3. How Deploy Provisions Infrastructure (Terraform + Railway)
 
-Deploy is the **single path** that both provisions infrastructure and deploys code. It is invoked as **mtx deploy** or **mtx deploy asadmin** (from project root or workspace); both end up in **terraform/apply.sh** (MTX’s copy when run via MTX; apply.sh resolves **PROJECT_ROOT** to the repo that has `config/app.json` so Terraform and .env live in the **project’s** directory).
+Deploy is the **single path** that both provisions infrastructure and deploys code. It is invoked as **mtx deploy** or **mtx deploy asadmin** (from project root or workspace); both invoke **MTX’s** **`terraform/apply.sh`**, which resolves **PROJECT_ROOT** to the repo that has `config/app.json` so Terraform and `.env` live in the **project’s** directory.
 
 ### 3.1 Entry points
 
 | Command | Effect |
 |---------|--------|
-| **mtx deploy** [staging\|production] | Menu if no env → run `terraform/apply.sh` for that env. Provisions infra (if needed), then deploys **app** and **backend** code. |
+| **mtx deploy** [staging\|production] | Menu if no env → runs **MTX** `terraform/apply.sh` for that env. Provisions infra (if needed), then deploys **app** and **backend** code. |
 | **mtx deploy asadmin** [staging\|production] | Same as above, but sets **RUN_AS_MASTER=true** and ensures **MASTER_JWT_SECRET** (prompt if missing); apply.sh persists these to .env and sets them on the **backend** Railway service. So the backend for that run is the **master** (auth at `/auth`). |
 
 ### 3.2 Config and tokens (required for apply.sh)
