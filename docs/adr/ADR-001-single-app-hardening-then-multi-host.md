@@ -1,4 +1,4 @@
-# ADR-001: Airlock Single-App First, Then Multi-App Host
+# ADR-001: Single-App Hardening First, Then Multi-App Host
 
 **Status:** Accepted  
 **Date:** 2026-03-27  
@@ -24,19 +24,18 @@ The platform must support a **project-bridge central host** that serves **payloa
 
 ### Phased delivery
 
-1. **Stage 1 — Single-app airlock:** One payload on the app-host lane; harden deploy, identity, DB policy, manifest, CI parity, rollback; pass exit gate.
+1. **Stage 1 — Single-app hardening:** One payload on the app-host lane; harden deploy, identity, DB policy, manifest, CI parity, rollback; pass `npm run verify:platform` in project-bridge.
 2. **Stage 2 — Multi-app host:** Multiple payloads in `server.apps`; preserve routing/context alignment; admin grants; ops controls.
-3. **Roadmap — Hybrid:** Document promotion from shared to dedicated host; no mandatory implementation in the airlock window.
+3. **Roadmap — Hybrid:** Document promotion from shared to dedicated host; no mandatory implementation before multi-app host work is stable.
 
 ## Consequences
 
 - New “apps” are **payloads + config**, not new Railway services per app (in shared-host mode).
-- **Legacy fork-first** documentation is superseded for product narrative; see [MISALIGNMENT.md](../MISALIGNMENT.md) for tracked exceptions.
+- **Legacy “new app = new project-bridge-shaped repo”** documentation is superseded for product narrative; see [MISALIGNMENT.md](../MISALIGNMENT.md) if drift reappears.
 - Apple / store programs (e.g. mini-app hosts) are **out of scope** for this ADR; legal eligibility is separate.
 
 ## Related documents
 
 - [MTX_DEPLOY_CONTRACT.md](../MTX_DEPLOY_CONTRACT.md)
 - [SERVICE_LANE_SEPARATION.md](../SERVICE_LANE_SEPARATION.md)
-- project-bridge: [IDENTITY_ID_VS_SLUG.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/IDENTITY_ID_VS_SLUG.md) (or local path `project-bridge/docs/IDENTITY_ID_VS_SLUG.md`)
-- project-bridge: `docs/AIRLOCK_DB_POLICY.md`, `docs/BUNDLE_MANIFEST.md`, `docs/AIRLOCK_EXIT_CRITERIA.md`, `docs/ADMIN_GRANTS_AND_AUDIT.md`, `docs/MULTI_APP_OPS_AND_INCIDENTS.md`, `docs/HYBRID_HOST_ROADMAP.md`
+- project-bridge: [PAYLOAD_CREATION_AND_SERVER_CONFIG.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/PAYLOAD_CREATION_AND_SERVER_CONFIG.md) (payload `id` vs `slug`), `docs/PAYLOAD_DATABASE_POLICY.md`, `docs/BUNDLE_MANIFEST.md`, `docs/PLATFORM_VERIFY_CRITERIA.md`, `docs/ADMIN_GRANTS_AND_AUDIT.md`, `docs/MULTI_APP_OPS_AND_INCIDENTS.md`, [CURRENT_ARCHITECTURE.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/CURRENT_ARCHITECTURE.md) (hybrid host roadmap §10)

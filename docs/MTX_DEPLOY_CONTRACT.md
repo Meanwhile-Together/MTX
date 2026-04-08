@@ -1,6 +1,6 @@
 # MTX deploy contract (source of truth)
 
-This document defines the **canonical deploy interface** for Meanwhile-Together: **`mtx deploy`** (and `mtx deploy asadmin` where applicable). Low-level Terraform and `apply.sh` behavior are **implementation details** invoked by MTX; operators and CI should not fork alternate deploy paths without updating this contract.
+This document defines the **canonical deploy interface** for Meanwhile-Together: **`mtx deploy`** (and `mtx deploy asadmin` where applicable). Low-level Terraform and `apply.sh` behavior are **implementation details** invoked by MTX; operators and CI should not introduce **parallel deploy entrypoints** (bypassing this contract) without updating this document.
 
 ## Entry points
 
@@ -29,7 +29,7 @@ Implementation references: [deploy.sh](../deploy.sh), [deploy/asadmin.sh](../dep
 ## CI alignment
 
 - **Target state:** CI should invoke the **same** entry as humans: **`mtx deploy`** (or a documented wrapper that calls the same scripts), not a divergent Railway/Terraform-only path.
-- Current GitHub Actions in project-bridge may predate this contract; see [project-bridge docs/CI_MTX_DEPLOY.md](../../project-bridge/docs/CI_MTX_DEPLOY.md) for alignment notes.
+- project-bridge workflows should match this contract; see [CI_MTX_DEPLOY.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/CI_MTX_DEPLOY.md) (absolute link so MTX-only clones still resolve).
 
 ## Non-goals
 
