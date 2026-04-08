@@ -8,15 +8,15 @@ Single reference for infra and deployment across **MTX** (wrapper/CLI) and **pro
 
 | What | Repo / path | Notes |
 |------|-------------|--------|
-| **Deploy entry (CLI)** | MTX `deploy.sh` | Menu (staging/production), then calls project’s `./terraform/apply.sh` |
-| **Apply + deploy logic** | project-bridge `terraform/apply.sh` | Same script is in MTX `terraform/apply.sh`; both resolve PROJECT_ROOT and run Terraform from **project’s** `terraform/` |
+| **Deploy entry (CLI)** | MTX `deploy.sh` | Menu (staging/production), then always runs **`$MTX_ROOT/terraform/apply.sh`** (MTX’s copy — never the project tree’s `terraform/apply.sh`) |
+| **Apply + deploy logic** | MTX `terraform/apply.sh` + project-bridge `terraform/` | **`deploy.sh`** invokes **only** MTX’s `terraform/apply.sh`. That script resolves **PROJECT_ROOT** to the directory containing `config/app.json` (usually **project-bridge**) and runs Terraform from **`$PROJECT_ROOT/terraform/`**. A **copy** of `apply.sh` also exists under project-bridge for direct runs (e.g. `./terraform/apply.sh` from project root); keep copies in sync. See [MTX_DEPLOY_CONTRACT.md](MTX_DEPLOY_CONTRACT.md). |
 | **Terraform (IaC)** | project-bridge only | `terraform/main.tf`, `variables.tf`, `outputs.tf`, `backend.tf`, `modules/railway-owner`, `modules/railway` — **MTX has no main.tf** |
 | **Config (app/deploy)** | project-bridge | `config/app.json`, `config/deploy.json` |
 | **Secrets** | project-bridge `.env` | `RAILWAY_*` tokens; gitignored |
 | **Railway build config** | project-bridge | Root `railway.json` (app), `targets/backend-server/railway.json` (backend) |
 | **Setup (first-time + deploy)** | project-bridge `scripts/setup.sh` | Source of truth for deployment setup; can call apply.sh |
 
-**Contract:** Deploy is always run from the **project root** (the repo that has `config/app.json`). That is project-bridge when using the Meanwhile-Together workspace. MTX’s `deploy.sh` runs `./terraform/apply.sh`; apply.sh resolves PROJECT_ROOT (current dir, parent, or `../project-bridge`) so that the same script works whether you run `mtx deploy` from project-bridge or from a parent dir.
+**Contract:** **`mtx deploy`** runs **MTX’s** `terraform/apply.sh` only. That script finds **PROJECT_ROOT** (the tree with `config/app.json` — typically **project-bridge**) and executes Terraform in **`$PROJECT_ROOT/terraform/`**. You may also run **`./terraform/apply.sh`** directly from project-bridge root (project’s copy); behavior should match when PROJECT_ROOT is the same.
 
 ---
 
@@ -24,7 +24,7 @@ Single reference for infra and deployment across **MTX** (wrapper/CLI) and **pro
 
 1. **Entry**
    - **Local:** From project root: `mtx deploy` or `mtx deploy staging` (or `./terraform/apply.sh staging` / `./scripts/setup.sh --setup-deployment`).
-   - **CI:** project-bridge `.github/workflows/03-deploy-staging.yml` and `04-deploy-production.yml` (see §7; **outdated** vs setup.sh/apply.sh).
+   - **CI:** project-bridge `.github/workflows/03-deploy-staging.yml` and `04-deploy-production.yml` — provision/deploy entry aligned with **`bash MTX/deploy.sh`** (see [project-bridge docs/CI_MTX_DEPLOY.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/CI_MTX_DEPLOY.md)); details in §7.
 
 2. **Config**
    - apply.sh requires `config/deploy.json` with `platform: ["railway"]` and `config/app.json` with `app.name`, `app.slug`, `app.owner`.
@@ -107,25 +107,20 @@ Terraform creates or adopts these; apply.sh discovers existing IDs and passes th
 
 ## 6. MTX Script Behaviour
 
-- **mtx deploy** [staging|production]: runs `./terraform/apply.sh [env]` from **current directory** (project root). If you run from project-bridge, that’s project-bridge/terraform/apply.sh.
-- **mtx terraform apply** (if exposed): would run the same apply.sh (from MTX’s copy); PROJECT_ROOT resolution can point to `../project-bridge`, so Terraform still runs in project-bridge/terraform (because SCRIPT_DIR = PROJECT_ROOT/terraform and PROJECT_ROOT is set to the dir that has config/app.json).
-- Preconditions (e.g. `precond/01-is-projectb.sh`) run before commands; they don’t change deploy behaviour.
+- **mtx deploy** [staging|production]: always runs **`"$MTX_ROOT/terraform/apply.sh"`** (see `MTX/deploy.sh` — **never** `./terraform/apply.sh` from the project). Preconditions (e.g. `precond/01-is-projectb.sh`) run before most commands; they don’t change this contract.
 
-### 6.1 apply.sh: single source vs copies
+### 6.1 apply.sh: two copies on disk
 
-- **Current state:** apply.sh exists in both **project-bridge** (`terraform/apply.sh`) and **MTX** (`terraform/apply.sh`). When you run `mtx deploy` from project-bridge, MTX invokes the project's `./terraform/apply.sh` (project-bridge's copy). When run from a parent dir, MTX's copy is used but it resolves PROJECT_ROOT to the directory containing `config/app.json`, so Terraform still runs in the **project's** `terraform/` (e.g. project-bridge/terraform).
-- **Canonical source:** project-bridge's `terraform/apply.sh` is the canonical implementation (it lives with Terraform config and outputs). MTX's copy is a convenience so `mtx deploy` works from the MTX repo or before cloning project-bridge; it should be kept in sync with project-bridge when apply.sh changes. If you prefer a single source, have MTX call the project's script by path (e.g. `"$PROJECT_ROOT/terraform/apply.sh"`) and remove or stub MTX's copy. See project-bridge [docs/OUTSTANDING_WORK.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/OUTSTANDING_WORK.md) section 2.2 and 8.3.
+- **MTX `terraform/apply.sh`:** This is what **`mtx deploy`** executes. It resolves **PROJECT_ROOT** to the directory containing `config/app.json` and runs Terraform in **`$PROJECT_ROOT/terraform/`** (e.g. project-bridge/terraform).
+- **project-bridge `terraform/apply.sh`:** Used when you invoke **`./terraform/apply.sh`** directly from the project root (without going through `mtx deploy`). Should stay **in sync** with MTX’s copy (same logic, different entry path).
+- **Authoritative Terraform files:** `*.tf` and modules live only under **project-bridge/terraform/**. MTX does not duplicate `main.tf`.
 
 ---
 
-## 7. CI (GitHub Actions) — Outdated vs Local
+## 7. CI (GitHub Actions)
 
-- **Source of truth for deploy:** project-bridge **scripts/setup.sh** and **terraform/apply.sh** (and thus `mtx deploy` when run from project-bridge). DEPLOYMENT.md states that **GitHub Actions workflows are outdated**.
-- **03-deploy-staging.yml / 04-deploy-production.yml:**
-  - Use Terraform Cloud backend and TF_VAR_* that don’t match current variables.tf (e.g. `railway_create_backend_service`, `railway_backend_service_id`, single `railway_service_id`).
-  - Use `deployment-project-id` from **deploy.json** `projectId` (often empty); current apply.sh uses **Terraform outputs** and discovery, not projectId for deploy.
-  - Railway deploy step uses `railway-app/railway-deploy@v1` with `service: deployment-project-id` — that’s a service ID, but CI doesn’t get env-specific app/backend service IDs from Terraform outputs.
-- To align CI with current behaviour you’d: use same Terraform vars as apply.sh, run apply (or plan/apply) in project-bridge/terraform, read `railway_app_service_id_staging`/`railway_app_service_id_production` and optionally backend IDs from outputs, then run deploy (e.g. Railway CLI or action) per service with the correct project token per environment.
+- **Source of truth for deploy:** Same as local: **MTX `deploy.sh` → MTX `terraform/apply.sh`** (or manual `./terraform/apply.sh` from project-bridge). See [project-bridge docs/CI_MTX_DEPLOY.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/CI_MTX_DEPLOY.md).
+- **03-deploy-staging.yml / 04-deploy-production.yml** checkout **MTX** and use **`bash MTX/deploy.sh`** for the provision/deploy contract step; build steps use project-bridge `package.json` scripts. If a workflow drifts (e.g. wrong `npm run` name), fix **workflows** and **project-bridge** `verify:airlock` — do not document CI as “outdated” without checking the current YAML.
 
 ---
 
@@ -133,7 +128,7 @@ Terraform creates or adopts these; apply.sh discovers existing IDs and passes th
 
 - **Where is Terraform defined?** Only in **project-bridge** (terraform/*.tf and modules). MTX only has a copy of apply.sh and FLOW.md.
 - **Who runs Terraform?** apply.sh, which runs in **project-bridge/terraform** whenever PROJECT_ROOT is project-bridge (normal case when you run from project-bridge or apply.sh finds it).
-- **Two apply.sh copies?** MTX and project-bridge have the same apply.sh; PROJECT_ROOT resolution ensures the **project’s** terraform dir and .env are used.
+- **Two apply.sh copies?** Yes — **MTX** `terraform/apply.sh` (used by **`mtx deploy`**) and **project-bridge** `terraform/apply.sh` (for direct `./terraform/apply.sh`). Both resolve **PROJECT_ROOT** so Terraform runs in the **project’s** `terraform/` with that repo’s `.env`.
 - **Token roles:** Account = Terraform + API. Project token staging/production = `railway up` only, per environment.
 - **Backend vs app deploy:** App uses root railway.json and build:server; backend deploy swaps in backend-server/railway.json and uses build:backend-server, then restores.
 - **Self-heal:** Backend 404/upload failure can trigger state rm of backend_${env} and `.railway-backend-invalidated` so next apply recreates backend.

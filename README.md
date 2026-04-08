@@ -14,7 +14,7 @@ A single-command wrapper that uses a git repository as a package source: install
 
 The wrapper installs itself (when needed) and keeps a clone of the repo in a fixed directory. From then on you run commands by their path inside the repo (e.g. `mtx do update` or `mtx git clean-branches`). It can create symlinks in your PATH for specific scripts (hoist) and checks the repo for updates when it runs.
 
-This repo is meant to be forked or used as a template: change the config (or run `./reconfigure.sh` for a guided setup), point it at your repo and script name, and deploy your own version while keeping the same behavior.
+Clone this repo (or your organization’s mirror), then change the config or run `./reconfigure.sh` for a guided setup: point the wrapper at your git repo and command layout so operators run **your** scripts from anywhere while keeping the same update model.
 
 ## Usage
 
@@ -26,8 +26,10 @@ The wrapper checks the repo for updates on each run and resets to the remote bra
 
 ## Architecture (Meanwhile-Together)
 
-- **ADR:** [docs/adr/ADR-001-airlock-single-app-then-multi-host.md](docs/adr/ADR-001-airlock-single-app-then-multi-host.md) — airlock single-app host first, then multi-app host; MTX as deploy SOT.
-- **Deploy contract:** [docs/MTX_DEPLOY_CONTRACT.md](docs/MTX_DEPLOY_CONTRACT.md) · **Service lanes:** [docs/SERVICE_LANE_SEPARATION.md](docs/SERVICE_LANE_SEPARATION.md)
+- **project-bridge source of truth:** [CURRENT_ARCHITECTURE.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/CURRENT_ARCHITECTURE.md) — payloads, unified server, two Railway services.
+- **New payload repos:** **`mtx create payload`** or **`mtx payload create`** → GitHub **`payload-*`** from **`payload-basic`** · **`mtx create org`** or **`mtx org create`** → **`org-*`**. **`mtx create`** alone = payload. Requires **`gh`** for create/push (or **`MTX_CREATE_SKIP_GITHUB=1`** for local-only). See [docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md](docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md).
+- **Create + deploy narrative:** [docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md](docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md) · **Deploy contract:** [docs/MTX_DEPLOY_CONTRACT.md](docs/MTX_DEPLOY_CONTRACT.md) · **Infra reference:** [docs/INFRA_AND_DEPLOY_REFERENCE.md](docs/INFRA_AND_DEPLOY_REFERENCE.md)
+- **ADR:** [docs/adr/ADR-001-single-app-hardening-then-multi-host.md](docs/adr/ADR-001-single-app-hardening-then-multi-host.md) · **Service lanes:** [docs/SERVICE_LANE_SEPARATION.md](docs/SERVICE_LANE_SEPARATION.md)
 
 ## Caveat Emptor
 
