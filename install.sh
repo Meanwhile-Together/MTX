@@ -3,6 +3,20 @@ desc="Install payload in current project and register routing in config/server.j
 nobanner=1
 set -e
 
+MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -d "$MTX_ROOT/includes" ]; then
+  # shellcheck disable=SC1091
+  for f in "$MTX_ROOT"/includes/*.sh; do source "$f"; done
+fi
+
+# Fallbacks when run outside mtx wrapper/bootstrap.
+declare -F echoc >/dev/null || echoc() { local _c="$1"; shift || true; echo "$*"; }
+declare -F info >/dev/null || info() { echo "[INFO] $*"; }
+declare -F warn >/dev/null || warn() { echo "[WARN] $*" >&2; }
+declare -F error >/dev/null || error() { echo "[ERROR] $*" >&2; }
+declare -F success >/dev/null || success() { echo "[SUCCESS] $*"; }
+declare -F mtx_run >/dev/null || mtx_run() { "$@"; }
+
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*\|-*$//g'
 }
@@ -18,7 +32,7 @@ find_project_root() {
   local walk
   walk="$(pwd)"
   while [ -n "$walk" ] && [ "$walk" != "/" ]; do
-    if [ -f "$walk/package.json" ] && { [ -f "$walk/config/server.json" ] || [ -f "$walk/server.json" ]; }; then
+    if [ -f "$walk/package.json" ] && { [ -d "$walk/config" ] || [ -f "$walk/config/app.json" ] || [ -f "$walk/server.json" ]; }; then
       echo "$walk"
       return 0
     fi
@@ -61,8 +75,25 @@ CONFIG_PATH="$PROJECT_ROOT/config/server.json"
 [ -f "$CONFIG_PATH" ] || CONFIG_PATH="$PROJECT_ROOT/server.json"
 
 if [ ! -f "$CONFIG_PATH" ]; then
-  error "No server config file found."
-  exit 1
+  info "No server config found; bootstrapping one now..."
+  if [ -f "$PROJECT_ROOT/config/server-multi-app.example.json" ]; then
+    cp "$PROJECT_ROOT/config/server-multi-app.example.json" "$PROJECT_ROOT/config/server.json"
+    CONFIG_PATH="$PROJECT_ROOT/config/server.json"
+    success "Created config/server.json from config/server-multi-app.example.json"
+  elif [ -f "$PROJECT_ROOT/config/server.json.example" ]; then
+    cp "$PROJECT_ROOT/config/server.json.example" "$PROJECT_ROOT/config/server.json"
+    CONFIG_PATH="$PROJECT_ROOT/config/server.json"
+    success "Created config/server.json from config/server.json.example"
+  elif [ -f "$PROJECT_ROOT/server.json.example" ]; then
+    cp "$PROJECT_ROOT/server.json.example" "$PROJECT_ROOT/server.json"
+    CONFIG_PATH="$PROJECT_ROOT/server.json"
+    success "Created server.json from server.json.example"
+  else
+    CONFIG_PATH="$PROJECT_ROOT/config/server.json"
+    mkdir -p "$PROJECT_ROOT/config"
+    printf '{\n  "apps": []\n}\n' > "$CONFIG_PATH"
+    warn "No server config template found; created minimal config/server.json with apps[]."
+  fi
 fi
 
 if ! command -v node >/dev/null 2>&1; then

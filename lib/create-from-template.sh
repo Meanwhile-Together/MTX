@@ -7,6 +7,18 @@
 
 : "${MTX_ROOT:?Set MTX_ROOT to the MTX repository root before sourcing lib/create-from-template.sh}"
 
+# When sourced outside mtx wrapper, load helpers and define safe fallbacks.
+if [ -d "$MTX_ROOT/includes" ]; then
+  # shellcheck disable=SC1091
+  for f in "$MTX_ROOT"/includes/*.sh; do source "$f"; done
+fi
+declare -F echoc >/dev/null || echoc() { local _c="$1"; shift || true; echo "$*"; }
+declare -F info >/dev/null || info() { echo "[INFO] $*"; }
+declare -F warn >/dev/null || warn() { echo "[WARN] $*" >&2; }
+declare -F error >/dev/null || error() { echo "[ERROR] $*" >&2; }
+declare -F success >/dev/null || success() { echo "[SUCCESS] $*"; }
+declare -F mtx_run >/dev/null || mtx_run() { "$@"; }
+
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*\|-*$//g'
 }
