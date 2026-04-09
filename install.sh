@@ -48,6 +48,10 @@ Usage:
 
 Installs a payload package/source into the current project-bridge-style repo,
 then updates config/server.json (or server.json) with an idempotent apps[] entry.
+
+<payload-id> is the app entry id (e.g. payload-myapp, org-tenant-acme). For repos
+created with mtx create org, use the org-* id; default npm package is
+@meanwhile-together/<payload-id> unless you override.
 EOF
 }
 
@@ -113,6 +117,13 @@ PAYLOAD_SLUG="${PAYLOAD_SLUG#template-}"
 [ -n "$PAYLOAD_SLUG" ] || PAYLOAD_SLUG="app"
 
 DEFAULT_NAME="$(echo "$PAYLOAD_ID" | sed 's/[-_]/ /g')"
+# Friendlier default label for org-* repos (mtx create org → org-<slug>-…)
+case "$PAYLOAD_ID" in
+  org-*)
+    _org_rest="${PAYLOAD_ID#org-}"
+    DEFAULT_NAME="Organization $(echo "$_org_rest" | sed 's/[-_]/ /g')"
+    ;;
+esac
 DEFAULT_PACKAGE="@meanwhile-together/$PAYLOAD_ID"
 if [[ "$PAYLOAD_ID" == @*/* ]]; then
   DEFAULT_PACKAGE="$PAYLOAD_ID"
