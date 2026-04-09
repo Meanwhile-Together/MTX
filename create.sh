@@ -5,6 +5,23 @@ nobanner=1
 set -e
 
 MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Defensive dispatch when invoked directly (outside mtx wrapper).
+case "${1:-}" in
+  payload)
+    shift
+    # shellcheck source=create/payload.sh
+    source "$MTX_ROOT/create/payload.sh" "$@"
+    return 0 2>/dev/null || exit 0
+    ;;
+  org)
+    shift
+    # shellcheck source=create/org.sh
+    source "$MTX_ROOT/create/org.sh" "$@"
+    return 0 2>/dev/null || exit 0
+    ;;
+esac
+
 export MTX_REPO_PREFIX="payload-"
 export MTX_TEMPLATE_REPO="${MTX_PAYLOAD_TEMPLATE_REPO:-payload-basic}"
 export MTX_KIND_LABEL="Payload"
