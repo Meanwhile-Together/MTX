@@ -20,7 +20,7 @@ This document describes the **desired end-to-end flow**: how a **new app** is cr
 |------------------------|-------------------------|
 | **New app** = fork of project-bridge (clone, rebrand, new repo). Every app is its own full project-bridge repo. | **New app** = **payload**. An app is fundamentally a **payload**: a bundle (path, package, or git) that the server **hosts** and serves. You do **not** need to fork project-bridge to create a new app. |
 | project-bridge = “the framework” as in “the repo you fork to get an app.” | **project-bridge = central framework that runs and hosts** — one (or few) deployments of project-bridge **point to** many payloads (apps) via `config/server.json`. |
-| **mtx create** = only path: clone project-bridge → rebrand → fork → push. | **`mtx create`** (see §2.2) creates a **payload** repo from **`payload-basic`** (or `MTX_PAYLOAD_TEMPLATE_REPO`) — not a project-bridge fork. The **primary** way to add an app to an **existing** host is still **create/register a payload** in `server.apps` (path, package, or git). |
+| **mtx create** = only path: clone project-bridge → rebrand → fork → push. | **`mtx create`** (see §2.2) creates a **payload** repo from **`template-basic`** (or `MTX_PAYLOAD_TEMPLATE_REPO`) — not a project-bridge fork. The **primary** way to add an app to an **existing** host is still **create/register a payload** in `server.apps` (path, package, or git). |
 
 **Implications:**
 
@@ -50,7 +50,7 @@ This document describes the **desired end-to-end flow**: how a **new app** is cr
 
 ### 2.1 Primary path: new app = new payload (no fork)
 
-1. **Create the payload** — Copy a payload template (e.g. **`payload-basic`**, client-portal), or scaffold a minimal payload (views, routes, schema as needed). The payload can live in the **same repo** as project-bridge (e.g. under **`demo/`** or a path pointed to by config) or in its **own repo**.
+1. **Create the payload** — Copy a payload template (e.g. **`template-basic`**, client-portal), or scaffold a minimal payload (views, routes, schema as needed). The payload can live in the **same repo** as project-bridge (e.g. under **`demo/`** or a path pointed to by config) or in its **own repo**.
 2. **Register on the host** — Add an entry to **config/server.json** under `server.apps` (or `payloads`) with `id`, `name`, `slug`, and **source**:
    - **path** — e.g. `"./payloads/my-app"` (relative to project root).
    - **package** — e.g. `"@org/my-payload"` (resolved from `node_modules`).
@@ -63,12 +63,12 @@ This document describes the **desired end-to-end flow**: how a **new app** is cr
 
 **Implemented behavior** ([`MTX/create.sh`](https://github.com/Meanwhile-Together/MTX/blob/main/create.sh)):
 
-1. **Template** — Clones **`payload-basic`** by default (`MTX_PAYLOAD_TEMPLATE_REPO` overrides; `MTX_GITHUB_ORG` defaults to `Meanwhile-Together`), or uses a local clone at `$WORKSPACE_ROOT/$TEMPLATE_REPO`.
+1. **Template** — Clones **`template-basic`** by default (`MTX_PAYLOAD_TEMPLATE_REPO` overrides; `MTX_GITHUB_ORG` defaults to `Meanwhile-Together`), or uses a local clone at `$WORKSPACE_ROOT/$TEMPLATE_REPO`.
 2. **Naming** — Repo name is forced to **`payload-*`** via `ensure_payload_prefix`.
 3. **Metadata** — Rewrites `package.json` / `README` for the new slug; **`gh repo create`** + push when `gh` is available.
 4. **Registration** — Script prints a **`server.apps`** snippet for **project-bridge** `config/server.json` so the host can load the new payload (path/package/git as you choose).
 
-**Subcommands:** **`mtx create payload`** (same as plain **`mtx create`**), **`mtx create org`** → **`org-*`**, **`mtx create template`** → **`template-*`**. The template subcommand uses the same machinery; the GitHub repo name prefix is **`template-`**, and the clone source defaults to **`payload-basic`** unless **`MTX_TEMPLATE_SOURCE_REPO`** is set.
+**Subcommands:** **`mtx create payload`** (same as plain **`mtx create`**), **`mtx create org`** → **`org-*`**, **`mtx create template`** → **`template-*`**. The template subcommand uses the same machinery; the GitHub repo name prefix is **`template-`**, and the clone source defaults to **`template-basic`** unless **`MTX_TEMPLATE_SOURCE_REPO`** or **`MTX_PAYLOAD_TEMPLATE_REPO`** is set.
 
 A **standalone full project-bridge fork** is **not** what `create.sh` does today; that remains a **manual** or separate flow if you need an entire host repo. Target **customer `client-*` repos** from [docs/finalize/06_TARGET_ARCHITECTURE_LOCKED.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/finalize/06_TARGET_ARCHITECTURE_LOCKED.md) are **future MTX/template work**, not `create.sh` yet.
 

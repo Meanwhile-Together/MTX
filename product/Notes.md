@@ -164,7 +164,7 @@ First-time developer onboarding a real client.
 - Ran `echo "Ashe Austaire" | mtx create` from project-bridge root.
 - MTX auto-updated first (pulled 4 new commits). During update, `sudo chmod` and `sudo ln` failed with "a terminal is required to read the password" — noisy errors, but update continued.
 - Output said "workspace not found, workspace features disabled" — no explanation of what this means.
-- Template `payload-basic` was cloned from GitHub into `../payload-ashe-austaire`.
+- Template `template-basic` was cloned from GitHub into `../payload-ashe-austaire`.
 - GitHub repo `Meanwhile-Together/payload-ashe-austaire` was created via `gh`.
 - **BLOCKER:** `git push` failed because `create.sh` hardcodes SSH remote (`git@github.com:...`) but `gh auth` is configured for HTTPS. Had to manually switch remote to HTTPS and push.
 - Output ended with a JSON snippet to add to `config/server.json` — but no guidance on how to create that file since it doesn't exist.
@@ -224,7 +224,7 @@ Ran `mtx create` from project-bridge root to create the first payload for client
 First-time developer user creating their first payload.
 
 ### What went well
-- Template cloned correctly from `Meanwhile-Together/payload-basic`.
+- Template cloned correctly from `Meanwhile-Together/template-basic`.
 - GitHub repo `Meanwhile-Together/payload-ashe-austaire` was created automatically via `gh`.
 - Payload metadata (package.json name, description, README) was rewritten correctly.
 - Starter `src/index.ts` exports the interface Project Bridge expects (`getAppViews`, `getViewComponent`, `getAppRoutes`).

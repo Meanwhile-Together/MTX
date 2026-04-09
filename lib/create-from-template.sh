@@ -2,7 +2,8 @@
 # Loaded only from mtx create/payload|org|template, payload/org/template create, or top-level create — NOT from includes/ (mtx auto-sources includes/*.sh at boot).
 # Callers must set MTX_ROOT to the MTX repo root before sourcing this file.
 # Callers set: MTX_REPO_PREFIX, MTX_TEMPLATE_REPO, MTX_KIND_LABEL, MTX_CREATE_CMD
-# Optional: MTX_WORKSPACE_ROOT, MTX_GITHUB_ORG, MTX_CREATE_SKIP_GITHUB=1 (local git + snippet only; no gh)
+# Optional: MTX_WORKSPACE_ROOT, MTX_GITHUB_ORG, MTX_CREATE_SKIP_GITHUB=1 (local git + snippet only; no gh).
+# Default clone source repo name: template-basic (override with MTX_PAYLOAD_TEMPLATE_REPO / MTX_ORG_TEMPLATE_REPO / MTX_TEMPLATE_SOURCE_REPO).
 # With gh: new repos use `gh repo create org/repo --source=. --remote=origin --push`; existing repos get origin + git push.
 
 : "${MTX_ROOT:?Set MTX_ROOT to the MTX repository root before sourcing lib/create-from-template.sh}"
@@ -68,7 +69,7 @@ mtx_create_ensure_template_available() {
   fi
 
   echoc yellow "No local template at: $local_path"
-  echoc dim "Expected a sibling of MTX: $ws/$repo (clone or copy payload-basic there), or set MTX_WORKSPACE_ROOT."
+  echoc dim "Expected a sibling of MTX: $ws/$repo (clone or copy template-basic there), or set MTX_WORKSPACE_ROOT."
   if ! command -v git &>/dev/null; then
     warn "git is required to fetch template from $url"
     exit 1

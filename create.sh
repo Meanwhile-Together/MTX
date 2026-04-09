@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Backward-compatible: `mtx create` = payload from payload-basic. Prefer `mtx create payload|org|template` or `mtx payload create`.
-desc="Create payload-* repo from payload-basic (same as mtx payload create / mtx create payload)"
+# Backward-compatible: `mtx create` = payload from template-basic. Prefer `mtx create payload|org|template` or `mtx payload create`.
+desc="Create payload-* repo from template-basic (same as mtx payload create / mtx create payload)"
 nobanner=1
 set -e
 
@@ -29,7 +29,7 @@ case "${1:-}" in
 esac
 
 export MTX_REPO_PREFIX="payload-"
-export MTX_TEMPLATE_REPO="${MTX_PAYLOAD_TEMPLATE_REPO:-payload-basic}"
+export MTX_TEMPLATE_REPO="${MTX_PAYLOAD_TEMPLATE_REPO:-template-basic}"
 export MTX_KIND_LABEL="Payload"
 export MTX_CREATE_CMD="mtx create"
 

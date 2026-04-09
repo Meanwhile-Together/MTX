@@ -1,6 +1,6 @@
 # Misalignment registry (legacy fork narrative vs current behavior)
 
-**Purpose:** Track docs and rules that still describe **fork project-bridge** as the only “new app” story. **Authoritative deploy path:** [MTX_DEPLOY_CONTRACT.md](MTX_DEPLOY_CONTRACT.md), [INFRA_AND_DEPLOY_REFERENCE.md](INFRA_AND_DEPLOY_REFERENCE.md). **Authoritative create path:** [MTX_CREATE_AND_DEPLOYMENT_FLOW.md](MTX_CREATE_AND_DEPLOYMENT_FLOW.md) — **`mtx create`** = **payload template** (`payload-basic` / `MTX_PAYLOAD_TEMPLATE_REPO`), **`payload-*`** repo, **`gh`**.
+**Purpose:** Track docs and rules that still describe **fork project-bridge** as the only “new app” story. **Authoritative deploy path:** [MTX_DEPLOY_CONTRACT.md](MTX_DEPLOY_CONTRACT.md), [INFRA_AND_DEPLOY_REFERENCE.md](INFRA_AND_DEPLOY_REFERENCE.md). **Authoritative create path:** [MTX_CREATE_AND_DEPLOYMENT_FLOW.md](MTX_CREATE_AND_DEPLOYMENT_FLOW.md) — **`mtx create`** = **payload template** (`template-basic` / `MTX_PAYLOAD_TEMPLATE_REPO`), **`payload-*`** repo, **`gh`**.
 
 **Target architecture (customer `client-*`, master Railway project, etc.):** [project-bridge docs/finalize/06_TARGET_ARCHITECTURE_LOCKED.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/finalize/06_TARGET_ARCHITECTURE_LOCKED.md).
 
@@ -12,7 +12,7 @@
 |------|--------|
 | **INFRA_AND_DEPLOY_REFERENCE.md** — `mtx deploy` vs `./terraform/apply.sh` | **Updated:** `deploy.sh` always runs **`$MTX_ROOT/terraform/apply.sh`**; PROJECT_ROOT resolves to project-bridge for Terraform. |
 | **MTX_CREATE_AND_DEPLOYMENT_FLOW.md** — §2.2 fork narrative | **Updated:** Describes actual **`create.sh`** (payload template, not project-bridge fork). |
-| **create.sh** | **Implementation:** Clones **`payload-basic`** (or `MTX_PAYLOAD_TEMPLATE_REPO`), **`payload-*`** naming — see script header in repo. |
+| **create.sh** | **Implementation:** Clones **`template-basic`** (or `MTX_PAYLOAD_TEMPLATE_REPO`), **`payload-*`** naming — see script header in repo. |
 
 ---
 
@@ -44,6 +44,6 @@ Framework phase rules and **framework-doctrine.mdc** still reference **MASTER_FL
 
 | Concept | Legacy (misaligned) | Current |
 |--------|---------------------|---------|
-| **`mtx create`** | Fork project-bridge only | **Payload** repo from **`payload-basic`** (or override template). |
+| **`mtx create`** | Fork project-bridge only | **Payload** repo from **`template-basic`** (or override template). |
 | **`mtx deploy`** | Project’s `./terraform/apply.sh` | **MTX** `$MTX_ROOT/terraform/apply.sh` only. |
 | **New app on existing host** | N/A | Payload + **`server.apps`** entry. |

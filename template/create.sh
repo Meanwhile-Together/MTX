@@ -6,7 +6,7 @@ set -e
 
 MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export MTX_REPO_PREFIX="template-"
-export MTX_TEMPLATE_REPO="${MTX_TEMPLATE_SOURCE_REPO:-${MTX_PAYLOAD_TEMPLATE_REPO:-payload-basic}}"
+export MTX_TEMPLATE_REPO="${MTX_TEMPLATE_SOURCE_REPO:-${MTX_PAYLOAD_TEMPLATE_REPO:-template-basic}}"
 export MTX_KIND_LABEL="Template"
 export MTX_CREATE_CMD="mtx template create"
 
