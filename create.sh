@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Backward-compatible: `mtx create` = payload from payload-basic. Prefer `mtx create payload` or `mtx payload create`.
+# Backward-compatible: `mtx create` = payload from payload-basic. Prefer `mtx create payload|org|template` or `mtx payload create`.
 desc="Create payload-* repo from payload-basic (same as mtx payload create / mtx create payload)"
 nobanner=1
 set -e
@@ -18,6 +18,12 @@ case "${1:-}" in
     shift
     # shellcheck source=create/org.sh
     source "$MTX_ROOT/create/org.sh" "$@"
+    return 0 2>/dev/null || exit 0
+    ;;
+  template)
+    shift
+    # shellcheck source=create/template.sh
+    source "$MTX_ROOT/create/template.sh" "$@"
     return 0 2>/dev/null || exit 0
     ;;
 esac

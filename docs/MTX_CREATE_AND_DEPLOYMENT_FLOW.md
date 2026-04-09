@@ -68,6 +68,8 @@ This document describes the **desired end-to-end flow**: how a **new app** is cr
 3. **Metadata** — Rewrites `package.json` / `README` for the new slug; **`gh repo create`** + push when `gh` is available.
 4. **Registration** — Script prints a **`server.apps`** snippet for **project-bridge** `config/server.json` so the host can load the new payload (path/package/git as you choose).
 
+**Subcommands:** **`mtx create payload`** (same as plain **`mtx create`**), **`mtx create org`** → **`org-*`**, **`mtx create template`** → **`template-*`**. The template subcommand uses the same machinery; the GitHub repo name prefix is **`template-`**, and the clone source defaults to **`payload-basic`** unless **`MTX_TEMPLATE_SOURCE_REPO`** is set.
+
 A **standalone full project-bridge fork** is **not** what `create.sh` does today; that remains a **manual** or separate flow if you need an entire host repo. Target **customer `client-*` repos** from [docs/finalize/06_TARGET_ARCHITECTURE_LOCKED.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/finalize/06_TARGET_ARCHITECTURE_LOCKED.md) are **future MTX/template work**, not `create.sh` yet.
 
 ### 2.3 Principles (updated)

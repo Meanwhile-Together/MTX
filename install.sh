@@ -109,6 +109,7 @@ fi
 PAYLOAD_SLUG="$(slugify "$PAYLOAD_ID")"
 PAYLOAD_SLUG="${PAYLOAD_SLUG#payload-}"
 PAYLOAD_SLUG="${PAYLOAD_SLUG#org-}"
+PAYLOAD_SLUG="${PAYLOAD_SLUG#template-}"
 [ -n "$PAYLOAD_SLUG" ] || PAYLOAD_SLUG="app"
 
 DEFAULT_NAME="$(echo "$PAYLOAD_ID" | sed 's/[-_]/ /g')"

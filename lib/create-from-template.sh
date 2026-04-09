@@ -1,5 +1,5 @@
 # Shared: scaffold a GitHub repo from a template with a fixed name prefix (payload- or org-).
-# Loaded only from mtx create/payload, create/org, payload/create, org/create, or top-level create — NOT from includes/ (mtx auto-sources includes/*.sh at boot).
+# Loaded only from mtx create/payload|org|template, payload/org/template create, or top-level create — NOT from includes/ (mtx auto-sources includes/*.sh at boot).
 # Callers must set MTX_ROOT to the MTX repo root before sourcing this file.
 # Callers set: MTX_REPO_PREFIX, MTX_TEMPLATE_REPO, MTX_KIND_LABEL, MTX_CREATE_CMD
 # Optional: MTX_WORKSPACE_ROOT, MTX_GITHUB_ORG, MTX_CREATE_SKIP_GITHUB=1 (local git + snippet only; no gh)
@@ -214,7 +214,7 @@ mtx_create_from_template_run() {
 
   mtx_create_ensure_template_available "$LOCAL_TEMPLATE_PATH" "$TEMPLATE_URL" "$TEMPLATE_REPO" "$WORKSPACE_ROOT"
 
-  echoc cyan "Create new $(echo "$MTX_KIND_LABEL" | tr '[:upper:]' '[:lower:]') payload (${MTX_REPO_PREFIX}*)"
+  echoc cyan "Create new $(echo "$MTX_KIND_LABEL" | tr '[:upper:]' '[:lower:]') repo (${MTX_REPO_PREFIX}*)"
   echo ""
   read -rp "$(echo -e "${bold:-}Display name (organization or app name):${reset:-} ")" NEW_APP_NAME
   NEW_APP_NAME="${NEW_APP_NAME#"${NEW_APP_NAME%%[![:space:]]*}"}"
