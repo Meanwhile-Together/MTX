@@ -13,7 +13,8 @@ Plain-language task to command lookup. Only includes commands explicitly reviewe
 | Deploy to staging | `mtx deploy staging` | Runs terraform/apply.sh, provisions infra if needed, deploys app + backend |
 | Deploy to production | `mtx deploy production` | Same flow as staging, targeting production environment |
 | Deploy as master admin | `mtx deploy asadmin` | Same deploy flow with RUN_AS_MASTER=true and MASTER_JWT_SECRET handling |
-| Bootstrap a workspace | `mtx workspace` | Creates workspace file, clones MTX + project-bridge + client-a as siblings |
+| Bootstrap a workspace | `mtx workspace` | Creates workspace file; clones repos listed in `includes/workspace-repos.sh` as siblings |
+| Hard-reset all workspace repos to `origin` | `mtx pull` | `git fetch` + `reset --hard` to default branch per repo under workspace root; **discards** local changes |
 
 ## Project Bridge commands (runtime host)
 

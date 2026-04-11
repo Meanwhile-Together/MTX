@@ -20,16 +20,10 @@ if [[ ! "$answer" =~ ^[Yy]$ ]]; then
 fi
 
 GITHUB_ORG="Meanwhile-Together"
-# Full Meanwhile-Together workspace (adjust as repos come/go).
-REPOS=(
-  MTX
-  project-bridge
-  template-basic
-  org-sandbox
-  payload-admin
-  payload-client-portal
-  payload-litmus
-)
+MTX_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=includes/workspace-repos.sh
+source "$MTX_SCRIPT_DIR/includes/workspace-repos.sh"
+REPOS=("${MTX_WORKSPACE_REPOS[@]}")
 WORKSPACE_FILE="Meanwhile-Together.code-workspace"
 
 echo "📦 Creating $WORKSPACE_FILE and cloning ${#REPOS[@]} repos..." >&2
