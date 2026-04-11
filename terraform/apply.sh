@@ -1066,135 +1066,22 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         else
             (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && railway domain 2>/dev/null) || true
         fi
-        
-        # Ensure backend exists for this env: deploy backend code from current repo to backend-<env> (when service exists)
-        BACKEND_DEPLOY_ID="$BACKEND_SERVICE_ID"
-        [ -n "${FORCE_BACKEND:-}" ] && [ -n "$BACKEND_DEPLOY_ID" ] && echo -e "${CYAN}ℹ️  --force-backend: will redeploy backend to $BACKEND_SERVICE_NAME_FOR_ENV${NC}"
-        if [ -n "$BACKEND_DEPLOY_ID" ] && [ "$BACKEND_DEPLOY_ID" != "null" ]; then
-            echo ""
-            echo -e "${BLUE}🚀 Ensuring backend for $ENVIRONMENT: deploying from current repo to $BACKEND_SERVICE_NAME_FOR_ENV ($BACKEND_DEPLOY_ID)...${NC}"
-            if [ -n "${FORCE_BACKEND:-}" ]; then
-                echo -e "${CYAN}   (--force-backend: forcing redeploy)${NC}"
+
+        # mtx deploy asadmin: master auth env on the unified app service (same binary as local admin + payloads)
+        if [ -n "${RUN_AS_MASTER:-}" ] || [ -n "${MASTER_JWT_SECRET:-}" ] || [ -n "${MASTER_AUTH_ISSUER:-}" ] || [ -n "${MASTER_CORS_ORIGINS:-}" ]; then
+            echo -e "${BLUE}🔐 Setting master auth variables on $APP_SERVICE_NAME_FOR_ENV...${NC}"
+            export RAILWAY_TOKEN="$PROJECT_TOKEN"
+            unset RAILWAY_API_TOKEN
+            (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment)
+            if [ -n "${RUN_AS_MASTER:-}" ]; then
+                RUN_AS_MASTER_VAL="true"
+                (railway variables set "RUN_AS_MASTER=$RUN_AS_MASTER_VAL" 2>/dev/null && echo -e "${GREEN}✅ RUN_AS_MASTER=$RUN_AS_MASTER_VAL on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RUN_AS_MASTER via CLI${NC}"
             fi
-            
-            # Railway uses root railway.json for build/start. Use backend-server config for backend deploys.
-            RAILWAY_JSON_ROOT="$PROJECT_ROOT/railway.json"
-            RAILWAY_JSON_BACKEND="$PROJECT_ROOT/targets/backend-server/railway.json"
-            RAILWAY_JSON_BAK="$PROJECT_ROOT/railway.json.app.bak"
-            restore_railway_json() {
-                if [ -n "${RAILWAY_JSON_BAK:-}" ] && [ -f "$RAILWAY_JSON_BAK" ]; then
-                    mv "$RAILWAY_JSON_BAK" "$RAILWAY_JSON_ROOT"
-                fi
-            }
-            if [ -f "$RAILWAY_JSON_BACKEND" ]; then
-                cp "$RAILWAY_JSON_ROOT" "$RAILWAY_JSON_BAK"
-                cp "$RAILWAY_JSON_BACKEND" "$RAILWAY_JSON_ROOT"
-                trap restore_railway_json EXIT
-            fi
-            
-            # Build backend server (shared with mtx build backend; skip if pre-built)
-            BACKEND_BUILD_EXIT=0
-            if [ "${MTX_SKIP_BUILD:-}" = "1" ]; then
-                echo -e "${BLUE}ℹ️  MTX_SKIP_BUILD=1 — skipping backend build${NC}"
-            elif [ -f "$MTX_ROOT/build.sh" ]; then
-                echo -e "${BLUE}🔨 Building backend server...${NC}"
-                if ! bash "$MTX_ROOT/build.sh" backend; then
-                    BACKEND_BUILD_EXIT=$?
-                    echo -e "${YELLOW}⚠️  Backend build failed, skipping backend deployment${NC}"
-                fi
-            else
-                if [ ! -f "node_modules/.bin/prisma" ] && [ -f "package.json" ]; then
-                    echo -e "${BLUE}ℹ️  Prisma/dependencies not found, running npm install...${NC}"
-                    npm install || { echo -e "${RED}❌ npm install failed${NC}"; exit 1; }
-                    echo ""
-                fi
-                echo -e "${BLUE}🔨 Building backend server...${NC}"
-                npm run build:backend-server || {
-                    BACKEND_BUILD_EXIT=$?
-                    echo -e "${YELLOW}⚠️  Backend build failed, skipping backend deployment${NC}"
-                }
-            fi
-            
-            if [ "$BACKEND_BUILD_EXIT" -eq 0 ]; then
-                BACKEND_DEPLOY_SUCCESS=false
-                # Use same project token as app deploy so backend deploy is authorized (account token causes Unauthorized for railway up).
-                BACKEND_DEPLOY_TOKEN="$PROJECT_TOKEN"
-                export RAILWAY_TOKEN="$BACKEND_DEPLOY_TOKEN"
-                unset RAILWAY_API_TOKEN
-                export CI=true
-                if [ -d ".railway" ]; then
-                    RAILWAY_LINK_BAK_SVC=$(cat .railway/service 2>/dev/null || echo "")
-                    RAILWAY_LINK_BAK_PRJ=$(cat .railway/project 2>/dev/null || echo "")
-                    RAILWAY_LINK_BAK_ENV=$(cat .railway/environment 2>/dev/null || echo "")
-                fi
-                railway link --project "$PROJECT_ID" --service "$BACKEND_DEPLOY_ID" --environment "$ENVIRONMENT" 2>/dev/null || {
-                    mkdir -p .railway
-                    echo "$BACKEND_DEPLOY_ID" > .railway/service
-                    echo "$PROJECT_ID" > .railway/project
-                    echo "$ENVIRONMENT" > .railway/environment
-                }
-                if deploy_to_railway "$BACKEND_DEPLOY_TOKEN" "$PROJECT_ID" "$BACKEND_DEPLOY_ID" "$ENVIRONMENT" "verbose"; then
-                    BACKEND_DEPLOY_SUCCESS=true
-                    echo -e "${GREEN}✅ Backend deployment successful!${NC}"
-                    rm -f "$PROJECT_ROOT/.railway-backend-invalidated"
-                    # Ensure backend service has a Railway-provided public domain (*.railway.app)
-                    echo -e "${BLUE}🔗 Ensuring public domain for backend service...${NC}"
-                    export RAILWAY_TOKEN="$BACKEND_DEPLOY_TOKEN"
-                    unset RAILWAY_API_TOKEN
-                    if type ensure_railway_domain &>/dev/null; then
-                        ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$BACKEND_DEPLOY_ID" "$ENVIRONMENT" "backend" || true
-                    else
-                        (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$BACKEND_DEPLOY_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && railway domain 2>/dev/null) || true
-                    fi
-                    # When deploy asadmin: set the master switch first (server reads RUN_AS_MASTER to run as main master), then secret
-                    if [ -n "${RUN_AS_MASTER:-}" ] || [ -n "${MASTER_JWT_SECRET:-}" ]; then
-                        echo -e "${BLUE}🔐 Setting master switch and secret on backend service...${NC}"
-                        # Switch that signals to the server this is the main master (mounts /auth, etc.)
-                        if [ -n "${RUN_AS_MASTER:-}" ]; then
-                            RUN_AS_MASTER_VAL="true"
-                            (railway variables set "RUN_AS_MASTER=$RUN_AS_MASTER_VAL" 2>/dev/null && echo -e "${GREEN}✅ RUN_AS_MASTER=$RUN_AS_MASTER_VAL (master server) set on $BACKEND_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RUN_AS_MASTER via CLI${NC}"
-                        fi
-                        [ -n "${MASTER_JWT_SECRET:-}" ] && (railway variables set "MASTER_JWT_SECRET=$MASTER_JWT_SECRET" 2>/dev/null && echo -e "${GREEN}✅ MASTER_JWT_SECRET set on $BACKEND_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set MASTER_JWT_SECRET via CLI; set in Railway Dashboard if needed${NC}"
-                        [ -n "${MASTER_AUTH_ISSUER:-}" ] && railway variables set "MASTER_AUTH_ISSUER=$MASTER_AUTH_ISSUER" 2>/dev/null || true
-                        [ -n "${MASTER_CORS_ORIGINS:-}" ] && railway variables set "MASTER_CORS_ORIGINS=$MASTER_CORS_ORIGINS" 2>/dev/null || true
-                    fi
-                else
-                    echo -e "${YELLOW}⚠️  Backend deployment failed${NC}"
-                    if echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "404|Failed to upload code"; then
-                        # Self-heal: remove invalid backend from state and re-run apply so Terraform creates a new backend
-                        if [ "${RAILWAY_BACKEND_SELF_HEAL:-0}" = "1" ]; then
-                            DEPLOY_INVALIDATED_SERVICE=1
-                            echo -e "${CYAN}   Self-heal already attempted; backend still invalid. Re-run: ./scripts/setup.sh --setup-deployment${NC}"
-                        else
-                            echo -e "${BLUE}🔧 Self-healing: removing invalid backend from Terraform state and retrying...${NC}"
-                            cd "$SCRIPT_DIR"
-                            BACKEND_RES="module.railway_owner[0].railway_service.backend_${ENVIRONMENT}[0]"
-                            if terraform state list 2>/dev/null | grep -qF "$BACKEND_RES"; then
-                                terraform state rm "$BACKEND_RES" 2>/dev/null || true
-                                echo -e "${GREEN}   Removed backend-${ENVIRONMENT} from state.${NC}"
-                            fi
-                            touch "$PROJECT_ROOT/.railway-backend-invalidated"
-                            export RAILWAY_BACKEND_SELF_HEAL=1
-                            APPLY_ARGS=("$ENVIRONMENT")
-                            [ -n "${FORCE_BACKEND:-}" ] && APPLY_ARGS=("--force-backend" "$ENVIRONMENT")
-                            echo -e "${BLUE}   Re-running apply to create new backend and deploy.${NC}"
-                            echo ""
-                            exec "$0" "${APPLY_ARGS[@]}"
-                        fi
-                    fi
-                fi
-                # Restore .railway link to app service for any later commands
-                if [ -d ".railway" ] && [ -n "${RAILWAY_LINK_BAK_SVC:-}" ]; then
-                    echo "$RAILWAY_LINK_BAK_SVC" > .railway/service
-                    [ -n "${RAILWAY_LINK_BAK_PRJ:-}" ] && echo "$RAILWAY_LINK_BAK_PRJ" > .railway/project
-                    [ -n "${RAILWAY_LINK_BAK_ENV:-}" ] && echo "$RAILWAY_LINK_BAK_ENV" > .railway/environment
-                fi
-            fi
-            
-            trap - EXIT
-            restore_railway_json
+            [ -n "${MASTER_JWT_SECRET:-}" ] && (railway variables set "MASTER_JWT_SECRET=$MASTER_JWT_SECRET" 2>/dev/null && echo -e "${GREEN}✅ MASTER_JWT_SECRET set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set MASTER_JWT_SECRET via CLI${NC}"
+            [ -n "${MASTER_AUTH_ISSUER:-}" ] && railway variables set "MASTER_AUTH_ISSUER=$MASTER_AUTH_ISSUER" 2>/dev/null || true
+            [ -n "${MASTER_CORS_ORIGINS:-}" ] && railway variables set "MASTER_CORS_ORIGINS=$MASTER_CORS_ORIGINS" 2>/dev/null || true
         fi
-        
+
         echo ""
         echo -e "${GREEN}✅ Deployment complete!${NC}"
         echo "Your application should be live on Railway shortly."
@@ -1202,8 +1089,4 @@ if [ "$HAS_RAILWAY" = "true" ]; then
 fi
 
 echo ""
-if [ "${DEPLOY_INVALIDATED_SERVICE:-0}" = "1" ]; then
-    echo -e "${YELLOW}⚠️  Backend deploy failed after self-heal retry. Re-run: ./scripts/setup.sh --setup-deployment${NC}"
-    exit 2
-fi
 echo -e "${GREEN}✅ All done!${NC}"

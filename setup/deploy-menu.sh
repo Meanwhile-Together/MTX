@@ -343,7 +343,7 @@ guided_setup() {
         echo ""
         echo -e "${CYAN}Step 5: Deploying to Railway...${NC}"
         echo "This will deploy your code to the provisioned infrastructure."
-        echo -e "${BLUE}Note: DATABASE_URL is provided by the Railway Postgres extension to all services in the project (backend, app server).${NC}"
+        echo -e "${BLUE}Note: DATABASE_URL from Postgres applies to services you attach it to (typically the unified app service).${NC}"
         read -p "Continue with deployment? (y/n, default: y): " deploy_confirm
         deploy_confirm="${deploy_confirm:-y}"
         
@@ -356,10 +356,8 @@ guided_setup() {
             ENVIRONMENT="${ENVIRONMENT:-staging}"
             if [ "$ENVIRONMENT" = "production" ]; then
                 SERVICE_ID=$(terraform output -raw railway_app_service_id_production 2>/dev/null || echo "")
-                BACKEND_SERVICE_ID=$(terraform output -raw railway_backend_production_service_id 2>/dev/null || echo "")
             else
                 SERVICE_ID=$(terraform output -raw railway_app_service_id_staging 2>/dev/null || echo "")
-                BACKEND_SERVICE_ID=$(terraform output -raw railway_backend_staging_service_id 2>/dev/null || echo "")
             fi
             
             if [ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "null" ] && [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "null" ]; then
@@ -410,37 +408,6 @@ guided_setup() {
                     railway up --environment "$ENVIRONMENT" || {
                         echo -e "${YELLOW}⚠️  Deployment failed. You can retry later with option 5.${NC}"
                     }
-                    # Deploy backend (backend-server + backend panel) to backend service
-                    if [ -n "$BACKEND_SERVICE_ID" ] && [ "$BACKEND_SERVICE_ID" != "null" ]; then
-                        echo ""
-                        read -p "Deploy backend (backend-server + backend panel) to the backend service? (y/n, default: n): " deploy_backend_confirm
-                        deploy_backend_confirm="${deploy_backend_confirm:-n}"
-                        if [ "$deploy_backend_confirm" = "y" ] || [ "$deploy_backend_confirm" = "Y" ]; then
-                            go_to_project_root
-                            echo -e "${CYAN}Building backend-server and backend...${NC}"
-                            npm run build:backend-server && npm run build:backend || {
-                                echo -e "${RED}❌ Build failed.${NC}"
-                            }
-                            # Railway uses root railway.json; swap to backend config so backend service gets correct build/start
-                            RAILWAY_JSON_ROOT="./railway.json"
-                            RAILWAY_JSON_BACKEND="./targets/backend-server/railway.json"
-                            RAILWAY_JSON_BAK="./railway.json.app.bak"
-                            if [ -f "$RAILWAY_JSON_BACKEND" ]; then
-                                cp "$RAILWAY_JSON_ROOT" "$RAILWAY_JSON_BAK"
-                                cp "$RAILWAY_JSON_BACKEND" "$RAILWAY_JSON_ROOT"
-                            fi
-                            echo -e "${BLUE}Linking to backend service and deploying...${NC}"
-                            railway link --service "$BACKEND_SERVICE_ID" --project "$PROJECT_ID" 2>/dev/null || true
-                            railway up --environment "$ENVIRONMENT" || {
-                                echo -e "${YELLOW}⚠️  Backend deployment failed. Ensure the backend service has start command: node targets/backend-server/dist/index.js${NC}"
-                            }
-                            if [ -f "$RAILWAY_JSON_BAK" ]; then
-                                mv "$RAILWAY_JSON_BAK" "$RAILWAY_JSON_ROOT"
-                            fi
-                            # Restore link to app service for future runs
-                            railway link --service "$SERVICE_ID" --project "$PROJECT_ID" 2>/dev/null || true
-                        fi
-                    fi
                 else
                     echo -e "${YELLOW}⚠️  No project token provided. Skipping deployment.${NC}"
                     echo "You can deploy later with option 5 from the main menu."

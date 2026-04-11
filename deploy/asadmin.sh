@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy as master admin: same as "mtx deploy" but sets RUN_AS_MASTER and ensures
-# MASTER_JWT_SECRET (and related env) are passed via env, persisted to .env and Railway backend.
-desc="Deploy as master admin (RUN_AS_MASTER); persists is-master env to .env and Railway backend"
+# MASTER_JWT_SECRET (and related env) are passed via env, persisted to .env and the unified Railway app service.
+desc="Deploy as master admin (RUN_AS_MASTER); persists is-master env to .env and Railway app service"
 nobanner=1
 set -e
 
