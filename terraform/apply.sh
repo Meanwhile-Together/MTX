@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # MTX terraform apply: run from project root (wrapper sets cwd); use project's terraform dir
-desc="Apply Terraform (Railway etc.); deploy app and backend"
+desc="Apply Terraform (Railway etc.); deploy unified app service"
 set -e
 
 # Directory where this script lives (MTX/terraform); use for sourcing subroutines, not project's terraform
@@ -117,14 +117,17 @@ PLATFORMS=$(jq -r '.platform | join(", ")' "$PROJECT_ROOT/config/deploy.json")
 echo -e "📋 Platforms in deploy.json: ${GREEN}[$PLATFORMS]${NC}"
 echo ""
 
-# Parse script args: [environment] [--force-backend] or [--force-backend] [environment]
-# FORCE_BACKEND can come from env (e.g. setup.sh --force-backend) or from --force-backend flag
+# Parse script args: [environment] [--force-backend] (flag ignored; unified server has no separate backend service)
 ENVIRONMENT="staging"
 FORCE_BACKEND="${FORCE_BACKEND:-}"
 while [ $# -gt 0 ]; do
     case "$1" in
-        --force-backend) FORCE_BACKEND="1"; shift ;;
-        *)               ENVIRONMENT="$1"; shift ;;
+        --force-backend)
+            echo -e "${CYAN}ℹ️  --force-backend is deprecated (single unified Railway service).${NC}"
+            FORCE_BACKEND="1"
+            shift
+            ;;
+        *) ENVIRONMENT="$1"; shift ;;
     esac
 done
 [ -z "$ENVIRONMENT" ] && ENVIRONMENT="staging"
@@ -261,10 +264,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         TF_VARS+=(-var="railway_owner_project_id=$RAILWAY_PROJECT_ID_FOR_RUN")
     fi
     
-    # Resolve all four service IDs (backend-staging, backend-production, app-staging, app-production)
+    # Resolve app service IDs ({slug}-staging, {slug}-production); unified server — no separate backend-* services
     discover_railway_services() {
-        EXISTING_BACKEND_STAGING_ID=""
-        EXISTING_BACKEND_PRODUCTION_ID=""
         EXISTING_APP_STAGING_ID=""
         EXISTING_APP_PRODUCTION_ID=""
         [ -z "$SERVICES_RESPONSE" ] && return
@@ -275,13 +276,9 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             [ -z "$id" ] || [ "$id" = "null" ] && id=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$name" '.data.project.services[]? | select(.name == $name) | .id // empty' 2>/dev/null | head -1)
             echo "$id"
         }
-        EXISTING_BACKEND_STAGING_ID=$(get_id "backend-staging")
-        EXISTING_BACKEND_PRODUCTION_ID=$(get_id "backend-production")
         EXISTING_APP_STAGING_ID=$(get_id "$APP_SLUG-staging")
         EXISTING_APP_PRODUCTION_ID=$(get_id "$APP_SLUG-production")
     }
-    EXISTING_BACKEND_STAGING_ID=""
-    EXISTING_BACKEND_PRODUCTION_ID=""
     EXISTING_APP_STAGING_ID=""
     EXISTING_APP_PRODUCTION_ID=""
     if [ -n "${RAILWAY_PROJECT_ID_FOR_RUN:-}" ] && [ -n "${RAILWAY_TOKEN_VALUE:-}" ]; then
@@ -291,22 +288,6 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             -H "Content-Type: application/json" \
             -d "$SERVICES_QUERY" 2>/dev/null)
         discover_railway_services
-    fi
-    if [ -f "$PROJECT_ROOT/.railway-backend-invalidated" ]; then
-        EXISTING_BACKEND_STAGING_ID=""
-        EXISTING_BACKEND_PRODUCTION_ID=""
-    fi
-    if [ -n "$EXISTING_BACKEND_STAGING_ID" ] && [ "$EXISTING_BACKEND_STAGING_ID" != "null" ]; then
-        echo -e "${GREEN}✅${NC} Backend service backend-staging already exists"
-        TF_VARS+=(-var="railway_backend_staging_id=$EXISTING_BACKEND_STAGING_ID")
-    else
-        echo -e "${CYAN}ℹ️${NC}  Backend service backend-staging not found; Terraform will create it"
-    fi
-    if [ -n "$EXISTING_BACKEND_PRODUCTION_ID" ] && [ "$EXISTING_BACKEND_PRODUCTION_ID" != "null" ]; then
-        echo -e "${GREEN}✅${NC} Backend service backend-production already exists"
-        TF_VARS+=(-var="railway_backend_production_id=$EXISTING_BACKEND_PRODUCTION_ID")
-    else
-        echo -e "${CYAN}ℹ️${NC}  Backend service backend-production not found; Terraform will create it"
     fi
     if [ -n "$EXISTING_APP_STAGING_ID" ] && [ "$EXISTING_APP_STAGING_ID" != "null" ]; then
         echo -e "${GREEN}✅${NC} App service $APP_SLUG-staging already exists"
@@ -369,30 +350,25 @@ if [ "$HAS_RAILWAY" = "true" ] && [ -n "${RAILWAY_PROJECT_ID_FOR_RUN:-}" ] && [ 
     fi
 fi
 
-# Remove legacy single "backend" resource from state if present (we now use backend-staging / backend-production).
+# Remove legacy single "backend" resource from state if present
 if terraform state list 2>/dev/null | grep -q 'module.railway_owner\[0\].railway_service.backend\[0\]'; then
-    echo -e "${CYAN}ℹ️  Removing legacy backend from state (replaced by backend-staging / backend-production)...${NC}"
+    echo -e "${CYAN}ℹ️  Removing legacy backend from state...${NC}"
     terraform state rm 'module.railway_owner[0].railway_service.backend[0]' 2>/dev/null || true
 fi
+# Unified server: drop backend-staging / backend-prod from Terraform state (no longer in config). Railway may still show those services until you delete them in the dashboard.
+for _be in 'module.railway_owner[0].railway_service.backend_staging[0]' 'module.railway_owner[0].railway_service.backend_production[0]'; do
+    if terraform state list 2>/dev/null | grep -qF "$_be"; then
+        echo -e "${CYAN}ℹ️  Removing ${_be} from Terraform state (unified app service only)...${NC}"
+        terraform state rm "$_be" 2>/dev/null || true
+    fi
+done
 # Remove legacy single "app" resource from state if present (we now use app_staging / app_production).
 if terraform state list 2>/dev/null | grep -qF 'module.railway_app[0].railway_service.app[0]'; then
     echo -e "${CYAN}ℹ️  Removing legacy app service from state (replaced by app_staging / app_production)...${NC}"
     terraform state rm 'module.railway_app[0].railway_service.app[0]' 2>/dev/null || true
 fi
 
-# When we pass an existing backend/app ID, remove that resource from state so Terraform does not plan to destroy it.
-if [ -n "${EXISTING_BACKEND_STAGING_ID:-}" ] && [ "$EXISTING_BACKEND_STAGING_ID" != "null" ]; then
-    if terraform state list 2>/dev/null | grep -qF 'module.railway_owner[0].railway_service.backend_staging[0]'; then
-        echo -e "${CYAN}ℹ️  Removing backend_staging from state (using existing service)...${NC}"
-        terraform state rm 'module.railway_owner[0].railway_service.backend_staging[0]' 2>/dev/null || true
-    fi
-fi
-if [ -n "${EXISTING_BACKEND_PRODUCTION_ID:-}" ] && [ "$EXISTING_BACKEND_PRODUCTION_ID" != "null" ]; then
-    if terraform state list 2>/dev/null | grep -qF 'module.railway_owner[0].railway_service.backend_production[0]'; then
-        echo -e "${CYAN}ℹ️  Removing backend_production from state (using existing service)...${NC}"
-        terraform state rm 'module.railway_owner[0].railway_service.backend_production[0]' 2>/dev/null || true
-    fi
-fi
+# When we pass an existing app ID, remove that resource from state so Terraform does not plan to destroy it.
 if [ -n "${EXISTING_APP_STAGING_ID:-}" ] && [ "$EXISTING_APP_STAGING_ID" != "null" ]; then
     if terraform state list 2>/dev/null | grep -qF 'module.railway_app[0].railway_service.app_staging[0]'; then
         echo -e "${CYAN}ℹ️  Removing app_staging from state (using existing service)...${NC}"
@@ -423,8 +399,6 @@ if [ $TERRAFORM_EXIT -ne 0 ] && grep -q "already exists in this project" "$TF_AP
         -H "Content-Type: application/json" \
         -d "$SERVICES_QUERY" 2>/dev/null)
     discover_railway_services
-    [ -n "$EXISTING_BACKEND_STAGING_ID" ] && [ "$EXISTING_BACKEND_STAGING_ID" != "null" ] && TF_VARS+=(-var="railway_backend_staging_id=$EXISTING_BACKEND_STAGING_ID") && terraform state rm 'module.railway_owner[0].railway_service.backend_staging[0]' 2>/dev/null || true
-    [ -n "$EXISTING_BACKEND_PRODUCTION_ID" ] && [ "$EXISTING_BACKEND_PRODUCTION_ID" != "null" ] && TF_VARS+=(-var="railway_backend_production_id=$EXISTING_BACKEND_PRODUCTION_ID") && terraform state rm 'module.railway_owner[0].railway_service.backend_production[0]' 2>/dev/null || true
     [ -n "$EXISTING_APP_STAGING_ID" ] && [ "$EXISTING_APP_STAGING_ID" != "null" ] && TF_VARS+=(-var="railway_service_id_staging=$EXISTING_APP_STAGING_ID") && terraform state rm 'module.railway_app[0].railway_service.app_staging[0]' 2>/dev/null || true
     [ -n "$EXISTING_APP_PRODUCTION_ID" ] && [ "$EXISTING_APP_PRODUCTION_ID" != "null" ] && TF_VARS+=(-var="railway_service_id_production=$EXISTING_APP_PRODUCTION_ID") && terraform state rm 'module.railway_app[0].railway_service.app_production[0]' 2>/dev/null || true
     echo ""
@@ -467,12 +441,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
     # Get Railway service IDs and project ID from Terraform outputs (env-specific for deploy)
     if [ "$ENVIRONMENT" = "staging" ]; then
         SERVICE_ID=$(terraform output -raw railway_app_service_id_staging 2>/dev/null || echo "")
-        BACKEND_SERVICE_ID=$(terraform output -raw railway_backend_staging_service_id 2>/dev/null || echo "")
-        [ -z "$BACKEND_SERVICE_ID" ] || [ "$BACKEND_SERVICE_ID" = "null" ] && [ -n "${EXISTING_BACKEND_STAGING_ID:-}" ] && BACKEND_SERVICE_ID="$EXISTING_BACKEND_STAGING_ID"
     else
         SERVICE_ID=$(terraform output -raw railway_app_service_id_production 2>/dev/null || echo "")
-        BACKEND_SERVICE_ID=$(terraform output -raw railway_backend_production_service_id 2>/dev/null || echo "")
-        [ -z "$BACKEND_SERVICE_ID" ] || [ "$BACKEND_SERVICE_ID" = "null" ] && [ -n "${EXISTING_BACKEND_PRODUCTION_ID:-}" ] && BACKEND_SERVICE_ID="$EXISTING_BACKEND_PRODUCTION_ID"
     fi
     PROJECT_ID=$(terraform output -raw railway_project_id 2>/dev/null || echo "")
     # If project ID changed (e.g. Terraform just created a new project), clear project tokens — they're for the old project
@@ -492,17 +462,10 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         set_env_var_in_file "RAILWAY_PROJECT_ID" "$PROJECT_ID"
     fi
     
-    # Explicit deploy target: always deploy app to the chosen environment's app service; ensure backend exists and deploy from repo when present
+    # Unified server: single Railway service per env ({slug}-staging / {slug}-production)
     APP_SERVICE_NAME_FOR_ENV="$APP_SLUG-$ENVIRONMENT"
-    BACKEND_SERVICE_NAME_FOR_ENV="backend-$ENVIRONMENT"
     echo -e "${CYAN}Deploy target (environment: $ENVIRONMENT):${NC}"
-    echo -e "  App:    $APP_SERVICE_NAME_FOR_ENV ${GREEN}(service id: ${SERVICE_ID:-<none>})${NC}"
-    echo -e "  Backend: $BACKEND_SERVICE_NAME_FOR_ENV ${GREEN}(service id: ${BACKEND_SERVICE_ID:-<none>})${NC}"
-    if [ -z "$BACKEND_SERVICE_ID" ] || [ "$BACKEND_SERVICE_ID" = "null" ]; then
-        echo -e "  ${YELLOW}Backend service for $ENVIRONMENT not found; only app will be deployed. Re-run apply to create backend-$ENVIRONMENT if needed.${NC}"
-    else
-        echo -e "  Backend will be deployed from current repo to $BACKEND_SERVICE_NAME_FOR_ENV after app deploy."
-    fi
+    echo -e "  Unified app service: $APP_SERVICE_NAME_FOR_ENV ${GREEN}(service id: ${SERVICE_ID:-<none>})${NC}"
     echo ""
     
     if [ -z "$SERVICE_ID" ] || [ "$SERVICE_ID" = "null" ]; then
@@ -1007,7 +970,6 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         fi
         
         # Step 4: Deploy using Railway CLI with environment-specific project token
-        DEPLOY_INVALIDATED_SERVICE=0
         echo -e "${BLUE}🚀 Deploying to Railway ($ENVIRONMENT environment)...${NC}"
         export RAILWAY_SERVICE="$SERVICE_ID"
         export RAILWAY_PROJECT="$PROJECT_ID"
@@ -1077,7 +1039,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     clear_env_var_in_file "RAILWAY_APP_SERVICE_ID"
                     echo -e "${RED}❌ App deployment failed (service or environment invalid)${NC}"
                     echo ""
-                    echo -e "${CYAN}   Re-run: ./scripts/setup.sh --setup-deployment (or with --force-backend) to re-discover services.${NC}"
+                    echo -e "${CYAN}   Re-run: ./scripts/setup.sh --setup-deployment to re-discover services.${NC}"
                     exit 2
                 else
                     # Non-token error, don't retry
