@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # MTX workspace: create a fresh Meanwhile-Together multi-repo workspace (empty folder only).
-# Prompts, then creates a VS Code workspace file and clones repos (MTX, project-bridge, client-a).
-desc="Create fresh Meanwhile-Together workspace (empty folder); clones MTX, project-bridge, client-a"
+# Prompts, then creates a VS Code workspace file and clones the full current repo set (see REPOS).
+desc="Create fresh Meanwhile-Together workspace (empty folder); clones full MT repo list (REPOS in script)"
 set -e
 
 # Require empty folder (only ., .., and optionally .git)
@@ -20,7 +20,16 @@ if [[ ! "$answer" =~ ^[Yy]$ ]]; then
 fi
 
 GITHUB_ORG="Meanwhile-Together"
-REPOS=(MTX project-bridge client-a)
+# Full Meanwhile-Together workspace (adjust as repos come/go).
+REPOS=(
+  MTX
+  project-bridge
+  template-basic
+  org-sandbox
+  payload-admin
+  payload-client-portal
+  payload-litmus
+)
 WORKSPACE_FILE="Meanwhile-Together.code-workspace"
 
 echo "📦 Creating $WORKSPACE_FILE and cloning ${#REPOS[@]} repos..." >&2

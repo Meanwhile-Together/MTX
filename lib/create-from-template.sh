@@ -1,5 +1,5 @@
 # Shared: scaffold a GitHub repo from a template with a fixed name prefix (payload-, org-, or template-).
-# Loaded only from mtx create/payload|org|template, payload/org/template create, or top-level create — NOT from includes/ (mtx auto-sources includes/*.sh at boot).
+# Loaded only from mtx create/payload|org|template, payload/template create (legacy), or top-level create — NOT from includes/ (mtx auto-sources includes/*.sh at boot).
 # Callers must set MTX_ROOT to the MTX repo root before sourcing this file.
 # Callers set: MTX_REPO_PREFIX, MTX_TEMPLATE_REPO, MTX_KIND_LABEL, MTX_CREATE_CMD
 # Repo prefixes: payload-, org-, template- (`template-*` = payload templates only; see docs/MTX_SCAFFOLDING_MODEL.md).
@@ -347,27 +347,36 @@ mtx_org_merge_host_into_package_json() {
     warn "scripts/org-dev-server.sh missing from template; cannot wire dev."
     return 1
   fi
-  chmod +x "$repo_path/scripts/org-build-server.sh" "$repo_path/scripts/org-dev-server.sh"
+  if [ ! -f "$repo_path/scripts/railway-build.sh" ] || [ ! -f "$repo_path/scripts/ensure-vendor-project-bridge.sh" ]; then
+    warn "scripts/railway-build.sh or ensure-vendor-project-bridge.sh missing from template."
+    return 1
+  fi
+  chmod +x "$repo_path/scripts/org-build-server.sh" "$repo_path/scripts/org-dev-server.sh" \
+    "$repo_path/scripts/railway-build.sh" "$repo_path/scripts/ensure-vendor-project-bridge.sh"
   if ! command -v jq &>/dev/null; then
     warn "jq required to merge org host into package.json"
     return 1
   fi
   jq \
     '
-    .dependencies["projectb"] = "file:../project-bridge"
+    .dependencies = ((.dependencies // {}) | del(.projectb))
+    | .dependencies["@meanwhile-together/shared"] = "file:vendor/project-bridge/shared"
+    | .dependencies["@meanwhile-together/ui"] = "file:vendor/project-bridge/ui"
+    | .devDependencies = ((.devDependencies // {}) + {"@meanwhile-together/engine": "file:vendor/project-bridge/engine"})
+    | .scripts["preinstall"] = "bash scripts/ensure-vendor-project-bridge.sh"
     | .scripts["dev"] = "bash scripts/org-dev-server.sh"
     | .scripts["build:server"] = "bash scripts/org-build-server.sh"
     | .scripts["build:backend-server"] = "npm run build:server"
     ' "$pkg" > "${pkg}.tmp" && mv "${pkg}.tmp" "$pkg"
 
   if [ -f "$pb/railway.json" ]; then
-    jq '.build.buildCommand = "npm install && bash scripts/org-build-server.sh"' "$pb/railway.json" > "$repo_path/railway.json"
+    jq '.build.buildCommand = "bash scripts/railway-build.sh"' "$pb/railway.json" > "$repo_path/railway.json"
   else
     jq -n \
       --arg schema "https://railway.app/railway.schema.json" \
       '{
         "$schema": $schema,
-        build: { builder: "RAILPACK", buildCommand: "npm install && bash scripts/org-build-server.sh" },
+        build: { builder: "RAILPACK", buildCommand: "bash scripts/railway-build.sh" },
         deploy: { startCommand: "node targets/server/dist/index.js", restartPolicyType: "ON_FAILURE", restartPolicyMaxRetries: 10 }
       }' > "$repo_path/railway.json"
   fi
