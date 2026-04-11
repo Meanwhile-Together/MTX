@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Same as template/create.sh — use `mtx create template` or `mtx template create`.
-desc="Create a template-* repo from a source template (default template-basic; override MTX_TEMPLATE_SOURCE_REPO)"
+# Run from a payload repo root: snapshots the current tree into a new template-* git repo. See docs/MTX_SCAFFOLDING_MODEL.md.
+desc="Create a template-* repo by snapshotting the current payload directory (run from payload root; optional name arg)"
 nobanner=1
 set -e
 
 MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export MTX_REPO_PREFIX="template-"
-export MTX_TEMPLATE_REPO="${MTX_TEMPLATE_SOURCE_REPO:-${MTX_PAYLOAD_TEMPLATE_REPO:-template-basic}}"
-export MTX_KIND_LABEL="Template"
+export MTX_KIND_LABEL="Payload template"
 export MTX_CREATE_CMD="mtx create template"
 
 # shellcheck source=../lib/create-from-template.sh
 source "$MTX_ROOT/lib/create-from-template.sh"
-mtx_create_from_template_run
+mtx_create_template_from_payload_run "$@"

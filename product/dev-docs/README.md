@@ -23,6 +23,7 @@ The same doc structure exists in `project-bridge/product/dev-docs/`. Content is 
 
 These live in the main `docs/` folders and go deeper than the developer-user docs above:
 
+- `MTX/docs/MTX_SCAFFOLDING_MODEL.md` — **`template-*`** payload templates (`template-basic` + forkable starters), universal org, admin as payload.
 - `MTX/docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md` — Canonical architecture: payload = app, Project Bridge = central host, fork path optional.
 - `MTX/docs/MTX_DEPLOY_CONTRACT.md` — Deploy entry point contract.
 - `MTX/docs/INFRA_AND_DEPLOY_REFERENCE.md` — Tokens, config, Terraform, Railway, CI.

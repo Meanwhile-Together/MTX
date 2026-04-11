@@ -1,8 +1,16 @@
-# Shared: scaffold a GitHub repo from a template with a fixed name prefix (payload- or org-).
+# Shared: scaffold a GitHub repo from a template with a fixed name prefix (payload-, org-, or template-).
 # Loaded only from mtx create/payload|org|template, payload/org/template create, or top-level create — NOT from includes/ (mtx auto-sources includes/*.sh at boot).
 # Callers must set MTX_ROOT to the MTX repo root before sourcing this file.
 # Callers set: MTX_REPO_PREFIX, MTX_TEMPLATE_REPO, MTX_KIND_LABEL, MTX_CREATE_CMD
+# Repo prefixes: payload-, org-, template- (`template-*` = payload templates only; see docs/MTX_SCAFFOLDING_MODEL.md).
 # Optional: MTX_WORKSPACE_ROOT, MTX_GITHUB_ORG, MTX_CREATE_SKIP_GITHUB=1 (local git + snippet only; no gh).
+# Optional CLI name: mtx_create_from_template_run "$@" — if any args are given, they are joined with
+# spaces (trimmed) and used as the display name; otherwise the script prompts interactively.
+# Org (org-*): prompts for repo name, app slug, owner, URLs, deploy projectId, server.json paths (defaults always shown).
+#   Non-interactive: MTX_CREATE_NONINTERACTIVE=1 or no TTY — use MTX_ORG_REPO_NAME, MTX_ORG_DISPLAY_NAME,
+#   MTX_ORG_APP_SLUG, MTX_ORG_OWNER, MTX_ORG_VERSION, MTX_ORG_DEV_PORT, MTX_ORG_DEV_URL, MTX_ORG_STAGING_PORT,
+#   MTX_ORG_STAGING_URL, MTX_ORG_PROD_PORT, MTX_ORG_PROD_URL, MTX_ORG_DEPLOY_PROJECT_ID, MTX_ORG_SERVER_PORT,
+#   MTX_ORG_PROJECT_ROOT, MTX_ORG_STATE_DIR (secrets stay in backend.example.json / .env — not prompted).
 # Default clone source repo name: template-basic (override with MTX_PAYLOAD_TEMPLATE_REPO / MTX_ORG_TEMPLATE_REPO / MTX_TEMPLATE_SOURCE_REPO).
 # With gh: new repos use `gh repo create org/repo --source=. --remote=origin --push`; existing repos get origin + git push.
 
@@ -24,7 +32,7 @@ slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*\|-*$//g'
 }
 
-# Ensure repo name starts with required prefix (payload- or org-).
+# Ensure repo name starts with required prefix (payload-, org-, template-, …).
 ensure_mtx_repo_prefix() {
   local raw="$1"
   local p="$2"
@@ -137,11 +145,251 @@ mtx_create_print_server_json_snippet() {
   echo ""
 }
 
+# Interactive defaults for org host config (secrets never prompted — use backend.example.json / env).
+# Sets ORG_CFG_* and APP_SLUG. Non-interactive: MTX_ORG_* env vars or defaults only.
+mtx_org_collect_host_config() {
+  local repo_name="$1" display_name="$2" github_org="$3"
+  local default_slug
+  default_slug=$(slugify "${repo_name#org-}")
+  [ -z "$default_slug" ] && default_slug=$(slugify "$repo_name")
+
+  ORG_CFG_DISPLAY_NAME="${MTX_ORG_DISPLAY_NAME:-$display_name}"
+  ORG_CFG_APP_SLUG="${MTX_ORG_APP_SLUG:-$default_slug}"
+  ORG_CFG_OWNER=$(printf '%s' "${MTX_ORG_OWNER:-$github_org}" | tr '[:upper:]' '[:lower:]')
+  ORG_CFG_VERSION="${MTX_ORG_VERSION:-1.0.0}"
+  ORG_CFG_DEV_PORT="${MTX_ORG_DEV_PORT:-3001}"
+  ORG_CFG_DEV_URL="${MTX_ORG_DEV_URL:-http://localhost:3001}"
+  ORG_CFG_STAGING_PORT="${MTX_ORG_STAGING_PORT:-3001}"
+  ORG_CFG_STAGING_URL="${MTX_ORG_STAGING_URL:-https://staging-api.example.com}"
+  ORG_CFG_PROD_PORT="${MTX_ORG_PROD_PORT:-3001}"
+  ORG_CFG_PROD_URL="${MTX_ORG_PROD_URL:-https://api.example.com}"
+  ORG_CFG_DEPLOY_PROJECT_ID="${MTX_ORG_DEPLOY_PROJECT_ID:-}"
+  ORG_CFG_SERVER_PORT="${MTX_ORG_SERVER_PORT:-3001}"
+  ORG_CFG_PROJECT_ROOT="${MTX_ORG_PROJECT_ROOT:-..}"
+  ORG_CFG_STATE_DIR="${MTX_ORG_STATE_DIR:-.state}"
+
+  if [ -t 0 ] && [ -t 1 ] && [ "${MTX_CREATE_NONINTERACTIVE:-}" != "1" ]; then
+    echo ""
+    echoc cyan "Host & deploy settings (Enter = keep default):"
+    local _v
+    read -rp "  App display name [$ORG_CFG_DISPLAY_NAME]: " _v
+    [ -n "$_v" ] && ORG_CFG_DISPLAY_NAME="$_v"
+    read -rp "  App slug (config + Railway) [$ORG_CFG_APP_SLUG]: " _v
+    [ -n "$_v" ] && ORG_CFG_APP_SLUG="$(slugify "$_v")"
+    [ -z "$ORG_CFG_APP_SLUG" ] && ORG_CFG_APP_SLUG="$default_slug"
+    read -rp "  Railway / workspace owner (GitHub org name) [$ORG_CFG_OWNER]: " _v
+    [ -n "$_v" ] && ORG_CFG_OWNER=$(printf '%s' "$_v" | tr '[:upper:]' '[:lower:]')
+    read -rp "  App version [$ORG_CFG_VERSION]: " _v
+    [ -n "$_v" ] && ORG_CFG_VERSION="$_v"
+    read -rp "  Development port [$ORG_CFG_DEV_PORT]: " _v
+    [ -n "$_v" ] && ORG_CFG_DEV_PORT="$_v"
+    read -rp "  Development URL [$ORG_CFG_DEV_URL]: " _v
+    [ -n "$_v" ] && ORG_CFG_DEV_URL="$_v"
+    read -rp "  Staging URL [$ORG_CFG_STAGING_URL]: " _v
+    [ -n "$_v" ] && ORG_CFG_STAGING_URL="$_v"
+    read -rp "  Production URL [$ORG_CFG_PROD_URL]: " _v
+    [ -n "$_v" ] && ORG_CFG_PROD_URL="$_v"
+    read -rp "  Railway deploy.json projectId (optional) [$ORG_CFG_DEPLOY_PROJECT_ID]: " _v
+    ORG_CFG_DEPLOY_PROJECT_ID="${_v:-$ORG_CFG_DEPLOY_PROJECT_ID}"
+    read -rp "  server.json — HTTP port [$ORG_CFG_SERVER_PORT]: " _v
+    [ -n "$_v" ] && ORG_CFG_SERVER_PORT="$_v"
+    read -rp "  server.json — projectRoot (unified server) [$ORG_CFG_PROJECT_ROOT]: " _v
+    [ -n "$_v" ] && ORG_CFG_PROJECT_ROOT="$_v"
+    read -rp "  server.json — stateDir [$ORG_CFG_STATE_DIR]: " _v
+    [ -n "$_v" ] && ORG_CFG_STATE_DIR="$_v"
+    echo ""
+  fi
+
+  export ORG_CFG_DISPLAY_NAME ORG_CFG_APP_SLUG ORG_CFG_OWNER ORG_CFG_VERSION
+  export ORG_CFG_DEV_PORT ORG_CFG_DEV_URL ORG_CFG_STAGING_PORT ORG_CFG_STAGING_URL ORG_CFG_PROD_PORT ORG_CFG_PROD_URL
+  export ORG_CFG_DEPLOY_PROJECT_ID ORG_CFG_SERVER_PORT ORG_CFG_PROJECT_ROOT ORG_CFG_STATE_DIR
+  APP_SLUG="$ORG_CFG_APP_SLUG"
+}
+
+# Org repos: same config surface as project-bridge (from template) + terraform/ vendored from sibling project-bridge.
+mtx_org_scaffold_deploy_config_surface() {
+  local repo_path="$1" repo_name="$2" _display_name="$3" workspace_root="$4" github_org="$5"
+  local tf_src gitignore app_base deploy_base server_base
+
+  if ! command -v jq &>/dev/null; then
+    warn "jq is required to merge org host config (install jq)."
+    return 1
+  fi
+
+  mkdir -p "$repo_path/config"
+  workspace_root="$(cd "$workspace_root" && pwd -P)"
+  app_base="$repo_path/config/app.json"
+  if [ ! -f "$app_base" ] && [ -f "$workspace_root/project-bridge/config/app.json" ]; then
+    echoc dim "Using project-bridge config/app.json as base (template had no app.json)."
+    cp -a "$workspace_root/project-bridge/config/app.json" "$app_base"
+  fi
+  if [ ! -f "$app_base" ]; then
+    warn "No config/app.json in template and no project-bridge sibling; cannot scaffold org host config."
+    return 1
+  fi
+
+  jq \
+    --arg name "$ORG_CFG_DISPLAY_NAME" \
+    --arg slug "$ORG_CFG_APP_SLUG" \
+    --arg owner "$ORG_CFG_OWNER" \
+    --arg ver "$ORG_CFG_VERSION" \
+    --argjson devp "${ORG_CFG_DEV_PORT:-3001}" \
+    --arg devu "$ORG_CFG_DEV_URL" \
+    --argjson stp "${ORG_CFG_STAGING_PORT:-3001}" \
+    --arg stu "$ORG_CFG_STAGING_URL" \
+    --argjson prp "${ORG_CFG_PROD_PORT:-3001}" \
+    --arg pru "$ORG_CFG_PROD_URL" \
+    '
+    .app.name = $name
+    | .app.slug = $slug
+    | .app.owner = $owner
+    | .app.version = $ver
+    | .development.port = $devp
+    | .development.url = $devu
+    | .staging.port = $stp
+    | .staging.url = $stu
+    | .production.port = $prp
+    | .production.url = $pru
+    ' "$app_base" > "${app_base}.tmp" && mv "${app_base}.tmp" "$app_base"
+
+  deploy_base="$repo_path/config/deploy.json"
+  if [ ! -f "$deploy_base" ] && [ -f "$workspace_root/project-bridge/config/deploy.json" ]; then
+    cp -a "$workspace_root/project-bridge/config/deploy.json" "$deploy_base"
+  fi
+  if [ -f "$deploy_base" ]; then
+    jq --arg pid "$ORG_CFG_DEPLOY_PROJECT_ID" '.projectId = $pid' "$deploy_base" > "${deploy_base}.tmp" && mv "${deploy_base}.tmp" "$deploy_base"
+  fi
+
+  server_base="$repo_path/config/server.json.example"
+  if [ ! -f "$server_base" ] && [ -f "$workspace_root/project-bridge/config/server.json.example" ]; then
+    cp -a "$workspace_root/project-bridge/config/server.json.example" "$server_base"
+  fi
+  if [ -f "$server_base" ]; then
+    jq \
+      --arg id "$repo_name" \
+      --arg pname "$ORG_CFG_DISPLAY_NAME" \
+      --arg pslug "$ORG_CFG_APP_SLUG" \
+      --arg ver "$ORG_CFG_VERSION" \
+      --argjson sp "${ORG_CFG_SERVER_PORT:-3001}" \
+      --arg proot "$ORG_CFG_PROJECT_ROOT" \
+      --arg sdir "$ORG_CFG_STATE_DIR" \
+      '
+      .server.port = $sp
+      | .server.projectRoot = $proot
+      | .server.stateDir = $sdir
+      | .apps[0].id = $id
+      | .apps[0].name = $pname
+      | .apps[0].slug = $pslug
+      | .apps[0].app.name = $pname
+      | .apps[0].app.slug = $pslug
+      | .apps[0].app.version = $ver
+      | .apps[0].source = { "path": "." }
+      ' "$server_base" > "$repo_path/config/server.json"
+  else
+    warn "No server.json.example in template; skipped config/server.json."
+  fi
+
+  tf_src="$workspace_root/project-bridge/terraform"
+  if [ -f "$tf_src/main.tf" ]; then
+    echoc cyan "Vendoring project-bridge/terraform → $repo_path/terraform (for mtx deploy)..."
+    mkdir -p "$repo_path/terraform"
+    if command -v rsync &>/dev/null; then
+      rsync -a \
+        --exclude='.terraform' \
+        --exclude='.terraform.lock.hcl' \
+        --exclude='terraform.tfstate' \
+        --exclude='terraform.tfstate.*' \
+        --exclude='*.backup' \
+        "$tf_src/" "$repo_path/terraform/"
+    else
+      cp -a "$tf_src/." "$repo_path/terraform/"
+      rm -rf "$repo_path/terraform/.terraform" 2>/dev/null || true
+      rm -f "$repo_path/terraform/terraform.tfstate" "$repo_path/terraform"/terraform.tfstate.* 2>/dev/null || true
+    fi
+    echoc dim "terraform/ uses ../config/app.json — run terraform init on first mtx deploy."
+  else
+    echoc yellow "Sibling project-bridge/terraform not found at $tf_src — skipped. Clone project-bridge next to this workspace to vendor terraform/."
+  fi
+
+  gitignore="$repo_path/.gitignore"
+  if [ -f "$gitignore" ] && ! grep -qE '^\.terraform/?$|terraform/terraform\.tfstate' "$gitignore" 2>/dev/null; then
+    {
+      echo ""
+      echo "# Terraform (mtx deploy — local state; do not commit)"
+      echo ".terraform/"
+      echo ".terraform.lock.hcl"
+      echo "terraform/.terraform/"
+      echo "terraform/terraform.tfstate"
+      echo "terraform/terraform.tfstate.*"
+    } >> "$gitignore"
+  fi
+  if [ -f "$gitignore" ] && ! grep -q 'targets/server/dist' "$gitignore" 2>/dev/null; then
+    {
+      echo ""
+      echo "# Unified server dist (mirrored from project-bridge by npm run build:server)"
+      echo "targets/server/dist/"
+    } >> "$gitignore"
+  fi
+}
+
+# Wire package.json + railway.json so org repos run the full unified server build via sibling (or vendor) project-bridge.
+mtx_org_merge_host_into_package_json() {
+  local repo_path="$1" workspace_root="$2"
+  local pkg="$repo_path/package.json" pb
+  workspace_root="$(cd "$workspace_root" && pwd -P)"
+  pb="$workspace_root/project-bridge"
+  [ -f "$pkg" ] || return 0
+  if [ ! -f "$repo_path/scripts/org-build-server.sh" ]; then
+    warn "scripts/org-build-server.sh missing from template; cannot wire build:server."
+    return 1
+  fi
+  chmod +x "$repo_path/scripts/org-build-server.sh"
+  if ! command -v jq &>/dev/null; then
+    warn "jq required to merge org host into package.json"
+    return 1
+  fi
+  jq \
+    '
+    .dependencies["projectb"] = "file:../project-bridge"
+    | .scripts["build:server"] = "bash scripts/org-build-server.sh"
+    | .scripts["build:backend-server"] = "npm run build:server"
+    ' "$pkg" > "${pkg}.tmp" && mv "${pkg}.tmp" "$pkg"
+
+  if [ -f "$pb/railway.json" ]; then
+    jq '.build.buildCommand = "npm install && bash scripts/org-build-server.sh"' "$pb/railway.json" > "$repo_path/railway.json"
+  else
+    jq -n \
+      --arg schema "https://railway.app/railway.schema.json" \
+      '{
+        "$schema": $schema,
+        build: { builder: "RAILPACK", buildCommand: "npm install && bash scripts/org-build-server.sh" },
+        deploy: { startCommand: "node targets/server/dist/index.js", restartPolicyType: "ON_FAILURE", restartPolicyMaxRetries: 10 }
+      }' > "$repo_path/railway.json"
+  fi
+}
+
 update_repo_metadata_from_template() {
   local dir="$1"
   local pkg_json="$dir/package.json"
   local readme="$dir/README.md"
-  local desc_line="${MTX_KIND_LABEL} payload: ${NEW_APP_NAME} (repo ${REPO_NAME}, template ${TEMPLATE_REPO})"
+  local desc_line readme_intro next_extra step3
+  desc_line="${MTX_REPO_PACKAGE_DESC:-${MTX_KIND_LABEL} payload: ${NEW_APP_NAME} (repo ${REPO_NAME}, template ${TEMPLATE_REPO})}"
+  readme_intro="${MTX_KIND_LABEL} payload for **$NEW_APP_NAME**."
+  next_extra=""
+  step3="3. Register in project-bridge \`config/server.json\` (top-level \`apps\` array) with \`source.git\` pointing at this repo."
+
+  case "${MTX_REPO_PREFIX:-}" in
+    template-*)
+      readme_intro="Forkable **payload template** repo (\`template-*\` is for payload scaffolds only). Point \`MTX_PAYLOAD_TEMPLATE_REPO\` or \`MTX_TEMPLATE_SOURCE_REPO\` here so \`mtx create payload\` clones from your scaffold."
+      ;;
+    org-*)
+      readme_intro="Organization product repo (**org-***): includes \`config/app.json\`, \`config/deploy.json\`, and (when a sibling \`project-bridge\` exists) \`terraform/\` so \`mtx deploy\` can provision Railway from this tree."
+      step3="3. **Shared host (optional):** Add this repo to a central project-bridge \`config/server.json\` with \`source.git\` if you are not deploying this tree as the unified server."
+      next_extra="
+
+4. **Standalone deploy** — Keep a checkout of **project-bridge** next to this repo (or \`vendor/project-bridge\`, or set \`PROJECT_BRIDGE_ROOT\`). Run \`npm install\` then \`npm run build:server\` (temporarily syncs org \`config/\` into project-bridge for the build, then **restores** project-bridge’s \`config/\`; mirrors \`targets/server/dist\` here). Then \`mtx deploy\`. For Railway builds without a sibling directory, add project-bridge as a submodule under \`vendor/project-bridge\`."
+      ;;
+  esac
 
   if [ ! -f "$pkg_json" ]; then
     warn "Template does not include package.json at $pkg_json"
@@ -172,12 +420,19 @@ fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');
 " 2>/dev/null || true
   fi
 
+  local created_line
+  if [ -n "${MTX_TEMPLATE_SNAPSHOT_FROM:-}" ]; then
+    created_line="Snapshotted from payload working tree at \`${MTX_TEMPLATE_SNAPSHOT_FROM}\` via \`${MTX_CREATE_CMD}\` (run from that payload root)."
+  else
+    created_line="Created by \`${MTX_CREATE_CMD}\` from template \`${TEMPLATE_REPO}\`."
+  fi
+
   cat > "$readme" <<EOF
 # $REPO_NAME
 
-${MTX_KIND_LABEL} payload for **$NEW_APP_NAME**.
+$readme_intro
 
-Created by \`${MTX_CREATE_CMD}\` from template \`$TEMPLATE_REPO\`.
+$created_line
 
 ## Next steps
 
@@ -189,15 +444,226 @@ Created by \`${MTX_CREATE_CMD}\` from template \`$TEMPLATE_REPO\`.
    \`\`\`bash
    npm run build
    \`\`\`
-3. Register in project-bridge \`config/server.json\` (top-level \`apps\` array) with \`source.git\` pointing at this repo.
+$step3$next_extra
 EOF
+}
+
+# Snapshot a payload working tree into a new directory (fresh template-* repo contents).
+mtx_create_copy_payload_snapshot_to() {
+  local src="$1" dst="$2"
+  mkdir -p "$dst"
+  if command -v rsync &>/dev/null; then
+    rsync -a --delete \
+      --exclude=.git \
+      --exclude=node_modules \
+      --exclude=dist \
+      --exclude=build \
+      --exclude=.next \
+      --exclude=coverage \
+      --exclude=.turbo \
+      "$src/" "$dst/"
+  else
+    warn "rsync not found; using cp with manual excludes (install rsync for more reliable snapshots)."
+    mkdir -p "$dst"
+    shopt -s dotglob nullglob
+    local p base
+    for p in "$src"/* "$src"/.[!.]* "$src"/..?*; do
+      [ -e "$p" ] || continue
+      base=$(basename "$p")
+      case "$base" in .git|node_modules|dist|build|.next|coverage|.turbo) continue ;; esac
+      cp -a "$p" "$dst/"
+    done
+    shopt -u dotglob nullglob
+  fi
+}
+
+# Shared: set package description, rewrite README/package.json, GitHub push, snippet.
+# Expects globals: REPO_PATH REPO_NAME NEW_APP_NAME APP_SLUG GITHUB_ORG MTX_CREATE_CMD MTX_KIND_LABEL
+# MTX_REPO_PREFIX TEMPLATE_REPO; optional MTX_TEMPLATE_SNAPSHOT_FROM, MTX_CREATE_SOURCE_NOTE.
+mtx_create_apply_metadata_and_github_publish() {
+  export MTX_REPO_PACKAGE_DESC=""
+  case "${MTX_REPO_PREFIX}" in
+    template-*)
+      if [ -n "${MTX_TEMPLATE_SNAPSHOT_FROM:-}" ]; then
+        MTX_REPO_PACKAGE_DESC="Forkable payload template: ${NEW_APP_NAME} (repo ${REPO_NAME}; snapshotted from ${MTX_TEMPLATE_SNAPSHOT_FROM})"
+      else
+        MTX_REPO_PACKAGE_DESC="Forkable payload template: ${NEW_APP_NAME} (repo ${REPO_NAME}; scaffolded from ${TEMPLATE_REPO})"
+      fi
+      ;;
+    *)
+      MTX_REPO_PACKAGE_DESC="${MTX_KIND_LABEL} payload: ${NEW_APP_NAME} (repo ${REPO_NAME}, template ${TEMPLATE_REPO})"
+      ;;
+  esac
+  export MTX_REPO_PACKAGE_DESC
+
+  local ref_note="${MTX_CREATE_SOURCE_NOTE:-$TEMPLATE_REPO}"
+
+  echoc cyan "Applying package name and metadata..."
+  update_repo_metadata_from_template "$REPO_PATH"
+  echo ""
+
+  if [ "${MTX_CREATE_SKIP_GITHUB:-}" = "1" ]; then
+    mtx_create_local_git_commit_initial "$REPO_PATH" "${MTX_CREATE_CMD}: initialize ${REPO_NAME} from ${ref_note} (local only)"
+    echoc yellow "Skipped GitHub (MTX_CREATE_SKIP_GITHUB=1). Push from $REPO_PATH when the remote exists."
+    echoc dim "Local path: $REPO_PATH"
+    mtx_create_print_server_json_snippet "$REPO_NAME" "$NEW_APP_NAME" "$APP_SLUG" "$GITHUB_ORG" "$REPO_NAME"
+    exit 0
+  fi
+
+  if ! command -v gh &>/dev/null; then
+    mtx_create_local_git_commit_initial "$REPO_PATH" "${MTX_CREATE_CMD}: initialize ${REPO_NAME} from ${ref_note}"
+    warn "gh CLI not found. Local tree is ready at $REPO_PATH. Install gh, then from $REPO_PATH: gh repo create $GITHUB_ORG/$REPO_NAME --private --source=. --remote=origin --push"
+    echoc dim "Local path: $REPO_PATH"
+    mtx_create_print_server_json_snippet "$REPO_NAME" "$NEW_APP_NAME" "$APP_SLUG" "$GITHUB_ORG" "$REPO_NAME"
+    exit 1
+  fi
+
+  ensure_gh_auth_create || { warn "gh authentication required for create/push."; exit 1; }
+
+  mtx_create_ensure_github_org_reachable "$GITHUB_ORG" || exit 1
+
+  if ! (
+    set -e
+    cd "$REPO_PATH"
+    WANT_REMOTE="git@github.com:${GITHUB_ORG}/${REPO_NAME}.git"
+    WANT_REMOTE_HTTPS="https://github.com/${GITHUB_ORG}/${REPO_NAME}.git"
+
+    if [ ! -d .git ]; then
+      git init -q
+    fi
+    git branch -M main
+
+    if [ -n "$(git status --porcelain)" ]; then
+      git add .
+      git commit -q -m "${MTX_CREATE_CMD}: initialize ${REPO_NAME} from ${ref_note}"
+    fi
+
+    if ! git rev-parse -q --verify HEAD >/dev/null; then
+      git add -A
+      git commit -q --allow-empty -m "${MTX_CREATE_CMD}: initialize ${REPO_NAME} from ${ref_note}"
+    fi
+
+    if ! gh repo view "$GITHUB_ORG/$REPO_NAME" &>/dev/null; then
+      echoc cyan "Creating GitHub repository $GITHUB_ORG/$REPO_NAME and pushing main..."
+      git remote remove origin 2>/dev/null || true
+      gh repo create "$GITHUB_ORG/$REPO_NAME" --private \
+        --description "${MTX_REPO_PACKAGE_DESC}" \
+        --source=. --remote=origin --push
+    else
+      echoc cyan "GitHub repo exists; setting origin and pushing..."
+      CURRENT_REMOTE=$(git remote get-url origin 2>/dev/null || true)
+      if [ "$CURRENT_REMOTE" = "$WANT_REMOTE" ] || [ "$CURRENT_REMOTE" = "$WANT_REMOTE_HTTPS" ]; then
+        :
+      elif [ -n "$CURRENT_REMOTE" ]; then
+        git remote set-url origin "$WANT_REMOTE"
+      else
+        git remote add origin "$WANT_REMOTE"
+      fi
+      git push -u origin main 2>/dev/null || git push origin main
+    fi
+  ); then
+    warn "GitHub create or push failed. Check gh auth (gh auth login), org permissions, branch main, and write access to $GITHUB_ORG/$REPO_NAME."
+    exit 1
+  fi
+
+  if ! gh repo view "$GITHUB_ORG/$REPO_NAME" &>/dev/null; then
+    warn "Push finished but gh cannot resolve $GITHUB_ORG/$REPO_NAME (visibility lag or wrong org)."
+    exit 1
+  fi
+
+  echo ""
+  echoc green "Done. New repo: https://github.com/$GITHUB_ORG/$REPO_NAME"
+  echoc dim "Local path: $REPO_PATH"
+  mtx_create_print_server_json_snippet "$REPO_NAME" "$NEW_APP_NAME" "$APP_SLUG" "$GITHUB_ORG" "$REPO_NAME"
+}
+
+mtx_create_template_from_payload_run() {
+  local WORKSPACE_ROOT GITHUB_ORG NEW_APP_NAME APP_SLUG REPO_PATH PAYLOAD_ROOT REPO_NAME MTX_ABS
+  : "${MTX_REPO_PREFIX:?Set MTX_REPO_PREFIX (template-)}"
+  : "${MTX_KIND_LABEL:?Set MTX_KIND_LABEL}"
+  : "${MTX_CREATE_CMD:?Set MTX_CREATE_CMD}"
+
+  PAYLOAD_ROOT="$(pwd -P)"
+  if [ ! -f "$PAYLOAD_ROOT/package.json" ]; then
+    error "mtx create template must be run from a payload repo root (no package.json in $PAYLOAD_ROOT)."
+    exit 1
+  fi
+
+  MTX_ABS="$(cd "$MTX_ROOT" && pwd -P)"
+  if [ "$PAYLOAD_ROOT" = "$MTX_ABS" ]; then
+    error "Run from a payload directory, not the MTX repo root."
+    exit 1
+  fi
+
+  if ! command -v git &>/dev/null; then
+    warn "git is required."
+    exit 1
+  fi
+
+  WORKSPACE_ROOT="${MTX_WORKSPACE_ROOT:-$(cd "$MTX_ROOT/.." && pwd)}"
+  GITHUB_ORG="${MTX_GITHUB_ORG:-Meanwhile-Together}"
+  export TEMPLATE_REPO="${MTX_PAYLOAD_TEMPLATE_REPO:-template-basic}"
+
+  echoc cyan "Create template-* repo from current payload tree"
+  echoc dim "Payload root: $PAYLOAD_ROOT"
+  echo ""
+
+  NEW_APP_NAME=""
+  if [ $# -gt 0 ]; then
+    NEW_APP_NAME=$(printf '%s' "$(echo "$*" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')")
+  fi
+  if [ -z "$NEW_APP_NAME" ]; then
+    read -rp "$(echo -e "${bold:-}Name for the new template (display name):${reset:-} ")" NEW_APP_NAME
+    NEW_APP_NAME="${NEW_APP_NAME#"${NEW_APP_NAME%%[![:space:]]*}"}"
+    NEW_APP_NAME="${NEW_APP_NAME%"${NEW_APP_NAME##*[![:space:]]}"}"
+    if [ -z "$NEW_APP_NAME" ]; then
+      warn "No name entered. Exiting."
+      exit 0
+    fi
+  else
+    echoc dim "Template name (from command line): $(color yellow "$NEW_APP_NAME")"
+    echo ""
+  fi
+
+  APP_SLUG=$(slugify "$NEW_APP_NAME")
+  [ -z "$APP_SLUG" ] && APP_SLUG="app"
+  REPO_NAME=$(ensure_mtx_repo_prefix "$APP_SLUG" "$MTX_REPO_PREFIX")
+  WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd -P)"
+  REPO_PATH="$WORKSPACE_ROOT/$REPO_NAME"
+
+  if [ "$PAYLOAD_ROOT" = "$REPO_PATH" ]; then
+    error "New template path would be the same as the current directory. Choose a different name or run from another payload."
+    exit 1
+  fi
+
+  echo ""
+  echoc cyan "Workspace: $WORKSPACE_ROOT"
+  echoc cyan "New template repo: $(color yellow "$REPO_NAME")"
+  echoc dim "Command: $MTX_CREATE_CMD"
+  echo ""
+
+  if [ -d "$REPO_PATH" ] && [ -f "$REPO_PATH/package.json" ]; then
+    echoc cyan "Updating existing directory at $REPO_PATH (re-snapshot from payload)."
+  elif [ -d "$REPO_PATH" ]; then
+    warn "Directory $REPO_PATH exists but has no package.json. Remove it or choose another name."
+    exit 1
+  fi
+
+  echoc cyan "Copying payload tree into $REPO_PATH (excluding .git, node_modules, dist, …)..."
+  mtx_create_copy_payload_snapshot_to "$PAYLOAD_ROOT" "$REPO_PATH"
+  rm -rf "$REPO_PATH/.git"
+  echo ""
+
+  export MTX_TEMPLATE_SNAPSHOT_FROM="$PAYLOAD_ROOT"
+  export MTX_CREATE_SOURCE_NOTE="payload at $PAYLOAD_ROOT"
+  mtx_create_apply_metadata_and_github_publish
 }
 
 mtx_create_from_template_run() {
   local WORKSPACE_ROOT GITHUB_ORG TEMPLATE_REPO TEMPLATE_URL LOCAL_TEMPLATE_PATH
   local NEW_APP_NAME APP_SLUG REPO_PATH
 
-  : "${MTX_REPO_PREFIX:?Set MTX_REPO_PREFIX (payload- or org-)}"
+  : "${MTX_REPO_PREFIX:?Set MTX_REPO_PREFIX (payload-, org-, or template-)}"
   : "${MTX_TEMPLATE_REPO:?Set MTX_TEMPLATE_REPO}"
   : "${MTX_KIND_LABEL:?Set MTX_KIND_LABEL}"
   : "${MTX_CREATE_CMD:?Set MTX_CREATE_CMD}"
@@ -217,17 +683,40 @@ mtx_create_from_template_run() {
 
   echoc cyan "Create new $(echo "$MTX_KIND_LABEL" | tr '[:upper:]' '[:lower:]') repo (${MTX_REPO_PREFIX}*)"
   echo ""
-  read -rp "$(echo -e "${bold:-}Display name (organization or app name):${reset:-} ")" NEW_APP_NAME
-  NEW_APP_NAME="${NEW_APP_NAME#"${NEW_APP_NAME%%[![:space:]]*}"}"
-  NEW_APP_NAME="${NEW_APP_NAME%"${NEW_APP_NAME##*[![:space:]]}"}"
+  NEW_APP_NAME=""
+  if [ $# -gt 0 ]; then
+    NEW_APP_NAME=$(printf '%s' "$(echo "$*" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')")
+  fi
   if [ -z "$NEW_APP_NAME" ]; then
-    warn "No name entered. Exiting."
-    exit 0
+    read -rp "$(echo -e "${bold:-}Display name (organization or app name):${reset:-} ")" NEW_APP_NAME
+    NEW_APP_NAME="${NEW_APP_NAME#"${NEW_APP_NAME%%[![:space:]]*}"}"
+    NEW_APP_NAME="${NEW_APP_NAME%"${NEW_APP_NAME##*[![:space:]]}"}"
+    if [ -z "$NEW_APP_NAME" ]; then
+      warn "No name entered. Exiting."
+      exit 0
+    fi
+  else
+    echoc dim "Display name (from command line): $(color yellow "$NEW_APP_NAME")"
+    echo ""
   fi
 
-  APP_SLUG=$(slugify "$NEW_APP_NAME")
-  [ -z "$APP_SLUG" ] && APP_SLUG="app"
-  REPO_NAME=$(ensure_mtx_repo_prefix "$APP_SLUG" "$MTX_REPO_PREFIX")
+  if [ "${MTX_REPO_PREFIX}" = "org-" ]; then
+    local default_org_repo
+    default_org_repo=$(ensure_mtx_repo_prefix "$(slugify "$NEW_APP_NAME")" "org-")
+    if [ -t 0 ] && [ -t 1 ] && [ "${MTX_CREATE_NONINTERACTIVE:-}" != "1" ]; then
+      read -rp "$(echo -e "${bold:-}Repository name (org-* folder + GitHub repo) [${default_org_repo}]:${reset:-} ")" _org_repo_in
+      _org_repo_in="${_org_repo_in:-$default_org_repo}"
+      REPO_NAME=$(ensure_mtx_repo_prefix "$(slugify "${_org_repo_in#org-}")" "org-")
+    else
+      REPO_NAME="${MTX_ORG_REPO_NAME:-$default_org_repo}"
+      REPO_NAME=$(ensure_mtx_repo_prefix "$(slugify "${REPO_NAME#org-}")" "org-")
+    fi
+    mtx_org_collect_host_config "$REPO_NAME" "$NEW_APP_NAME" "$GITHUB_ORG"
+  else
+    APP_SLUG=$(slugify "$NEW_APP_NAME")
+    [ -z "$APP_SLUG" ] && APP_SLUG="app"
+    REPO_NAME=$(ensure_mtx_repo_prefix "$APP_SLUG" "$MTX_REPO_PREFIX")
+  fi
   REPO_PATH="$WORKSPACE_ROOT/$REPO_NAME"
 
   echo ""
@@ -267,82 +756,17 @@ mtx_create_from_template_run() {
     echo ""
   fi
 
-  echoc cyan "Applying package name and metadata..."
-  update_repo_metadata_from_template "$REPO_PATH"
-  echo ""
+  unset MTX_TEMPLATE_SNAPSHOT_FROM
+  export MTX_CREATE_SOURCE_NOTE="$TEMPLATE_REPO"
 
-  if [ "${MTX_CREATE_SKIP_GITHUB:-}" = "1" ]; then
-    mtx_create_local_git_commit_initial "$REPO_PATH" "${MTX_CREATE_CMD}: initialize ${REPO_NAME} from ${TEMPLATE_REPO} (local only)"
-    echoc yellow "Skipped GitHub (MTX_CREATE_SKIP_GITHUB=1). Push from $REPO_PATH when the remote exists."
-    echoc dim "Local path: $REPO_PATH"
-    mtx_create_print_server_json_snippet "$REPO_NAME" "$NEW_APP_NAME" "$APP_SLUG" "$GITHUB_ORG" "$REPO_NAME"
-    exit 0
+  if [ "${MTX_REPO_PREFIX}" = "org-" ]; then
+    mtx_org_scaffold_deploy_config_surface "$REPO_PATH" "$REPO_NAME" "$NEW_APP_NAME" "$WORKSPACE_ROOT" "$GITHUB_ORG" || {
+      warn "Org deploy config scaffold had warnings; check config/ and terraform/."
+    }
+    mtx_org_merge_host_into_package_json "$REPO_PATH" "$WORKSPACE_ROOT" || {
+      warn "Could not wire package.json to project-bridge (jq or scripts/org-build-server.sh missing)."
+    }
   fi
 
-  if ! command -v gh &>/dev/null; then
-    mtx_create_local_git_commit_initial "$REPO_PATH" "${MTX_CREATE_CMD}: initialize ${REPO_NAME} from ${TEMPLATE_REPO}"
-    warn "gh CLI not found. Local tree is ready at $REPO_PATH. Install gh, then from $REPO_PATH: gh repo create $GITHUB_ORG/$REPO_NAME --private --source=. --remote=origin --push"
-    echoc dim "Local path: $REPO_PATH"
-    mtx_create_print_server_json_snippet "$REPO_NAME" "$NEW_APP_NAME" "$APP_SLUG" "$GITHUB_ORG" "$REPO_NAME"
-    exit 1
-  fi
-
-  ensure_gh_auth_create || { warn "gh authentication required for create/push."; exit 1; }
-
-  mtx_create_ensure_github_org_reachable "$GITHUB_ORG" || exit 1
-
-  if ! (
-    set -e
-    cd "$REPO_PATH"
-    WANT_REMOTE="git@github.com:${GITHUB_ORG}/${REPO_NAME}.git"
-    WANT_REMOTE_HTTPS="https://github.com/${GITHUB_ORG}/${REPO_NAME}.git"
-
-    if [ ! -d .git ]; then
-      git init -q
-    fi
-    git branch -M main
-
-    if [ -n "$(git status --porcelain)" ]; then
-      git add .
-      git commit -q -m "${MTX_CREATE_CMD}: initialize ${REPO_NAME} from ${TEMPLATE_REPO}"
-    fi
-
-    # Ensure at least one commit for push (metadata should always dirty the tree once)
-    if ! git rev-parse -q --verify HEAD >/dev/null; then
-      git add -A
-      git commit -q --allow-empty -m "${MTX_CREATE_CMD}: initialize ${REPO_NAME} from ${TEMPLATE_REPO}"
-    fi
-
-    if ! gh repo view "$GITHUB_ORG/$REPO_NAME" &>/dev/null; then
-      echoc cyan "Creating GitHub repository $GITHUB_ORG/$REPO_NAME and pushing main..."
-      git remote remove origin 2>/dev/null || true
-      gh repo create "$GITHUB_ORG/$REPO_NAME" --private \
-        --description "${MTX_KIND_LABEL} payload: $NEW_APP_NAME (from $TEMPLATE_REPO)" \
-        --source=. --remote=origin --push
-    else
-      echoc cyan "GitHub repo exists; setting origin and pushing..."
-      CURRENT_REMOTE=$(git remote get-url origin 2>/dev/null || true)
-      if [ "$CURRENT_REMOTE" = "$WANT_REMOTE" ] || [ "$CURRENT_REMOTE" = "$WANT_REMOTE_HTTPS" ]; then
-        :
-      elif [ -n "$CURRENT_REMOTE" ]; then
-        git remote set-url origin "$WANT_REMOTE"
-      else
-        git remote add origin "$WANT_REMOTE"
-      fi
-      git push -u origin main 2>/dev/null || git push origin main
-    fi
-  ); then
-    warn "GitHub create or push failed. Check gh auth (gh auth login), org permissions, branch main, and write access to $GITHUB_ORG/$REPO_NAME."
-    exit 1
-  fi
-
-  if ! gh repo view "$GITHUB_ORG/$REPO_NAME" &>/dev/null; then
-    warn "Push finished but gh cannot resolve $GITHUB_ORG/$REPO_NAME (visibility lag or wrong org)."
-    exit 1
-  fi
-
-  echo ""
-  echoc green "Done. New repo: https://github.com/$GITHUB_ORG/$REPO_NAME"
-  echoc dim "Local path: $REPO_PATH"
-  mtx_create_print_server_json_snippet "$REPO_NAME" "$NEW_APP_NAME" "$APP_SLUG" "$GITHUB_ORG" "$REPO_NAME"
+  mtx_create_apply_metadata_and_github_publish
 }

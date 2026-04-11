@@ -4,6 +4,7 @@ This document describes the **desired end-to-end flow**: how a **new app** is cr
 
 **Related references:**
 
+- **MTX:** [MTX_SCAFFOLDING_MODEL.md](MTX_SCAFFOLDING_MODEL.md) — **Authoritative story:** payload vs **`template-*`** payload templates, org defaults, admin as payload.
 - **MTX:** [INFRA_AND_DEPLOY_REFERENCE.md](INFRA_AND_DEPLOY_REFERENCE.md) — Tokens, config, Terraform, Railway, CI.
 - **project-bridge:** [MASTER_FLOW_AND_MTX_CREATE_PLAN.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MASTER_FLOW_AND_MTX_CREATE_PLAN.md) — Earlier fork-based plan (see divergence below).
 - **project-bridge:** [SERVER_CONFIG.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/SERVER_CONFIG.md), [PAYLOAD_CREATION_AND_SERVER_CONFIG.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/PAYLOAD_CREATION_AND_SERVER_CONFIG.md) — Payload = app, config-driven hosting.
@@ -68,9 +69,17 @@ This document describes the **desired end-to-end flow**: how a **new app** is cr
 3. **Metadata** — Rewrites `package.json` / `README` for the new slug; **`gh repo create`** + push when `gh` is available.
 4. **Registration** — Script prints a **`server.apps`** snippet for **project-bridge** `config/server.json` so the host can load the new payload (path/package/git as you choose).
 
-**Subcommands:** **`mtx create payload`** (same as plain **`mtx create`**), **`mtx create org`** → **`org-*`**, **`mtx create template`** → **`template-*`**. The template subcommand uses the same machinery; the GitHub repo name prefix is **`template-`**, and the clone source defaults to **`template-basic`** unless **`MTX_TEMPLATE_SOURCE_REPO`** or **`MTX_PAYLOAD_TEMPLATE_REPO`** is set.
+**Subcommands:**
 
-A **standalone full project-bridge fork** is **not** what `create.sh` does today; that remains a **manual** or separate flow if you need an entire host repo. Target **customer `client-*` repos** from [docs/finalize/06_TARGET_ARCHITECTURE_LOCKED.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/finalize/06_TARGET_ARCHITECTURE_LOCKED.md) are **future MTX/template work**, not `create.sh` yet.
+| Command | Repo prefix | Role |
+|---------|-------------|------|
+| **`mtx create payload`** (same as plain **`mtx create`**) | **`payload-*`** | New **app** repo; clone source **`MTX_PAYLOAD_TEMPLATE_REPO`** (default **`template-basic`**). |
+| **`mtx create template`** | **`template-*`** | **From a payload root:** snapshots the current directory into a new **`template-*`** repo (rsync/copy; excludes `.git`, `node_modules`, `dist`, …). Must **`cd`** into the payload first. Others may set **`MTX_TEMPLATE_SOURCE_REPO`** / **`MTX_PAYLOAD_TEMPLATE_REPO`** to that repo so **`mtx create payload`** clones from it. |
+| **`mtx create org`** | **`org-*`** | Use when you need a **separate org product repo**. The usual model is **one shared org payload** + tenant **routing/config**; see [MTX_SCAFFOLDING_MODEL.md](MTX_SCAFFOLDING_MODEL.md). |
+
+**Admin** is not a separate MTX template type: it is a **payload** (e.g. **`payload-admin`**) registered like any other app.
+
+A **standalone full project-bridge fork** is **not** what `create.sh` does today; that remains a **manual** or separate flow if you need an entire host repo. Customer **`client-*`** style hosts remain **out of band** unless you add your own template process.
 
 ### 2.3 Principles (updated)
 

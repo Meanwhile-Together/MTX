@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Same as payload/create.sh — use `mtx create payload` or `mtx payload create`.
+# New payload templates: `mtx create template` from a payload root snapshots into template-* (see docs/MTX_SCAFFOLDING_MODEL.md).
 desc="Create a payload-* repo from template-basic (GitHub + local); register in project-bridge apps[]"
 nobanner=1
 set -e
@@ -12,4 +13,4 @@ export MTX_CREATE_CMD="mtx create payload"
 
 # shellcheck source=../lib/create-from-template.sh
 source "$MTX_ROOT/lib/create-from-template.sh"
-mtx_create_from_template_run
+mtx_create_from_template_run "$@"

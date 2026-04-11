@@ -5,6 +5,7 @@ set -e
 
 # Directory where this script lives (MTX/terraform); use for sourcing subroutines, not project's terraform
 APPLY_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+MTX_ROOT="$(cd "$APPLY_SCRIPT_DIR/.." && pwd)"
 
 # Resolve project root (directory containing config/app.json) so .env is always loaded from the right place
 PROJECT_ROOT=""
@@ -558,21 +559,31 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         echo -e "${GREEN}✅ Linked to $APP_SERVICE_NAME_FOR_ENV${NC}"
         echo ""
         
-        # Ensure dependencies (e.g. Prisma) are installed before build
-        if [ ! -f "node_modules/.bin/prisma" ] && [ -f "package.json" ]; then
-            echo -e "${BLUE}ℹ️  Prisma/dependencies not found, running npm install...${NC}"
-            npm install || { echo -e "${RED}❌ npm install failed${NC}"; exit 1; }
+        # Build app server (shared with mtx build server; skip if pre-built)
+        if [ "${MTX_SKIP_BUILD:-}" = "1" ]; then
+            echo -e "${BLUE}ℹ️  MTX_SKIP_BUILD=1 — skipping build (use mtx build server if needed)${NC}"
+            echo ""
+        else
+            if [ -f "$MTX_ROOT/build.sh" ]; then
+                bash "$MTX_ROOT/build.sh" server || {
+                    echo -e "${RED}❌ Build failed${NC}"
+                    exit 1
+                }
+            else
+                if [ ! -f "node_modules/.bin/prisma" ] && [ -f "package.json" ]; then
+                    echo -e "${BLUE}ℹ️  Prisma/dependencies not found, running npm install...${NC}"
+                    npm install || { echo -e "${RED}❌ npm install failed${NC}"; exit 1; }
+                    echo ""
+                fi
+                echo -e "${BLUE}🔨 Building project...${NC}"
+                npm run build:server || {
+                    echo -e "${RED}❌ Build failed${NC}"
+                    exit 1
+                }
+                echo -e "${GREEN}✅ Build complete${NC}"
+            fi
             echo ""
         fi
-        
-        # Build the project
-        echo -e "${BLUE}🔨 Building project...${NC}"
-        npm run build:server || {
-            echo -e "${RED}❌ Build failed${NC}"
-            exit 1
-        }
-        echo -e "${GREEN}✅ Build complete${NC}"
-        echo ""
         
         # Function to handle Railway deployment with service selection and environment
         # Returns: 0 on success, 1 on failure
@@ -1119,19 +1130,28 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 trap restore_railway_json EXIT
             fi
             
-            # Ensure dependencies are installed before backend build
-            if [ ! -f "node_modules/.bin/prisma" ] && [ -f "package.json" ]; then
-                echo -e "${BLUE}ℹ️  Prisma/dependencies not found, running npm install...${NC}"
-                npm install || { echo -e "${RED}❌ npm install failed${NC}"; exit 1; }
-                echo ""
-            fi
-            # Build backend server first (artifact for deploy; Railway may also build on its side using backend config)
-            echo -e "${BLUE}🔨 Building backend server...${NC}"
+            # Build backend server (shared with mtx build backend; skip if pre-built)
             BACKEND_BUILD_EXIT=0
-            npm run build:backend-server || {
-                BACKEND_BUILD_EXIT=$?
-                echo -e "${YELLOW}⚠️  Backend build failed, skipping backend deployment${NC}"
-            }
+            if [ "${MTX_SKIP_BUILD:-}" = "1" ]; then
+                echo -e "${BLUE}ℹ️  MTX_SKIP_BUILD=1 — skipping backend build${NC}"
+            elif [ -f "$MTX_ROOT/build.sh" ]; then
+                echo -e "${BLUE}🔨 Building backend server...${NC}"
+                if ! bash "$MTX_ROOT/build.sh" backend; then
+                    BACKEND_BUILD_EXIT=$?
+                    echo -e "${YELLOW}⚠️  Backend build failed, skipping backend deployment${NC}"
+                fi
+            else
+                if [ ! -f "node_modules/.bin/prisma" ] && [ -f "package.json" ]; then
+                    echo -e "${BLUE}ℹ️  Prisma/dependencies not found, running npm install...${NC}"
+                    npm install || { echo -e "${RED}❌ npm install failed${NC}"; exit 1; }
+                    echo ""
+                fi
+                echo -e "${BLUE}🔨 Building backend server...${NC}"
+                npm run build:backend-server || {
+                    BACKEND_BUILD_EXIT=$?
+                    echo -e "${YELLOW}⚠️  Backend build failed, skipping backend deployment${NC}"
+                }
+            fi
             
             if [ "$BACKEND_BUILD_EXIT" -eq 0 ]; then
                 BACKEND_DEPLOY_SUCCESS=false

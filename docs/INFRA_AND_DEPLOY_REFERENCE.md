@@ -2,6 +2,8 @@
 
 Single reference for infra and deployment across **MTX** (wrapper/CLI) and **project-bridge** (app + Terraform). Use this to understand the full flow, where each piece lives, and how to run or debug deploys.
 
+**Create / scaffolding narrative (payload vs **`template-*`** payload templates vs org):** [MTX_SCAFFOLDING_MODEL.md](MTX_SCAFFOLDING_MODEL.md).
+
 ---
 
 ## 1. Where Things Live

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Backward-compatible: `mtx create` = payload from template-basic. Prefer `mtx create payload|org|template` or `mtx payload create`.
+# Optional name: `mtx create org My Org` / `mtx create payload foo` — args are the display name (joined if multiple words).
+# `mtx create template` → snapshot cwd payload into template-* (run from payload root; see docs/MTX_SCAFFOLDING_MODEL.md).
 desc="Create payload-* repo from template-basic (same as mtx payload create / mtx create payload)"
 nobanner=1
 set -e
@@ -35,4 +37,4 @@ export MTX_CREATE_CMD="mtx create"
 
 # shellcheck source=lib/create-from-template.sh
 source "$MTX_ROOT/lib/create-from-template.sh"
-mtx_create_from_template_run
+mtx_create_from_template_run "$@"

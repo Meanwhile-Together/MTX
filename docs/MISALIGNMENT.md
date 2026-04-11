@@ -1,6 +1,6 @@
 # Misalignment registry (legacy fork narrative vs current behavior)
 
-**Purpose:** Track docs and rules that still describe **fork project-bridge** as the only “new app” story. **Authoritative deploy path:** [MTX_DEPLOY_CONTRACT.md](MTX_DEPLOY_CONTRACT.md), [INFRA_AND_DEPLOY_REFERENCE.md](INFRA_AND_DEPLOY_REFERENCE.md). **Authoritative create path:** [MTX_CREATE_AND_DEPLOYMENT_FLOW.md](MTX_CREATE_AND_DEPLOYMENT_FLOW.md) — **`mtx create`** = **payload template** (`template-basic` / `MTX_PAYLOAD_TEMPLATE_REPO`), **`payload-*`** repo, **`gh`**.
+**Purpose:** Track docs and rules that still describe **fork project-bridge** as the only “new app” story. **Authoritative deploy path:** [MTX_DEPLOY_CONTRACT.md](MTX_DEPLOY_CONTRACT.md), [INFRA_AND_DEPLOY_REFERENCE.md](INFRA_AND_DEPLOY_REFERENCE.md). **Authoritative create path:** [MTX_SCAFFOLDING_MODEL.md](MTX_SCAFFOLDING_MODEL.md) (narrative) · [MTX_CREATE_AND_DEPLOYMENT_FLOW.md](MTX_CREATE_AND_DEPLOYMENT_FLOW.md) (steps) — **`mtx create`** = **payload** repo from **`template-basic`** / `MTX_PAYLOAD_TEMPLATE_REPO`, **`payload-*`**, **`gh`**; **`mtx create template`** = snapshot payload cwd → **`template-*`** (run from payload root).
 
 **Target architecture (customer `client-*`, master Railway project, etc.):** [project-bridge docs/finalize/06_TARGET_ARCHITECTURE_LOCKED.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/finalize/06_TARGET_ARCHITECTURE_LOCKED.md).
 

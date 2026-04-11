@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Same as org/create.sh — use `mtx create org` or `mtx org create`.
+# Prefer one shared org payload + config for tenants; use this when you need a separate org-* product repo. See docs/MTX_SCAFFOLDING_MODEL.md.
 desc="Create an org-* repo from template-basic (GitHub + local); register in apps[]"
 nobanner=1
 set -e
@@ -12,4 +13,4 @@ export MTX_CREATE_CMD="mtx create org"
 
 # shellcheck source=../lib/create-from-template.sh
 source "$MTX_ROOT/lib/create-from-template.sh"
-mtx_create_from_template_run
+mtx_create_from_template_run "$@"

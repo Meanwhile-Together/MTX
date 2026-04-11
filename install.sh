@@ -28,13 +28,36 @@ trim() {
   echo "$v"
 }
 
+# Org payload repos (org-*) may host config/server.json for nested apps without project-bridge's config/app.json.
+mtx_install_is_org_payload_root() {
+  local d="$1"
+  local base name
+  base="$(basename "$d")"
+  case "$base" in
+    org-*) return 0 ;;
+  esac
+  if [ -f "$d/package.json" ] && command -v node >/dev/null 2>&1; then
+    name=$(cd "$d" && node -p "require('./package.json').name" 2>/dev/null || true)
+    case "$name" in
+      @meanwhile-together/org-*) return 0 ;;
+    esac
+  fi
+  return 1
+}
+
 find_project_root() {
   local walk
   walk="$(pwd)"
   while [ -n "$walk" ] && [ "$walk" != "/" ]; do
-    if [ -f "$walk/package.json" ] && { [ -d "$walk/config" ] || [ -f "$walk/config/app.json" ] || [ -f "$walk/server.json" ]; }; then
-      echo "$walk"
-      return 0
+    if [ -f "$walk/package.json" ]; then
+      if [ -d "$walk/config" ] || [ -f "$walk/config/app.json" ] || [ -f "$walk/server.json" ]; then
+        echo "$walk"
+        return 0
+      fi
+      if mtx_install_is_org_payload_root "$walk"; then
+        echo "$walk"
+        return 0
+      fi
     fi
     walk="$(dirname "$walk")"
   done
@@ -46,12 +69,16 @@ show_help() {
 Usage:
   mtx install <payload-id>
 
-Installs a payload package/source into the current project-bridge-style repo,
-then updates config/server.json (or server.json) with an idempotent apps[] entry.
+Installs a payload package/source into the current host repo, then updates
+config/server.json (or server.json) with an idempotent apps[] entry.
 
-<payload-id> is the app entry id (e.g. payload-myapp, org-tenant-acme). For repos
-created with mtx create org, use the org-* id; default npm package is
+Project root is detected from cwd: project-bridge-style (package.json + config/…),
+or an org payload repo (directory name org-* or package name @meanwhile-together/org-*).
+
+<payload-id> is the app entry id (e.g. payload-client-portal). Default npm package is
 @meanwhile-together/<payload-id> unless you override.
+
+Same as: mtx payload install (run from org or project-bridge root).
 EOF
 }
 
@@ -122,6 +149,10 @@ case "$PAYLOAD_ID" in
   org-*)
     _org_rest="${PAYLOAD_ID#org-}"
     DEFAULT_NAME="Organization $(echo "$_org_rest" | sed 's/[-_]/ /g')"
+    ;;
+  template-*)
+    _trest="${PAYLOAD_ID#template-}"
+    DEFAULT_NAME="Payload template $(echo "$_trest" | sed 's/[-_]/ /g')"
     ;;
 esac
 DEFAULT_PACKAGE="@meanwhile-together/$PAYLOAD_ID"

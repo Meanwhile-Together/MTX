@@ -8,7 +8,11 @@ Key terms and what they mean in this system. Only includes terms explicitly revi
 
 **MTX** — The developer operating surface. A command wrapper that uses a git repo as a package source. You run MTX commands to create, configure, deploy, and manage payloads on a Project Bridge host.
 
-**Payload** — A user-facing app experience served by a Project Bridge host. Each payload has its own domain responsibility (e.g., Diet, Workout, Chat). Payloads are registered in the host's server config and can be sourced from a local path, an npm package, or a git repo.
+**Payload** — A user-facing (or operator) experience served by a Project Bridge host: **client apps, org surface, admin UI**, etc. Each payload has its own responsibility; payloads are registered in **`server.apps`** and can be sourced from a local path, an npm package, or a git repo. **Admin is a payload**, not a separate platform type.
+
+**Payload template (starter)** — Default repo name **`template-basic`**, or any **`template-*`** repo you maintain (**payload-only**). **`mtx create template`** (from a payload root) snapshots a payload into a new **`template-*`**; **`mtx create payload`** clones from `MTX_PAYLOAD_TEMPLATE_REPO`. See [MTX_SCAFFOLDING_MODEL.md](../../docs/MTX_SCAFFOLDING_MODEL.md).
+
+**Org surface** — Usually **one shared** org payload + **per-tenant routing/config**; **`mtx create org`** only when you need a **new `org-*` product repo**.
 
 **Host** — A running instance of Project Bridge that serves one or more payloads. One host can serve many payloads. The host reads `config/server.json` to know which payloads to serve.
 
