@@ -343,7 +343,11 @@ mtx_org_merge_host_into_package_json() {
     warn "scripts/org-build-server.sh missing from template; cannot wire build:server."
     return 1
   fi
-  chmod +x "$repo_path/scripts/org-build-server.sh"
+  if [ ! -f "$repo_path/scripts/org-dev-server.sh" ]; then
+    warn "scripts/org-dev-server.sh missing from template; cannot wire dev."
+    return 1
+  fi
+  chmod +x "$repo_path/scripts/org-build-server.sh" "$repo_path/scripts/org-dev-server.sh"
   if ! command -v jq &>/dev/null; then
     warn "jq required to merge org host into package.json"
     return 1
@@ -351,6 +355,7 @@ mtx_org_merge_host_into_package_json() {
   jq \
     '
     .dependencies["projectb"] = "file:../project-bridge"
+    | .scripts["dev"] = "bash scripts/org-dev-server.sh"
     | .scripts["build:server"] = "bash scripts/org-build-server.sh"
     | .scripts["build:backend-server"] = "npm run build:server"
     ' "$pkg" > "${pkg}.tmp" && mv "${pkg}.tmp" "$pkg"
@@ -387,7 +392,8 @@ update_repo_metadata_from_template() {
       step3="3. **Shared host (optional):** Add this repo to a central project-bridge \`config/server.json\` with \`source.git\` if you are not deploying this tree as the unified server."
       next_extra="
 
-4. **Standalone deploy** — Keep a checkout of **project-bridge** next to this repo (or \`vendor/project-bridge\`, or set \`PROJECT_BRIDGE_ROOT\`). Run \`npm install\` then \`npm run build:server\` (temporarily syncs org \`config/\` into project-bridge for the build, then **restores** project-bridge’s \`config/\`; mirrors \`targets/server/dist\` here). Then \`mtx deploy\`. For Railway builds without a sibling directory, add project-bridge as a submodule under \`vendor/project-bridge\`."
+4. **Local dev** — \`npm run dev\` runs **project-bridge**’s \`npm run dev\` with this repo’s \`config/\` synced in; project-bridge \`config/\` is **restored** when dev exits (Ctrl+C).  
+5. **Standalone deploy** — Same project-bridge checkout as above. Run \`npm install\` then \`npm run build:server\` (syncs org \`config/\` for the build, **restores**, mirrors \`targets/server/dist\`). Then \`mtx deploy\`. For Railway without a sibling, use \`vendor/project-bridge\` (e.g. submodule)."
       ;;
   esac
 
