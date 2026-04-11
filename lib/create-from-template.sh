@@ -1,7 +1,7 @@
 # Shared: scaffold a GitHub repo from a template with a fixed name prefix (payload-, org-, or template-).
 # Loaded only from mtx create/payload|org|template, payload/template create (legacy), or top-level create — NOT from includes/ (mtx auto-sources includes/*.sh at boot).
 # Callers must set MTX_ROOT to the MTX repo root before sourcing this file.
-# Callers set: MTX_REPO_PREFIX, MTX_TEMPLATE_REPO, MTX_KIND_LABEL, MTX_CREATE_CMD
+# Callers set: MTX_REPO_PREFIX, MTX_TEMPLATE_REPO, MTX_KIND_LABEL, MTX_CREATE_CMD, MTX_CREATE_VARIANT (org|payload)
 # Repo prefixes: payload-, org-, template- (`template-*` = payload templates only; see docs/MTX_SCAFFOLDING_MODEL.md).
 # Optional: MTX_WORKSPACE_ROOT, MTX_GITHUB_ORG, MTX_CREATE_SKIP_GITHUB=1 (local git + snippet only; no gh).
 # Optional CLI name: mtx_create_from_template_run "$@" — if any args are given, they are joined with
@@ -30,6 +30,15 @@ declare -F mtx_run >/dev/null || mtx_run() { "$@"; }
 
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*\|-*$//g'
+}
+
+# Set MTX_CREATE_VARIANT to org|payload from create/*.sh entrypoints; avoids mixing flows if prefix alone is ambiguous.
+mtx_create_is_org_flow() {
+  case "${MTX_CREATE_VARIANT:-}" in
+    org) return 0 ;;
+    payload) return 1 ;;
+  esac
+  [ "${MTX_REPO_PREFIX}" = "org-" ]
 }
 
 # Ensure repo name starts with required prefix (payload-, org-, template-, …).
@@ -170,11 +179,11 @@ mtx_org_collect_host_config() {
 
   if [ -t 0 ] && [ -t 1 ] && [ "${MTX_CREATE_NONINTERACTIVE:-}" != "1" ]; then
     echo ""
-    echoc cyan "Host & deploy settings (Enter = keep default):"
+    echoc cyan "Org repo — host & deploy (Enter = keep default):"
     local _v
-    read -rp "  App display name [$ORG_CFG_DISPLAY_NAME]: " _v
+    read -rp "  Display name (app.json / UI) [$ORG_CFG_DISPLAY_NAME]: " _v
     [ -n "$_v" ] && ORG_CFG_DISPLAY_NAME="$_v"
-    read -rp "  App slug (config + Railway) [$ORG_CFG_APP_SLUG]: " _v
+    read -rp "  Slug (config + Railway) [$ORG_CFG_APP_SLUG]: " _v
     [ -n "$_v" ] && ORG_CFG_APP_SLUG="$(slugify "$_v")"
     [ -z "$ORG_CFG_APP_SLUG" ] && ORG_CFG_APP_SLUG="$default_slug"
     read -rp "  Railway / workspace owner (GitHub org name) [$ORG_CFG_OWNER]: " _v
@@ -715,7 +724,11 @@ mtx_create_from_template_run() {
     NEW_APP_NAME=$(printf '%s' "$(echo "$*" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')")
   fi
   if [ -z "$NEW_APP_NAME" ]; then
-    read -rp "$(echo -e "${bold:-}Display name (organization or app name):${reset:-} ")" NEW_APP_NAME
+    if mtx_create_is_org_flow; then
+      read -rp "$(echo -e "${bold:-}Organization / product display name:${reset:-} ")" NEW_APP_NAME
+    else
+      read -rp "$(echo -e "${bold:-}App display name (new payload repo):${reset:-} ")" NEW_APP_NAME
+    fi
     NEW_APP_NAME="${NEW_APP_NAME#"${NEW_APP_NAME%%[![:space:]]*}"}"
     NEW_APP_NAME="${NEW_APP_NAME%"${NEW_APP_NAME##*[![:space:]]}"}"
     if [ -z "$NEW_APP_NAME" ]; then
@@ -727,7 +740,7 @@ mtx_create_from_template_run() {
     echo ""
   fi
 
-  if [ "${MTX_REPO_PREFIX}" = "org-" ]; then
+  if mtx_create_is_org_flow; then
     local default_org_repo
     default_org_repo=$(ensure_mtx_repo_prefix "$(slugify "$NEW_APP_NAME")" "org-")
     if [ -t 0 ] && [ -t 1 ] && [ "${MTX_CREATE_NONINTERACTIVE:-}" != "1" ]; then
@@ -786,7 +799,7 @@ mtx_create_from_template_run() {
   unset MTX_TEMPLATE_SNAPSHOT_FROM
   export MTX_CREATE_SOURCE_NOTE="$TEMPLATE_REPO"
 
-  if [ "${MTX_REPO_PREFIX}" = "org-" ]; then
+  if mtx_create_is_org_flow; then
     mtx_org_scaffold_deploy_config_surface "$REPO_PATH" "$REPO_NAME" "$NEW_APP_NAME" "$WORKSPACE_ROOT" "$GITHUB_ORG" || {
       warn "Org deploy config scaffold had warnings; check config/ and terraform/."
     }

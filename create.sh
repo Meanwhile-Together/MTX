@@ -12,12 +12,14 @@ MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 case "${1:-}" in
   payload)
     shift
+    export MTX_CREATE_VARIANT=payload
     # shellcheck source=create/payload.sh
     source "$MTX_ROOT/create/payload.sh" "$@"
     return 0 2>/dev/null || exit 0
     ;;
   org)
     shift
+    export MTX_CREATE_VARIANT=org
     # shellcheck source=create/org.sh
     source "$MTX_ROOT/create/org.sh" "$@"
     return 0 2>/dev/null || exit 0
@@ -30,6 +32,7 @@ case "${1:-}" in
     ;;
 esac
 
+export MTX_CREATE_VARIANT="${MTX_CREATE_VARIANT:-payload}"
 export MTX_REPO_PREFIX="payload-"
 export MTX_TEMPLATE_REPO="${MTX_PAYLOAD_TEMPLATE_REPO:-template-basic}"
 export MTX_KIND_LABEL="Payload"

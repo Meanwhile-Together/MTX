@@ -6,6 +6,7 @@ nobanner=1
 set -e
 
 MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export MTX_CREATE_VARIANT=payload
 export MTX_REPO_PREFIX="payload-"
 export MTX_TEMPLATE_REPO="${MTX_PAYLOAD_TEMPLATE_REPO:-template-basic}"
 export MTX_KIND_LABEL="Payload"
