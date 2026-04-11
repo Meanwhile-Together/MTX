@@ -364,10 +364,6 @@ mtx_org_merge_host_into_package_json() {
     warn "scripts/prepare-railway-artifact.sh missing from template."
     return 1
   fi
-  if [ ! -f "$repo_path/scripts/railway-bundle-for-git.sh" ]; then
-    warn "scripts/railway-bundle-for-git.sh missing from template."
-    return 1
-  fi
   if [ ! -f "$repo_path/scripts/railway-ci-install.sh" ] || [ ! -f "$repo_path/scripts/ensure-vendor-preinstall.sh" ]; then
     warn "scripts/railway-ci-install.sh or ensure-vendor-preinstall.sh missing from template."
     return 1
@@ -376,8 +372,7 @@ mtx_org_merge_host_into_package_json() {
     "$repo_path/scripts/railway-build.sh" "$repo_path/scripts/ensure-vendor-project-bridge.sh" \
     "$repo_path/scripts/ensure-vendor-preinstall.sh" \
     "$repo_path/scripts/railway-ci-install.sh" \
-    "$repo_path/scripts/prepare-railway-artifact.sh" \
-    "$repo_path/scripts/railway-bundle-for-git.sh"
+    "$repo_path/scripts/prepare-railway-artifact.sh"
   if ! command -v jq &>/dev/null; then
     warn "jq required to merge org host into package.json"
     return 1
@@ -390,7 +385,6 @@ mtx_org_merge_host_into_package_json() {
     | .devDependencies = ((.devDependencies // {}) + {"@meanwhile-together/engine": "file:vendor/project-bridge/engine"})
     | .scripts["preinstall"] = "bash scripts/ensure-vendor-preinstall.sh"
     | .scripts["prepare:railway"] = "bash scripts/prepare-railway-artifact.sh"
-    | .scripts["prepare:git-deploy"] = "bash scripts/railway-bundle-for-git.sh"
     | .scripts["dev"] = "bash scripts/org-dev-server.sh"
     | .scripts["build:server"] = "bash scripts/org-build-server.sh"
     | .scripts["build:backend-server"] = "npm run build:server"
@@ -429,7 +423,7 @@ update_repo_metadata_from_template() {
       next_extra="
 
 4. **Local dev** — \`npm run dev\` runs **project-bridge**’s \`npm run dev\` with this repo’s \`config/\` synced in; project-bridge \`config/\` is **restored** when dev exits (Ctrl+C).  
-5. **Standalone deploy** — Same local project-bridge checkout as above. Run \`npm install\` then \`npm run build:server\` (syncs org \`config/\` for the build, **restores**, mirrors \`targets/server/dist\`). Then \`mtx deploy\`. For Railway, run \`npm run prepare:railway\` locally (copies project-bridge into \`vendor/\` and builds \`targets/server/dist/\`), then deploy the prepared tree — remote builds do not fetch project-bridge over the network."
+5. **Standalone deploy** — Same local project-bridge checkout as above. Run \`npm install\` then \`npm run build:server\` (syncs org \`config/\` for the build, **restores**, mirrors \`targets/server/dist\`). Then \`mtx deploy\`. For Railway: \`npm run prepare:railway\` then \`railway up\` from this repo."
       ;;
   esac
 
