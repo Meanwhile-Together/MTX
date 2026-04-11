@@ -364,6 +364,10 @@ mtx_org_merge_host_into_package_json() {
     warn "scripts/prepare-railway-artifact.sh missing from template."
     return 1
   fi
+  if [ ! -f "$repo_path/scripts/railway-bundle-for-git.sh" ]; then
+    warn "scripts/railway-bundle-for-git.sh missing from template."
+    return 1
+  fi
   if [ ! -f "$repo_path/scripts/railway-ci-install.sh" ] || [ ! -f "$repo_path/scripts/ensure-vendor-preinstall.sh" ]; then
     warn "scripts/railway-ci-install.sh or ensure-vendor-preinstall.sh missing from template."
     return 1
@@ -372,7 +376,8 @@ mtx_org_merge_host_into_package_json() {
     "$repo_path/scripts/railway-build.sh" "$repo_path/scripts/ensure-vendor-project-bridge.sh" \
     "$repo_path/scripts/ensure-vendor-preinstall.sh" \
     "$repo_path/scripts/railway-ci-install.sh" \
-    "$repo_path/scripts/prepare-railway-artifact.sh"
+    "$repo_path/scripts/prepare-railway-artifact.sh" \
+    "$repo_path/scripts/railway-bundle-for-git.sh"
   if ! command -v jq &>/dev/null; then
     warn "jq required to merge org host into package.json"
     return 1
@@ -385,6 +390,7 @@ mtx_org_merge_host_into_package_json() {
     | .devDependencies = ((.devDependencies // {}) + {"@meanwhile-together/engine": "file:vendor/project-bridge/engine"})
     | .scripts["preinstall"] = "bash scripts/ensure-vendor-preinstall.sh"
     | .scripts["prepare:railway"] = "bash scripts/prepare-railway-artifact.sh"
+    | .scripts["prepare:git-deploy"] = "bash scripts/railway-bundle-for-git.sh"
     | .scripts["dev"] = "bash scripts/org-dev-server.sh"
     | .scripts["build:server"] = "bash scripts/org-build-server.sh"
     | .scripts["build:backend-server"] = "npm run build:server"
