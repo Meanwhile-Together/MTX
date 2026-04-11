@@ -317,7 +317,7 @@ mtx_org_scaffold_deploy_config_surface() {
     fi
     echoc dim "terraform/ uses ../config/app.json — run terraform init on first mtx deploy."
   else
-    echoc yellow "Sibling project-bridge/terraform not found at $tf_src — skipped. Clone project-bridge next to this workspace to vendor terraform/."
+    echoc yellow "Sibling project-bridge/terraform not found at $tf_src — skipped. Place a project-bridge checkout next to this workspace to vendor terraform/."
   fi
 
   gitignore="$repo_path/.gitignore"
@@ -423,7 +423,7 @@ update_repo_metadata_from_template() {
       next_extra="
 
 4. **Local dev** — \`npm run dev\` runs **project-bridge**’s \`npm run dev\` with this repo’s \`config/\` synced in; project-bridge \`config/\` is **restored** when dev exits (Ctrl+C).  
-5. **Standalone deploy** — Same project-bridge checkout as above. Run \`npm install\` then \`npm run build:server\` (syncs org \`config/\` for the build, **restores**, mirrors \`targets/server/dist\`). Then \`mtx deploy\`. For Railway without a sibling, use \`vendor/project-bridge\` (e.g. submodule)."
+5. **Standalone deploy** — Same local project-bridge checkout as above. Run \`npm install\` then \`npm run build:server\` (syncs org \`config/\` for the build, **restores**, mirrors \`targets/server/dist\`). Then \`mtx deploy\`. For Railway, run \`npm run prepare:railway\` locally (copies project-bridge into \`vendor/\` and builds \`targets/server/dist/\`), then deploy the prepared tree — remote builds do not fetch project-bridge over the network."
       ;;
   esac
 
