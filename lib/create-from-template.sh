@@ -397,7 +397,7 @@ mtx_org_merge_host_into_package_json() {
   if [ -f "$pb/railway.json" ]; then
     jq '
       .build.buildCommand = "bash scripts/railway-build.sh"
-      | .deploy.startCommand = "node targets/server/dist/index.js"
+      | .deploy.startCommand = "PROJECT_ROOT=/app DISABLE_BROWSER_AUTOMATION=1 node targets/server/dist/index.js"
     ' "$pb/railway.json" > "$repo_path/railway.json"
   else
     jq -n \
@@ -405,7 +405,7 @@ mtx_org_merge_host_into_package_json() {
       '{
         "$schema": $schema,
         build: { builder: "RAILPACK", buildCommand: "bash scripts/railway-build.sh" },
-        deploy: { startCommand: "node targets/server/dist/index.js", restartPolicyType: "ON_FAILURE", restartPolicyMaxRetries: 10 }
+        deploy: { startCommand: "PROJECT_ROOT=/app DISABLE_BROWSER_AUTOMATION=1 node targets/server/dist/index.js", restartPolicyType: "ON_FAILURE", restartPolicyMaxRetries: 10 }
       }' > "$repo_path/railway.json"
   fi
 }
