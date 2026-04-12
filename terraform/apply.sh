@@ -80,6 +80,25 @@ fi
 [ -n "${MASTER_AUTH_ISSUER:-}" ] && set_env_var_in_file "MASTER_AUTH_ISSUER" "$MASTER_AUTH_ISSUER"
 [ -n "${MASTER_CORS_ORIGINS:-}" ] && set_env_var_in_file "MASTER_CORS_ORIGINS" "$MASTER_CORS_ORIGINS"
 
+# After prepare:railway, config/server.json.railway may exist (path payloads vendored under ./payloads/).
+# Swap onto server.json only for railway up, then restore the dev file from backup.
+mtx_railway_swap_server_config_for_upload() {
+    local root="$1"
+    local r="$root/config/server.json.railway"
+    [ -f "$r" ] || return 0
+    cp -a "$root/config/server.json" "$root/config/server.json.mtx-dev-bak"
+    cp -a "$r" "$root/config/server.json"
+    echo -e "${CYAN}ℹ️  Using config/server.json.railway for Railway upload (payload paths under ./payloads/).${NC}"
+}
+
+mtx_railway_restore_server_config_after_upload() {
+    local root="$1"
+    local bak="$root/config/server.json.mtx-dev-bak"
+    [ -f "$bak" ] || return 0
+    mv -f "$bak" "$root/config/server.json"
+    echo -e "${CYAN}ℹ️  Restored config/server.json for local development.${NC}"
+}
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -985,6 +1004,12 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         export RAILWAY_PROJECT="$PROJECT_ID"
         export RAILWAY_TOKEN="$PROJECT_TOKEN"
         unset RAILWAY_API_TOKEN  # Clear account token so project token takes precedence
+
+        mtx_railway_swap_server_config_for_upload "$PROJECT_ROOT"
+        mtx_railway_restore_deploy_server_json_cleanup() {
+            mtx_railway_restore_server_config_after_upload "$PROJECT_ROOT"
+        }
+        trap mtx_railway_restore_deploy_server_json_cleanup EXIT
         
         # Run Railway CLI and capture output - retry with new token if validation fails
         RAILWAY_DEPLOY_OUTPUT=""  # Initialize global output variable
@@ -1066,6 +1091,9 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             echo -e "${RED}❌ App deployment failed after $MAX_TOKEN_RETRIES token attempts${NC}"
             exit 1
         fi
+        
+        trap - EXIT
+        mtx_railway_restore_deploy_server_json_cleanup
         
         # Ensure app service has a Railway-provided public domain (*.railway.app). Terraform provider has no domain resource; use CLI.
         echo -e "${BLUE}🔗 Ensuring public domain for app service...${NC}"
