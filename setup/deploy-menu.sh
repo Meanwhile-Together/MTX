@@ -405,7 +405,7 @@ guided_setup() {
                     export RAILWAY_TOKEN="$PROJECT_TOKEN"
                     echo ""
                     echo -e "${BLUE}🚀 Deploying app server to Railway ($ENVIRONMENT environment)...${NC}"
-                    railway up --environment "$ENVIRONMENT" || {
+                    railway up --environment "$ENVIRONMENT" --no-gitignore || {
                         echo -e "${YELLOW}⚠️  Deployment failed. You can retry later with option 5.${NC}"
                     }
                 else
@@ -738,7 +738,7 @@ while true; do
             echo -e "${BLUE}🚀 Deploying to Railway ($ENVIRONMENT environment)...${NC}"
             
             # Capture output to check for errors
-            RAILWAY_OUTPUT=$(railway up --environment "$ENVIRONMENT" 2>&1)
+            RAILWAY_OUTPUT=$(railway up --environment "$ENVIRONMENT" --no-gitignore 2>&1)
             RAILWAY_EXIT=$?
             
             # Check for "Project Token not found" error
@@ -776,7 +776,7 @@ while true; do
                 # Retry deployment
                 echo ""
                 echo -e "${BLUE}🚀 Retrying deployment...${NC}"
-                railway up --environment "$ENVIRONMENT"
+                railway up --environment "$ENVIRONMENT" --no-gitignore
             elif [ $RAILWAY_EXIT -ne 0 ]; then
                 echo "$RAILWAY_OUTPUT"
                 echo ""

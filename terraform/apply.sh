@@ -578,7 +578,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             # Note: Environment creation is handled BEFORE calling this function
             # This function only handles deployment
             # Pass project, service, and environment explicitly so the token doesn't "pick" a different project/env
-            local UP_OPTS="--project $PROJ_ID --service $SVC_ID --environment $ENV_NAME"
+            # --no-gitignore: include prepared targets/server/dist + npm-packs (see template .gitignore / .railwayignore)
+            local UP_OPTS="--project $PROJ_ID --service $SVC_ID --environment $ENV_NAME --no-gitignore"
             [ -n "$VERBOSE" ] && UP_OPTS="$UP_OPTS --verbose"
             # Use tee to both display output in real-time and capture it
             local OUTPUT=$(railway up $UP_OPTS 2>&1 | tee /dev/stderr)
@@ -647,7 +648,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 echo ""
                 
                 # Deploy to selected service with project + environment (explicit so token doesn't pick)
-                OUTPUT=$(railway up --project "$PROJ_ID" --service "$SELECTED_SERVICE_ID" --environment "$ENV_NAME" 2>&1 | tee /dev/stderr)
+                OUTPUT=$(railway up --project "$PROJ_ID" --service "$SELECTED_SERVICE_ID" --environment "$ENV_NAME" --no-gitignore 2>&1 | tee /dev/stderr)
                 EXIT_CODE=${PIPESTATUS[0]}
                 
                 # Store output in global variable

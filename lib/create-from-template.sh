@@ -332,20 +332,6 @@ mtx_org_scaffold_deploy_config_surface() {
       echo "terraform/terraform.tfstate.*"
     } >> "$gitignore"
   fi
-  if [ -f "$gitignore" ] && ! grep -q 'targets/server/dist' "$gitignore" 2>/dev/null; then
-    {
-      echo ""
-      echo "# Unified server dist (mirrored from project-bridge by npm run build:server)"
-      echo "targets/server/dist/"
-    } >> "$gitignore"
-  fi
-  if [ -f "$gitignore" ] && ! grep -q 'targets/server/npm-packs' "$gitignore" 2>/dev/null; then
-    {
-      echo ""
-      echo "# Packed workspace tarballs (npm run prepare:railway); upload with railway up"
-      echo "targets/server/npm-packs/"
-    } >> "$gitignore"
-  fi
   if [ -f "$gitignore" ] && ! grep -q 'targets/server/runtime' "$gitignore" 2>/dev/null; then
     {
       echo ""
