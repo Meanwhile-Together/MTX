@@ -339,6 +339,20 @@ mtx_org_scaffold_deploy_config_surface() {
       echo "targets/server/dist/"
     } >> "$gitignore"
   fi
+  if [ -f "$gitignore" ] && ! grep -q 'targets/server/npm-packs' "$gitignore" 2>/dev/null; then
+    {
+      echo ""
+      echo "# Packed workspace tarballs (npm run prepare:railway); upload with railway up"
+      echo "targets/server/npm-packs/"
+    } >> "$gitignore"
+  fi
+  if [ -f "$gitignore" ] && ! grep -q 'targets/server/runtime' "$gitignore" 2>/dev/null; then
+    {
+      echo ""
+      echo "# Legacy: mirrored node_modules (older prepare:railway)"
+      echo "targets/server/runtime/"
+    } >> "$gitignore"
+  fi
 }
 
 # Wire package.json + railway.json so org repos run the full unified server build via sibling (or vendor) project-bridge.
@@ -356,23 +370,27 @@ mtx_org_merge_host_into_package_json() {
     warn "scripts/org-dev-server.sh missing from template; cannot wire dev."
     return 1
   fi
-  if [ ! -f "$repo_path/scripts/railway-build.sh" ] || [ ! -f "$repo_path/scripts/ensure-vendor-project-bridge.sh" ]; then
-    warn "scripts/railway-build.sh or ensure-vendor-project-bridge.sh missing from template."
+  if [ ! -f "$repo_path/scripts/railway-build.sh" ]; then
+    warn "scripts/railway-build.sh missing from template."
     return 1
   fi
-  if [ ! -f "$repo_path/scripts/prepare-railway-artifact.sh" ]; then
-    warn "scripts/prepare-railway-artifact.sh missing from template."
+  if [ ! -f "$repo_path/scripts/prepare-railway-artifact.sh" ] || [ ! -f "$repo_path/scripts/generate-railway-deploy-manifest.sh" ]; then
+    warn "scripts/prepare-railway-artifact.sh or generate-railway-deploy-manifest.sh missing from template."
     return 1
   fi
-  if [ ! -f "$repo_path/scripts/railway-ci-install.sh" ] || [ ! -f "$repo_path/scripts/ensure-vendor-preinstall.sh" ]; then
-    warn "scripts/railway-ci-install.sh or ensure-vendor-preinstall.sh missing from template."
+  if [ ! -f "$repo_path/scripts/railway-ci-install.sh" ]; then
+    warn "scripts/railway-ci-install.sh missing from template."
+    return 1
+  fi
+  if [ ! -f "$repo_path/package.deploy.json" ] || [ ! -f "$repo_path/package-lock.deploy.json" ]; then
+    warn "package.deploy.json or package-lock.deploy.json missing from template."
     return 1
   fi
   chmod +x "$repo_path/scripts/org-build-server.sh" "$repo_path/scripts/org-dev-server.sh" \
-    "$repo_path/scripts/railway-build.sh" "$repo_path/scripts/ensure-vendor-project-bridge.sh" \
-    "$repo_path/scripts/ensure-vendor-preinstall.sh" \
+    "$repo_path/scripts/railway-build.sh" \
     "$repo_path/scripts/railway-ci-install.sh" \
-    "$repo_path/scripts/prepare-railway-artifact.sh"
+    "$repo_path/scripts/prepare-railway-artifact.sh" \
+    "$repo_path/scripts/generate-railway-deploy-manifest.sh"
   if ! command -v jq &>/dev/null; then
     warn "jq required to merge org host into package.json"
     return 1
@@ -380,18 +398,21 @@ mtx_org_merge_host_into_package_json() {
   jq \
     '
     .dependencies = ((.dependencies // {}) | del(.projectb))
-    | .dependencies["@meanwhile-together/shared"] = "file:vendor/project-bridge/shared"
-    | .dependencies["@meanwhile-together/ui"] = "file:vendor/project-bridge/ui"
-    | .devDependencies = ((.devDependencies // {}) + {"@meanwhile-together/engine": "file:vendor/project-bridge/engine"})
-    | .scripts["preinstall"] = "bash scripts/ensure-vendor-preinstall.sh"
+    | .dependencies["@meanwhile-together/shared"] = "file:../project-bridge/shared"
+    | .dependencies["@meanwhile-together/ui"] = "file:../project-bridge/ui"
+    | .devDependencies = ((.devDependencies // {}) + {"@meanwhile-together/engine": "file:../project-bridge/engine"})
     | .scripts["prepare:railway"] = "bash scripts/prepare-railway-artifact.sh"
     | .scripts["dev"] = "bash scripts/org-dev-server.sh"
     | .scripts["build:server"] = "bash scripts/org-build-server.sh"
     | .scripts["build:backend-server"] = "npm run build:server"
+    | .scripts = ((.scripts // {}) | del(.preinstall))
     ' "$pkg" > "${pkg}.tmp" && mv "${pkg}.tmp" "$pkg"
 
   if [ -f "$pb/railway.json" ]; then
-    jq '.build.buildCommand = "bash scripts/railway-build.sh"' "$pb/railway.json" > "$repo_path/railway.json"
+    jq '
+      .build.buildCommand = "bash scripts/railway-build.sh"
+      | .deploy.startCommand = "node targets/server/dist/index.js"
+    ' "$pb/railway.json" > "$repo_path/railway.json"
   else
     jq -n \
       --arg schema "https://railway.app/railway.schema.json" \
