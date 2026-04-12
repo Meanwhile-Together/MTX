@@ -105,6 +105,10 @@ Terraform creates or adopts these; apply.sh discovers existing IDs and passes th
 - **railway.json (root):** App build/start (RAILPACK; build:server; start `node targets/server/dist/index.js`).
 - **targets/backend-server/railway.json:** Backend build/start (build:backend-server + build:backend; start `node targets/backend-server/dist/index.js`). apply.sh temporarily copies this to root for backend `railway up`.
 
+### 5.1 PostgreSQL and `DATABASE_URL` (each org app service)
+
+The **unified server** deploys to **`{slug}-staging`** / **`{slug}-production`** only. A separate backend service no longer auto-provides the database. **Each** of those app services needs **`DATABASE_URL`** (and **`JWT_SECRET`**) in Railway, usually by adding **PostgreSQL** in the same project and **referencing** its `DATABASE_URL` on the app service variables. See project-bridge **[RAILWAY_DATABASE.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/RAILWAY_DATABASE.md)** (Railway database templates, variable references, optional Terraform `railway_create_db_service` caveat).
+
 ---
 
 ## 6. MTX Script Behaviour
