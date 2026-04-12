@@ -444,7 +444,7 @@ update_repo_metadata_from_template() {
       next_extra="
 
 4. **Local dev** — \`npm run dev\` runs **project-bridge**’s \`npm run dev\` with this repo’s \`config/\` synced in; project-bridge \`config/\` is **restored** when dev exits (Ctrl+C).  
-5. **Standalone deploy** — Same local project-bridge checkout as above. Run \`npm install\` then \`npm run build:server\` (syncs org \`config/\` for the build, **restores**, mirrors \`targets/server/dist\`). Then \`mtx deploy\`. For Railway: \`npm run prepare:railway\` then \`railway up\` from this repo."
+5. **Standalone deploy** — Same local project-bridge checkout as above. \`mtx deploy\` runs \`npm run prepare:railway\` automatically (unified server dist, npm-packs, deploy manifests) before \`railway up\`. You can still run \`npm run prepare:railway\` alone to verify the bundle."
       ;;
   esac
 

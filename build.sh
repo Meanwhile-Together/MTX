@@ -3,6 +3,8 @@
 # Same npm steps as mtx deploy uses before railway up; does not provision infra or upload.
 # Org repos (scripts/org-build-server.sh): before build:server, primes resolved project-bridge with
 # npm install and npm run db:generate (matches org-build-server expectations).
+# Org repos with scripts/prepare-railway-artifact.sh: run npm run prepare:railway instead of
+# build:server — produces targets/server/dist, npm-packs, and deploy manifests for Railway.
 # Usage: mtx build [server|backend|all]   (default: all)
 desc="Build server artifacts (no deploy); optional: server, backend, or all"
 nobanner=1
@@ -33,8 +35,8 @@ case "$TARGET" in
   all|a|'') TARGET=all ;;
   -h|--help|help)
     echo "Usage: mtx build [server|backend|all]"
-    echo "  server   — npm run build:server (app / unified server)"
-    echo "  backend  — npm run build:backend-server"
+    echo "  server   — npm run build:server, or npm run prepare:railway when org Railway scripts exist"
+    echo "  backend  — npm run build:backend-server (or same prepare:railway when unified)"
     echo "  all      — both (default; org repos run one unified build if backend aliases to server)"
     echo "  Org repos: project-bridge is primed with npm install + db:generate first (sibling, vendor/, or PROJECT_BRIDGE_ROOT)."
     exit 0
@@ -85,7 +87,23 @@ ensure_npm_deps() {
   fi
 }
 
+# Org template: full Railway bundle (mirrored dist + npm pack + package.deploy.json / lock).
+mtx_org_use_prepare_railway() {
+  [ -f "$PROJECT_ROOT/scripts/prepare-railway-artifact.sh" ] &&
+    [ -f "$PROJECT_ROOT/scripts/generate-railway-deploy-manifest.sh" ]
+}
+
+run_prepare_railway_bundle() {
+  echo "🔨 Building Railway deploy bundle (npm run prepare:railway)..." >&2
+  npm run prepare:railway || { echo "❌ prepare:railway failed" >&2; exit 1; }
+  echo "✅ prepare:railway complete" >&2
+}
+
 run_server_build() {
+  if mtx_org_use_prepare_railway; then
+    run_prepare_railway_bundle
+    return
+  fi
   echo "🔨 Building app server (npm run build:server)..." >&2
   ensure_npm_deps
   npm run build:server || { echo "❌ build:server failed" >&2; exit 1; }
@@ -93,6 +111,10 @@ run_server_build() {
 }
 
 run_backend_build() {
+  if mtx_org_use_prepare_railway; then
+    run_prepare_railway_bundle
+    return
+  fi
   echo "🔨 Building backend server (npm run build:backend-server)..." >&2
   ensure_npm_deps
   npm run build:backend-server || { echo "❌ build:backend-server failed" >&2; exit 1; }

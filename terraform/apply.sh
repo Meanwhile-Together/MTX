@@ -533,17 +533,26 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     exit 1
                 }
             else
-                if [ ! -f "node_modules/.bin/prisma" ] && [ -f "package.json" ]; then
-                    echo -e "${BLUE}ℹ️  Prisma/dependencies not found, running npm install...${NC}"
-                    npm install || { echo -e "${RED}❌ npm install failed${NC}"; exit 1; }
-                    echo ""
+                if [ -f "$PROJECT_ROOT/scripts/prepare-railway-artifact.sh" ] && [ -f "$PROJECT_ROOT/scripts/generate-railway-deploy-manifest.sh" ]; then
+                    echo -e "${BLUE}🔨 Building Railway deploy bundle (npm run prepare:railway)...${NC}"
+                    npm run prepare:railway || {
+                        echo -e "${RED}❌ prepare:railway failed${NC}"
+                        exit 1
+                    }
+                    echo -e "${GREEN}✅ prepare:railway complete${NC}"
+                else
+                    if [ ! -f "node_modules/.bin/prisma" ] && [ -f "package.json" ]; then
+                        echo -e "${BLUE}ℹ️  Prisma/dependencies not found, running npm install...${NC}"
+                        npm install || { echo -e "${RED}❌ npm install failed${NC}"; exit 1; }
+                        echo ""
+                    fi
+                    echo -e "${BLUE}🔨 Building project...${NC}"
+                    npm run build:server || {
+                        echo -e "${RED}❌ Build failed${NC}"
+                        exit 1
+                    }
+                    echo -e "${GREEN}✅ Build complete${NC}"
                 fi
-                echo -e "${BLUE}🔨 Building project...${NC}"
-                npm run build:server || {
-                    echo -e "${RED}❌ Build failed${NC}"
-                    exit 1
-                }
-                echo -e "${GREEN}✅ Build complete${NC}"
             fi
             echo ""
         fi
