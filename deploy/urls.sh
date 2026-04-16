@@ -70,11 +70,11 @@ if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ]; then
   exit 1
 fi
 
-# Org repos are expected to have .env tokens. Prefer account token, fallback to env-specific project token.
+# Org repos are expected to have .env tokens. Prefer env-specific project token, fallback to account token.
 if [ "$ENVIRONMENT" = "staging" ]; then
-  CANDIDATE_TOKEN="${RAILWAY_ACCOUNT_TOKEN:-${RAILWAY_PROJECT_TOKEN_STAGING:-}}"
+  CANDIDATE_TOKEN="${RAILWAY_PROJECT_TOKEN_STAGING:-${RAILWAY_ACCOUNT_TOKEN:-}}"
 else
-  CANDIDATE_TOKEN="${RAILWAY_ACCOUNT_TOKEN:-${RAILWAY_PROJECT_TOKEN_PRODUCTION:-}}"
+  CANDIDATE_TOKEN="${RAILWAY_PROJECT_TOKEN_PRODUCTION:-${RAILWAY_ACCOUNT_TOKEN:-}}"
 fi
 if [ -z "${CANDIDATE_TOKEN:-}" ]; then
   echo -e "${YELLOW}⚠️  Missing Railway token in .env for $ENVIRONMENT (need RAILWAY_ACCOUNT_TOKEN or env project token).${NC}" >&2
@@ -113,8 +113,10 @@ parse_domain() {
   fi
   local url=""
   [ -z "$out" ] && return
-  url=$(echo "$out" | jq -r '.domain // .url // .host // . // empty' 2>/dev/null)
-  [ -z "$url" ] && url=$(echo "$out" | tr -d '\n\r' | sed -n 's/.*\([a-zA-Z0-9.-]*\.up\.railway\.app\).*/\1/p')
+  # Prefer explicit hostname extraction from mixed/plain CLI output.
+  url=$(echo "$out" | grep -Eo '[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.up\.railway\.app' | head -n 1)
+  # Then try JSON fields when available.
+  [ -z "$url" ] && url=$(echo "$out" | jq -r '.domain // .url // .host // empty' 2>/dev/null)
   [ -z "$url" ] && url=$(echo "$out" | head -1 | tr -d '\n\r')
   url=$(echo "$url" | tr -d '\n\r' | sed 's|^https\?://||' | sed 's|/.*||')
   [ -n "$url" ] && [ "$url" != "null" ] && echo "$url"
@@ -127,7 +129,7 @@ APP_DOMAIN=""
 if [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "null" ]; then
   echo -e "${BLUE}  App service...${NC}"
   if type ensure_railway_domain &>/dev/null; then
-    APP_DOMAIN=$(run_with_timeout "${MTX_URLS_TIMEOUT_SEC:-20}" ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT" "app" | parse_domain) || true
+    APP_DOMAIN=$(ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT" "app" | parse_domain) || true
   else
     APP_DOMAIN=$(cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && run_with_timeout "${MTX_URLS_TIMEOUT_SEC:-20}" railway domain --service "$SERVICE_ID" | parse_domain) || true
   fi
@@ -138,7 +140,7 @@ BACKEND_DOMAIN=""
 if [ -n "$BACKEND_SERVICE_ID" ] && [ "$BACKEND_SERVICE_ID" != "null" ]; then
   echo -e "${BLUE}  Backend service...${NC}"
   if type ensure_railway_domain &>/dev/null; then
-    BACKEND_DOMAIN=$(run_with_timeout "${MTX_URLS_TIMEOUT_SEC:-20}" ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$BACKEND_SERVICE_ID" "$ENVIRONMENT" "backend" | parse_domain) || true
+    BACKEND_DOMAIN=$(ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$BACKEND_SERVICE_ID" "$ENVIRONMENT" "backend" | parse_domain) || true
   else
     BACKEND_DOMAIN=$(cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$BACKEND_SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && run_with_timeout "${MTX_URLS_TIMEOUT_SEC:-20}" railway domain --service "$BACKEND_SERVICE_ID" | parse_domain) || true
   fi

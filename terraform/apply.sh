@@ -1097,8 +1097,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         
         # Ensure app service has a Railway-provided public domain (*.railway.app). Terraform provider has no domain resource; use CLI.
         echo -e "${BLUE}🔗 Ensuring public domain for app service...${NC}"
-        # Domain generation may require account-token scoped auth on some Railway CLI versions.
-        export RAILWAY_TOKEN="${RAILWAY_ACCOUNT_TOKEN:-$PROJECT_TOKEN}"
+        # Prefer env project token for deploy/domain ops; fallback to account token.
+        export RAILWAY_TOKEN="${PROJECT_TOKEN:-${RAILWAY_ACCOUNT_TOKEN:-}}"
         unset RAILWAY_API_TOKEN
         if type ensure_railway_domain &>/dev/null; then
             ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT" "app" || true
