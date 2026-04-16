@@ -38,8 +38,10 @@ ensure_railway_domain() {
     local out
     out=$(railway domain 2>/dev/null) || true
     if [ -z "$out" ] || ! echo "$out" | grep -qE 'railway\.app|\.up\.'; then
-        out=$(railway domain --service "$service_id" --environment "$environment" --json 2>/dev/null) || \
-        out=$(railway domain --service "$service_id" --environment "$environment" 2>/dev/null) || true
+        # Current Railway CLI domain command supports --service but not --environment.
+        # Environment is selected via railway link/.railway context above.
+        out=$(railway domain --service "$service_id" --json 2>/dev/null) || \
+        out=$(railway domain --service "$service_id" 2>/dev/null) || true
     fi
 
     cd "$saved_pwd" || true

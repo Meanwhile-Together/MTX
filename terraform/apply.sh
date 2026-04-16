@@ -1097,7 +1097,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         
         # Ensure app service has a Railway-provided public domain (*.railway.app). Terraform provider has no domain resource; use CLI.
         echo -e "${BLUE}🔗 Ensuring public domain for app service...${NC}"
-        export RAILWAY_TOKEN="$PROJECT_TOKEN"
+        # Domain generation may require account-token scoped auth on some Railway CLI versions.
+        export RAILWAY_TOKEN="${RAILWAY_ACCOUNT_TOKEN:-$PROJECT_TOKEN}"
         unset RAILWAY_API_TOKEN
         if type ensure_railway_domain &>/dev/null; then
             ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT" "app" || true
@@ -1111,13 +1112,26 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             export RAILWAY_TOKEN="$PROJECT_TOKEN"
             unset RAILWAY_API_TOKEN
             (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment)
+            # Force CLI context to the exact project/service/environment before setting vars.
+            (cd "$PROJECT_ROOT" && railway link --project "$PROJECT_ID" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1) || true
+            railway_set_var() {
+                local kv="$1"
+                # Prefer explicit service/environment targeting, then fallback to linked context.
+                railway variable set "$kv" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
+                  || railway variables set "$kv" >/dev/null 2>&1
+            }
             if [ -n "${RUN_AS_MASTER:-}" ]; then
                 RUN_AS_MASTER_VAL="true"
-                (railway variables set "RUN_AS_MASTER=$RUN_AS_MASTER_VAL" 2>/dev/null && echo -e "${GREEN}✅ RUN_AS_MASTER=$RUN_AS_MASTER_VAL on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RUN_AS_MASTER via CLI${NC}"
+                (railway_set_var "RUN_AS_MASTER=$RUN_AS_MASTER_VAL" && echo -e "${GREEN}✅ RUN_AS_MASTER=$RUN_AS_MASTER_VAL on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RUN_AS_MASTER via CLI${NC}"
             fi
-            [ -n "${MASTER_JWT_SECRET:-}" ] && (railway variables set "MASTER_JWT_SECRET=$MASTER_JWT_SECRET" 2>/dev/null && echo -e "${GREEN}✅ MASTER_JWT_SECRET set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set MASTER_JWT_SECRET via CLI${NC}"
-            [ -n "${MASTER_AUTH_ISSUER:-}" ] && railway variables set "MASTER_AUTH_ISSUER=$MASTER_AUTH_ISSUER" 2>/dev/null || true
-            [ -n "${MASTER_CORS_ORIGINS:-}" ] && railway variables set "MASTER_CORS_ORIGINS=$MASTER_CORS_ORIGINS" 2>/dev/null || true
+            [ -n "${MASTER_JWT_SECRET:-}" ] && (railway_set_var "MASTER_JWT_SECRET=$MASTER_JWT_SECRET" && echo -e "${GREEN}✅ MASTER_JWT_SECRET set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set MASTER_JWT_SECRET via CLI${NC}"
+            # Keep legacy/server auth paths happy: if running as master and JWT_SECRET is unset,
+            # mirror MASTER_JWT_SECRET into JWT_SECRET on the same service.
+            if [ -n "${RUN_AS_MASTER:-}" ] && [ -n "${MASTER_JWT_SECRET:-}" ] && [ -z "${JWT_SECRET:-}" ]; then
+                (railway_set_var "JWT_SECRET=$MASTER_JWT_SECRET" && echo -e "${GREEN}✅ JWT_SECRET mirrored from MASTER_JWT_SECRET on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set JWT_SECRET via CLI${NC}"
+            fi
+            [ -n "${MASTER_AUTH_ISSUER:-}" ] && railway_set_var "MASTER_AUTH_ISSUER=$MASTER_AUTH_ISSUER" || true
+            [ -n "${MASTER_CORS_ORIGINS:-}" ] && railway_set_var "MASTER_CORS_ORIGINS=$MASTER_CORS_ORIGINS" || true
         fi
 
         echo ""

@@ -36,5 +36,5 @@ else
 fi
 # After successful deploy, ensure deploy URLs and print them (same as mtx deploy urls)
 if [ -f "$MTX_ROOT/deploy/urls.sh" ]; then
-  "$MTX_ROOT/deploy/urls.sh" "$ENV"
+  MTX_NONINTERACTIVE=1 "$MTX_ROOT/deploy/urls.sh" "$ENV"
 fi
