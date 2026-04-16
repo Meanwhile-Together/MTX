@@ -70,17 +70,17 @@ if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ]; then
   exit 1
 fi
 
-# Prefer account token for domain creation/listing when available; fallback to env project token.
+# Org repos are expected to have .env tokens. Prefer account token, fallback to env-specific project token.
 if [ "$ENVIRONMENT" = "staging" ]; then
-  RAILWAY_TOKEN="${RAILWAY_ACCOUNT_TOKEN:-${RAILWAY_PROJECT_TOKEN_STAGING:-$RAILWAY_TOKEN}}"
+  CANDIDATE_TOKEN="${RAILWAY_ACCOUNT_TOKEN:-${RAILWAY_PROJECT_TOKEN_STAGING:-}}"
 else
-  RAILWAY_TOKEN="${RAILWAY_ACCOUNT_TOKEN:-${RAILWAY_PROJECT_TOKEN_PRODUCTION:-$RAILWAY_TOKEN}}"
+  CANDIDATE_TOKEN="${RAILWAY_ACCOUNT_TOKEN:-${RAILWAY_PROJECT_TOKEN_PRODUCTION:-}}"
 fi
-if [ -z "$RAILWAY_TOKEN" ]; then
-  echo -e "${YELLOW}⚠️  No RAILWAY_PROJECT_TOKEN_$ENVIRONMENT (or RAILWAY_TOKEN). Set in .env or run deploy.${NC}" >&2
+if [ -z "${CANDIDATE_TOKEN:-}" ]; then
+  echo -e "${YELLOW}⚠️  Missing Railway token in .env for $ENVIRONMENT (need RAILWAY_ACCOUNT_TOKEN or env project token).${NC}" >&2
   exit 1
 fi
-export RAILWAY_TOKEN
+export RAILWAY_TOKEN="$CANDIDATE_TOKEN"
 unset RAILWAY_API_TOKEN
 
 # Railway CLI

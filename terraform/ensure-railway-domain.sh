@@ -3,7 +3,8 @@
 # Source this file and call ensure_railway_domain, or run as script with args.
 # Usage (function): ensure_railway_domain "$project_root" "$project_id" "$service_id" "$environment" "$label"
 # Usage (script):   ./ensure-railway-domain.sh <project_root> <project_id> <service_id> <environment> <label>
-# Requires: RAILWAY_TOKEN (project token) set in environment; railway CLI on PATH.
+# Requires: railway CLI on PATH and RAILWAY_TOKEN in environment
+# (provided by org repo .env via deploy/urls.sh).
 
 ensure_railway_domain() {
     _timeout_secs="${MTX_URLS_TIMEOUT_SEC:-20}"
@@ -22,10 +23,9 @@ ensure_railway_domain() {
     fi
 
     if [ -z "${RAILWAY_TOKEN:-}" ]; then
-        echo -e "${YELLOW}⚠️  RAILWAY_TOKEN not set; skipping domain ensure for $label${NC}" >&2
+        echo -e "${YELLOW}⚠️  RAILWAY_TOKEN missing; cannot ensure domain for $label${NC}" >&2
         return 0
     fi
-
     export RAILWAY_TOKEN
     unset RAILWAY_API_TOKEN
 
