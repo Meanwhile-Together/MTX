@@ -99,7 +99,7 @@ fi
 run_with_timeout() {
   local secs="${1:-15}"
   shift
-  timeout "${secs}s" "$@" </dev/null 2>/dev/null
+  timeout -k 2s "${secs}s" "$@" </dev/null 2>/dev/null
 }
 
 # Parse domain from CLI/API output (JSON, plain hostname, or line containing *.up.railway.app)
@@ -118,29 +118,6 @@ parse_domain() {
   [ -z "$url" ] && url=$(echo "$out" | head -1 | tr -d '\n\r')
   url=$(echo "$url" | tr -d '\n\r' | sed 's|^https\?://||' | sed 's|/.*||')
   [ -n "$url" ] && [ "$url" != "null" ] && echo "$url"
-}
-
-# Get service domain via Railway GraphQL API (project token)
-get_domain_via_api() {
-  local project_id="$1"
-  local service_id="$2"
-  local token="$3"
-  local query
-  query=$(printf '{"query":"query { project(id: \"%s\") { services { edges { node { id serviceDomains { edges { node { domain } } } } } } } }"}' "$project_id")
-  local res
-  res=$(curl -s -S -X POST "https://backboard.railway.com/graphql/v2" \
-    -H "Authorization: Bearer $token" \
-    -H "Content-Type: application/json" \
-    -d "$query" 2>/dev/null)
-  local domain
-  domain=$(echo "$res" | jq -r --arg sid "$service_id" '
-    .data.project.services.edges[] | select(.node.id == $sid) | .node.serviceDomains.edges[0].node.domain // empty
-  ' 2>/dev/null)
-  # Alternate schema: domains on node directly
-  [ -z "$domain" ] && domain=$(echo "$res" | jq -r --arg sid "$service_id" '
-    .data.project.services.edges[] | select(.node.id == $sid) | .node.domains.edges[0].node.domain // empty
-  ' 2>/dev/null)
-  [ -n "$domain" ] && [ "$domain" != "null" ] && echo "$domain"
 }
 
 echo -e "${CYAN}🔗 Ensure deploy URLs ($ENVIRONMENT)${NC}"
@@ -167,25 +144,13 @@ if [ -n "$BACKEND_SERVICE_ID" ] && [ "$BACKEND_SERVICE_ID" != "null" ]; then
   fi
 fi
 
-# If ensure didn't return a domain, try Railway API (same token)
-[ -z "$APP_DOMAIN" ] && APP_DOMAIN=$(get_domain_via_api "$PROJECT_ID" "$SERVICE_ID" "$RAILWAY_TOKEN" 2>/dev/null) || true
-[ -z "$BACKEND_DOMAIN" ] && BACKEND_DOMAIN=$(get_domain_via_api "$PROJECT_ID" "$BACKEND_SERVICE_ID" "$RAILWAY_TOKEN" 2>/dev/null) || true
-
-# Print URLs only for services that exist.
+# Print URLs only for services that exist (single pass; no extra lookups).
 echo -e "${GREEN}Deploy URLs ($ENVIRONMENT):${NC}"
-print_service_url() {
+print_domain_line() {
   local name="$1"
   local sid="$2"
-  local preferred="$3"
+  local url="$3"
   [ -z "$sid" ] || [ "$sid" = "null" ] && return
-  local url="$preferred"
-  if [ -z "$url" ]; then
-    local out
-    (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$sid" > .railway/service && echo "$ENVIRONMENT" > .railway/environment)
-    out=$(cd "$PROJECT_ROOT" && run_with_timeout "${MTX_URLS_TIMEOUT_SEC:-20}" railway domain --service "$sid" --json) || \
-    out=$(cd "$PROJECT_ROOT" && run_with_timeout "${MTX_URLS_TIMEOUT_SEC:-20}" railway domain --service "$sid") || true
-    url=$(parse_domain "$out")
-  fi
   url=$(echo "$url" | tr -d '\n\r' | sed 's|^https\?://||' | sed 's|/.*||')
   if [ -n "$url" ] && [ "$url" != "null" ]; then
     echo "  $name: https://$url"
@@ -193,6 +158,6 @@ print_service_url() {
     echo -e "  ${YELLOW}$name: (no Railway domain available)${NC}"
   fi
 }
-print_service_url "App"     "$SERVICE_ID" "$APP_DOMAIN"
-print_service_url "Backend" "$BACKEND_SERVICE_ID" "$BACKEND_DOMAIN"
+print_domain_line "App" "$SERVICE_ID" "$APP_DOMAIN"
+print_domain_line "Backend" "$BACKEND_SERVICE_ID" "$BACKEND_DOMAIN"
 echo ""

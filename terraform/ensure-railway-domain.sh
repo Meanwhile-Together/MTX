@@ -6,6 +6,11 @@
 # Requires: RAILWAY_TOKEN (project token) set in environment; railway CLI on PATH.
 
 ensure_railway_domain() {
+    _timeout_secs="${MTX_URLS_TIMEOUT_SEC:-20}"
+    _run_cmd() {
+        timeout -k 2s "${_timeout_secs}s" "$@" 2>/dev/null
+    }
+
     local project_root="${1:?}"
     local project_id="${2:?}"
     local service_id="${3:?}"
@@ -32,16 +37,16 @@ ensure_railway_domain() {
     echo "$service_id"   > .railway/service
     echo "$environment" > .railway/environment
     # Ensure CLI has a proper link (some versions need this before domain)
-    railway link --project "$project_id" --service "$service_id" --environment "$environment" 2>/dev/null || true
+    _run_cmd railway link --project "$project_id" --service "$service_id" --environment "$environment" || true
 
     # Generate public domain: "railway domain" with no args uses .railway link and creates *.up.railway.app for this service
     local out
-    out=$(railway domain 2>/dev/null) || true
+    out=$(_run_cmd railway domain) || true
     if [ -z "$out" ] || ! echo "$out" | grep -qE 'railway\.app|\.up\.'; then
         # Current Railway CLI domain command supports --service but not --environment.
         # Environment is selected via railway link/.railway context above.
-        out=$(railway domain --service "$service_id" --json 2>/dev/null) || \
-        out=$(railway domain --service "$service_id" 2>/dev/null) || true
+        out=$(_run_cmd railway domain --service "$service_id" --json) || \
+        out=$(_run_cmd railway domain --service "$service_id") || true
     fi
 
     cd "$saved_pwd" || true
