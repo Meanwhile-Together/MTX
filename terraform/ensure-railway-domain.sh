@@ -17,6 +17,7 @@ ensure_railway_domain() {
     local service_id="${3:?}"
     local environment="${4:?}"
     local label="${5:-service}"
+    local service_ref="$service_id"
 
     if [ -z "$project_id" ] || [ "$project_id" = "null" ] || [ -z "$service_id" ] || [ "$service_id" = "null" ]; then
         return 0
@@ -29,25 +30,37 @@ ensure_railway_domain() {
     export RAILWAY_TOKEN
     unset RAILWAY_API_TOKEN
 
+    # Railway domain CLI resolves by service name more reliably than service ID.
+    # Resolve service name from status JSON when possible.
+    local status_json resolved_name
+    status_json="$(_run_cmd railway status --json || true)"
+    if [ -n "$status_json" ] && command -v jq >/dev/null 2>&1; then
+        resolved_name="$(echo "$status_json" | jq -r --arg env "$environment" --arg sid "$service_id" '
+          .environments.edges[]
+          | select(.node.name == $env)
+          | .node.serviceInstances.edges[]
+          | select(.node.serviceId == $sid)
+          | .node.serviceName
+        ' 2>/dev/null | head -n 1)"
+        if [ -n "$resolved_name" ] && [ "$resolved_name" != "null" ]; then
+            service_ref="$resolved_name"
+        fi
+    fi
+
     local saved_pwd
     saved_pwd="$(pwd)"
     cd "$project_root" || return 1
     mkdir -p .railway
     echo "$project_id"   > .railway/project
-    echo "$service_id"   > .railway/service
+    echo "$service_ref"  > .railway/service
     echo "$environment" > .railway/environment
     # Ensure CLI has a proper link (some versions need this before domain)
-    _run_cmd railway link --project "$project_id" --service "$service_id" --environment "$environment" || true
+    _run_cmd railway link --project "$project_id" --service "$service_ref" --environment "$environment" || true
 
-    # Generate public domain: "railway domain" with no args uses .railway link and creates *.up.railway.app for this service
+    # Generate public domain for this service.
     local out
-    out=$(_run_cmd railway domain) || true
-    if [ -z "$out" ] || ! echo "$out" | grep -qE 'railway\.app|\.up\.'; then
-        # Current Railway CLI domain command supports --service but not --environment.
-        # Environment is selected via railway link/.railway context above.
-        out=$(_run_cmd railway domain --service "$service_id" --json) || \
-        out=$(_run_cmd railway domain --service "$service_id") || true
-    fi
+    out=$(_run_cmd railway domain --service "$service_ref" --json) || \
+    out=$(_run_cmd railway domain --service "$service_ref") || true
 
     cd "$saved_pwd" || true
 
