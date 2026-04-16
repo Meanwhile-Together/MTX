@@ -96,6 +96,12 @@ if [ -f "$MTX_ROOT/terraform/ensure-railway-domain.sh" ]; then
   source "$MTX_ROOT/terraform/ensure-railway-domain.sh"
 fi
 
+run_with_timeout() {
+  local secs="${1:-15}"
+  shift
+  timeout "${secs}s" "$@" </dev/null 2>/dev/null
+}
+
 # Parse domain from CLI/API output (JSON, plain hostname, or line containing *.up.railway.app)
 # Usage: parse_domain [stdin or $1]
 parse_domain() {
@@ -144,9 +150,9 @@ APP_DOMAIN=""
 if [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "null" ]; then
   echo -e "${BLUE}  App service...${NC}"
   if type ensure_railway_domain &>/dev/null; then
-    APP_DOMAIN=$(ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT" "app" 2>/dev/null | parse_domain) || true
+    APP_DOMAIN=$(run_with_timeout "${MTX_URLS_TIMEOUT_SEC:-20}" ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT" "app" | parse_domain) || true
   else
-    APP_DOMAIN=$(cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && railway domain --service "$SERVICE_ID" 2>/dev/null | parse_domain) || true
+    APP_DOMAIN=$(cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && run_with_timeout "${MTX_URLS_TIMEOUT_SEC:-20}" railway domain --service "$SERVICE_ID" | parse_domain) || true
   fi
 fi
 
@@ -155,9 +161,9 @@ BACKEND_DOMAIN=""
 if [ -n "$BACKEND_SERVICE_ID" ] && [ "$BACKEND_SERVICE_ID" != "null" ]; then
   echo -e "${BLUE}  Backend service...${NC}"
   if type ensure_railway_domain &>/dev/null; then
-    BACKEND_DOMAIN=$(ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$BACKEND_SERVICE_ID" "$ENVIRONMENT" "backend" 2>/dev/null | parse_domain) || true
+    BACKEND_DOMAIN=$(run_with_timeout "${MTX_URLS_TIMEOUT_SEC:-20}" ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$BACKEND_SERVICE_ID" "$ENVIRONMENT" "backend" | parse_domain) || true
   else
-    BACKEND_DOMAIN=$(cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$BACKEND_SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && railway domain --service "$BACKEND_SERVICE_ID" 2>/dev/null | parse_domain) || true
+    BACKEND_DOMAIN=$(cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$BACKEND_SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && run_with_timeout "${MTX_URLS_TIMEOUT_SEC:-20}" railway domain --service "$BACKEND_SERVICE_ID" | parse_domain) || true
   fi
 fi
 
@@ -176,8 +182,8 @@ print_service_url() {
   if [ -z "$url" ]; then
     local out
     (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$sid" > .railway/service && echo "$ENVIRONMENT" > .railway/environment)
-    out=$(cd "$PROJECT_ROOT" && railway domain --service "$sid" --json 2>/dev/null) || \
-    out=$(cd "$PROJECT_ROOT" && railway domain --service "$sid" 2>/dev/null) || true
+    out=$(cd "$PROJECT_ROOT" && run_with_timeout "${MTX_URLS_TIMEOUT_SEC:-20}" railway domain --service "$sid" --json) || \
+    out=$(cd "$PROJECT_ROOT" && run_with_timeout "${MTX_URLS_TIMEOUT_SEC:-20}" railway domain --service "$sid") || true
     url=$(parse_domain "$out")
   fi
   url=$(echo "$url" | tr -d '\n\r' | sed 's|^https\?://||' | sed 's|/.*||')
