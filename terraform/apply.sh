@@ -803,6 +803,65 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 return 1  # Environment does not exist
             fi
         }
+
+        # Central DB policy: one shared DB service per environment, then wire app service DATABASE_URL.
+        ensure_central_database_for_env() {
+            local TOKEN="$1"
+            local PROJ_ID="$2"
+            local ENV_NAME="$3"
+            local APP_SVC_ID="$4"
+            local DB_SVC_NAME="mtx-db-${ENV_NAME}"
+            local DB_SVC_ID=""
+            local SERVICES_QUERY SERVICES_RESPONSE DB_REF APP_VARS DB_URL_VAL
+
+            echo -e "${BLUE}🗄️  Ensuring central database service (${DB_SVC_NAME})...${NC}"
+
+            SERVICES_QUERY='{"query":"query($projectId: String!) { project(id: $projectId) { services { edges { node { id name } } } }", "variables": {"projectId": "'"$PROJ_ID"'"}}'
+            SERVICES_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "$SERVICES_QUERY" 2>/dev/null)
+            DB_SVC_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$DB_SVC_NAME" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
+
+            if [ -z "$DB_SVC_ID" ] || [ "$DB_SVC_ID" = "null" ]; then
+                echo -e "${CYAN}ℹ️  DB service ${DB_SVC_NAME} not found; creating PostgreSQL service...${NC}"
+                export RAILWAY_TOKEN="$TOKEN"
+                unset RAILWAY_API_TOKEN
+                (cd "$PROJECT_ROOT" && railway add --database postgres --service "$DB_SVC_NAME" >/dev/null 2>&1) || {
+                    echo -e "${RED}❌ Failed to create PostgreSQL service ${DB_SVC_NAME}.${NC}"
+                    return 1
+                }
+
+                SERVICES_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+                    -H "Authorization: Bearer $TOKEN" \
+                    -H "Content-Type: application/json" \
+                    -d "$SERVICES_QUERY" 2>/dev/null)
+                DB_SVC_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$DB_SVC_NAME" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
+            fi
+
+            if [ -z "$DB_SVC_ID" ] || [ "$DB_SVC_ID" = "null" ]; then
+                echo -e "${RED}❌ Could not resolve central DB service ${DB_SVC_NAME}.${NC}"
+                return 1
+            fi
+
+            DB_REF="\${{${DB_SVC_NAME}.DATABASE_URL}}"
+            export RAILWAY_TOKEN="$TOKEN"
+            unset RAILWAY_API_TOKEN
+            (cd "$PROJECT_ROOT" && railway variable set "DATABASE_URL=$DB_REF" --service "$APP_SVC_ID" --environment "$ENV_NAME" --skip-deploys >/dev/null 2>&1) || {
+                echo -e "${RED}❌ Failed to set DATABASE_URL on app service (${APP_SVC_ID}) for ${ENV_NAME}.${NC}"
+                return 1
+            }
+
+            APP_VARS=$(cd "$PROJECT_ROOT" && railway variable list --service "$APP_SVC_ID" --environment "$ENV_NAME" --json 2>/dev/null || echo "{}")
+            DB_URL_VAL=$(echo "$APP_VARS" | jq -r '.DATABASE_URL // empty' 2>/dev/null)
+            if [ -z "$DB_URL_VAL" ] || [ "$DB_URL_VAL" = "null" ]; then
+                echo -e "${RED}❌ DATABASE_URL not present after wiring ${DB_SVC_NAME} -> app service.${NC}"
+                return 1
+            fi
+
+            echo -e "${GREEN}✅ DATABASE_URL wired from ${DB_SVC_NAME} to app service for ${ENV_NAME}.${NC}"
+            return 0
+        }
         
         # Deploy to Railway - ensure environment exists first, then deploy
         echo -e "${BLUE}🚀 Deploying to Railway...${NC}"
@@ -1040,6 +1099,12 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             # For staging, we already handled everything in Step 2, so just confirm we're ready
             echo -e "${GREEN}✅ Proceeding with STAGING deployment (environment setup completed in previous step)${NC}"
             echo ""
+        fi
+
+        # Step 3b: enforce shared DB policy and wire DATABASE_URL onto the deploy target service.
+        if ! ensure_central_database_for_env "$PROJECT_TOKEN" "$PROJECT_ID" "$ENVIRONMENT" "$SERVICE_ID"; then
+            echo -e "${RED}❌ Central database wiring failed; aborting deployment.${NC}"
+            exit 1
         fi
         
         # Step 4: Deploy using Railway CLI with environment-specific project token
