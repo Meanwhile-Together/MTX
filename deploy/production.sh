@@ -2,4 +2,5 @@
 # MTX deploy production: shortcut → mtx deploy manual production
 desc="Deploy to production"
 set -e
-"$0" deploy manual production
+MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+"$MTX_ROOT/deploy.sh" production
