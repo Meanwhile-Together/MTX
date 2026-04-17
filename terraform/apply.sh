@@ -143,6 +143,17 @@ CYAN='\033[0;36m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+mtx_output_looks_like_network_problem() {
+    local text="${1:-}"
+    echo "$text" | grep -qiE "ENOTFOUND|server misbehaving|Temporary failure in name resolution|Could not resolve host|dial tcp: lookup|network is unreachable|No route to host|ECONNRESET|ECONNREFUSED|ETIMEDOUT|i/o timeout|TLS handshake timeout|connection timed out|request timed out|Failed to connect"
+}
+
+mtx_print_network_help() {
+    echo -e "${RED}🌐 Internet connection problem detected.${NC}"
+    echo "The deploy step could not reach required external services (Railway/GitHub/npm)."
+    echo "Please check your network and DNS, then run the same command again."
+}
+
 # Subroutine: ensure Railway public domain (source from MTX/terraform, not project dir)
 # shellcheck source=ensure-railway-domain.sh
 [ -f "$APPLY_SCRIPT_DIR/ensure-railway-domain.sh" ] && source "$APPLY_SCRIPT_DIR/ensure-railway-domain.sh"
@@ -372,11 +383,18 @@ echo ""
 cd "$SCRIPT_DIR"
 
 # Ensure backend and providers are initialized (idempotent; no-op if already inited)
-if ! terraform init -reconfigure -input=false; then
+TF_INIT_LOG="/tmp/tf-init-$$.log"
+if ! terraform init -reconfigure -input=false 2>&1 | tee "$TF_INIT_LOG"; then
     echo ""
     echo -e "${RED}❌ terraform init failed${NC}"
+    if [ -f "$TF_INIT_LOG" ] && mtx_output_looks_like_network_problem "$(cat "$TF_INIT_LOG")"; then
+        echo ""
+        mtx_print_network_help
+    fi
+    rm -f "$TF_INIT_LOG"
     exit 1
 fi
+rm -f "$TF_INIT_LOG"
 
 # When using an existing project, import it so Terraform tracks it. Without import, apply would create a duplicate project.
 # Use TF_VAR_* env vars for import (avoid passing token on command line — prevents quote/special-char breakage).
@@ -478,7 +496,11 @@ rm -f "$TF_APPLY_LOG"
 if [ $TERRAFORM_EXIT -ne 0 ]; then
     echo ""
     echo -e "${RED}❌ Terraform apply failed${NC}"
-    echo -e "${CYAN}Review the error messages above for details.${NC}"
+    if [ -f "$TF_APPLY_LOG" ] && mtx_output_looks_like_network_problem "$(cat "$TF_APPLY_LOG")"; then
+        mtx_print_network_help
+    else
+        echo -e "${CYAN}Review the error messages above for details.${NC}"
+    fi
     echo ""
     echo -e "${YELLOW}Common issues:${NC}"
     echo "  - State lock: Another Terraform process may be running"
@@ -603,7 +625,17 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 else
                     if [ ! -f "node_modules/.bin/prisma" ] && [ -f "package.json" ]; then
                         echo -e "${BLUE}ℹ️  Prisma/dependencies not found, running npm install...${NC}"
-                        npm install || { echo -e "${RED}❌ npm install failed${NC}"; exit 1; }
+                        NPM_INSTALL_LOG="/tmp/mtx-npm-install-$$.log"
+                        if ! npm install 2>&1 | tee "$NPM_INSTALL_LOG"; then
+                            echo -e "${RED}❌ npm install failed${NC}"
+                            if [ -f "$NPM_INSTALL_LOG" ] && mtx_output_looks_like_network_problem "$(cat "$NPM_INSTALL_LOG")"; then
+                                echo ""
+                                mtx_print_network_help
+                            fi
+                            rm -f "$NPM_INSTALL_LOG"
+                            exit 1
+                        fi
+                        rm -f "$NPM_INSTALL_LOG"
                         echo ""
                     fi
                     echo -e "${BLUE}🔨 Building project...${NC}"
