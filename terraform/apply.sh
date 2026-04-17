@@ -870,6 +870,10 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 echo -e "${RED}❌ Failed to set DATABASE_URL on app service (${APP_SVC_ID}) for ${ENV_NAME}.${NC}"
                 return 1
             }
+            (cd "$PROJECT_ROOT" && railway variable set "DATABASE_PROVIDER=postgresql" --service "$APP_SVC_ID" --environment "$ENV_NAME" --skip-deploys >/dev/null 2>&1) || {
+                echo -e "${RED}❌ Failed to set DATABASE_PROVIDER=postgresql on app service (${APP_SVC_ID}) for ${ENV_NAME}.${NC}"
+                return 1
+            }
 
             APP_VARS=$(cd "$PROJECT_ROOT" && railway variable list --service "$APP_SVC_ID" --environment "$ENV_NAME" --json 2>/dev/null || echo "{}")
             DB_URL_VAL=$(echo "$APP_VARS" | jq -r '.DATABASE_URL // empty' 2>/dev/null)
