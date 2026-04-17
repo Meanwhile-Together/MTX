@@ -6,6 +6,8 @@ set -e
 # Directory where this script lives (MTX/terraform); use for sourcing subroutines, not project's terraform
 APPLY_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 MTX_ROOT="$(cd "$APPLY_SCRIPT_DIR/.." && pwd)"
+# shellcheck source=../includes/prepare-env.sh
+source "$MTX_ROOT/includes/prepare-env.sh"
 
 # Resolve project root (directory containing config/app.json) so .env is always loaded from the right place
 PROJECT_ROOT=""
@@ -25,6 +27,7 @@ cd "$PROJECT_ROOT" || exit 1
 
 SCRIPT_DIR="$PROJECT_ROOT/terraform"
 ENV_FILE="$PROJECT_ROOT/.env"
+mtx_require_prepare_env "$PROJECT_ROOT" || exit 1
 
 # Railway CLI sends RAILWAY_TOKEN as the HTTP header "project-access-token".
 # CR/LF or stray quotes from .env make HeaderValue::from_str fail; the CLI
@@ -59,6 +62,12 @@ if [ -f "$ENV_FILE" ]; then
     set +a
     mtx_sanitize_railway_token_env_from_dotenv
 fi
+# Workspace prepare file is the source of truth for Railway IDs/tokens.
+set -a
+# shellcheck source=/dev/null
+source "$MTX_PREPARE_FILE"
+set +a
+mtx_sanitize_railway_token_env_from_dotenv
 
 # Clear an env var from .env and current shell (for invalid/stale service IDs on 404 etc.)
 clear_env_var_in_file() {

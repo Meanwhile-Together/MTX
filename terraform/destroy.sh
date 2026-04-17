@@ -3,14 +3,23 @@
 desc="Destroy Terraform-managed resources for environment"
 set -e
 
+MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+# shellcheck source=../includes/prepare-env.sh
+source "$MTX_ROOT/includes/prepare-env.sh"
+
 PROJECT_ROOT="$(pwd)"
 SCRIPT_DIR="$PROJECT_ROOT/terraform"
 ENV_FILE="$PROJECT_ROOT/.env"
+mtx_require_prepare_env "$PROJECT_ROOT" || exit 1
 if [ -f "$ENV_FILE" ]; then
     set -a
     source "$ENV_FILE"
     set +a
 fi
+set -a
+# shellcheck source=/dev/null
+source "$MTX_PREPARE_FILE"
+set +a
 
 # Colors
 GREEN='\033[0;32m'

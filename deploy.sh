@@ -8,6 +8,11 @@ set -e
 # Use BASH_SOURCE so this resolves correctly even when sourced by the mtx wrapper
 # (where $0 is typically /usr/bin/mtx).
 MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=includes/prepare-env.sh
+source "$MTX_ROOT/includes/prepare-env.sh"
+
+# All token/id-aware deploy flows require workspace prepare context.
+mtx_require_prepare_env "$(pwd)" || exit 1
 
 # Only use $1 as env if it's a valid environment; otherwise show menu (avoids "deploy" or other junk as env)
 ENV=""

@@ -23,8 +23,12 @@ fi
 
 # MTX repo root (this script lives in MTX/deploy/)
 MTX_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=../includes/prepare-env.sh
+source "$MTX_ROOT/includes/prepare-env.sh"
 ENV_FILE="$PROJECT_ROOT/.env"
 TERRAFORM_DIR="$PROJECT_ROOT/terraform"
+
+mtx_require_prepare_env "$PROJECT_ROOT" || exit 1
 
 if [ ! -d "$TERRAFORM_DIR" ] || [ ! -f "$TERRAFORM_DIR/apply.sh" ]; then
   echo "❌ No terraform dir at $TERRAFORM_DIR. Run deploy first." >&2
@@ -38,6 +42,10 @@ if [ -f "$ENV_FILE" ]; then
   source "$ENV_FILE"
   set +a
 fi
+set -a
+# shellcheck source=/dev/null
+source "$MTX_PREPARE_FILE"
+set +a
 
 # Environment: arg only (default staging). Never prompt.
 ENVIRONMENT="${1:-${DEFAULT_ENVIRONMENT:-staging}}"
