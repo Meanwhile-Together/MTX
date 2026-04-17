@@ -26,11 +26,38 @@ cd "$PROJECT_ROOT" || exit 1
 SCRIPT_DIR="$PROJECT_ROOT/terraform"
 ENV_FILE="$PROJECT_ROOT/.env"
 
+# Railway CLI sends RAILWAY_TOKEN as the HTTP header "project-access-token".
+# CR/LF or stray quotes from .env make HeaderValue::from_str fail; the CLI
+# then reports a misleading "Login state is corrupt" / "failed to parse header value".
+mtx_normalize_railway_token() {
+    local v="${1:-}"
+    v="${v//$'\r'/}"
+    v="${v//$'\n'/}"
+    v="${v#"${v%%[![:space:]]*}"}"
+    v="${v%"${v##*[![:space:]]}"}"
+    case "$v" in
+        '"'*) v="${v#\"}"; v="${v%\"}" ;;
+        "'"*) v="${v#\'}"; v="${v%\'}" ;;
+    esac
+    printf '%s' "$v"
+}
+
+mtx_sanitize_railway_token_env_from_dotenv() {
+    local k cleaned
+    for k in RAILWAY_ACCOUNT_TOKEN RAILWAY_TOKEN RAILWAY_API_TOKEN RAILWAY_PROJECT_TOKEN RAILWAY_PROJECT_TOKEN_STAGING RAILWAY_PROJECT_TOKEN_PRODUCTION; do
+        [ -n "${!k:-}" ] || continue
+        cleaned="$(mtx_normalize_railway_token "${!k}")"
+        printf -v "$k" '%s' "$cleaned"
+        export "$k"
+    done
+}
+
 # Load .env if it exists (for RAILWAY_ACCOUNT_TOKEN and other tokens)
 if [ -f "$ENV_FILE" ]; then
     set -a
     source "$ENV_FILE"
     set +a
+    mtx_sanitize_railway_token_env_from_dotenv
 fi
 
 # Clear an env var from .env and current shell (for invalid/stale service IDs on 404 etc.)
@@ -190,6 +217,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
     elif [ -n "${TF_VAR_railway_token:-}" ]; then
         RAILWAY_TOKEN_VALUE="$TF_VAR_railway_token"
     fi
+    RAILWAY_TOKEN_VALUE="$(mtx_normalize_railway_token "$RAILWAY_TOKEN_VALUE")"
     if [ -z "$RAILWAY_TOKEN_VALUE" ] || [ "$RAILWAY_TOKEN_VALUE" = "null" ]; then
         if [ -t 0 ]; then
             echo -e "${YELLOW}🔐 Railway account token needed (one-time). It will be saved to .env for future deploys.${NC}"
@@ -585,11 +613,12 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         # Output is captured in global variable RAILWAY_DEPLOY_OUTPUT
         # Sets NEED_PROJECT_TOKEN_FOR_ENV=1 if project token is needed for environment creation
         deploy_to_railway() {
-            local TOKEN="$1"
-            local PROJ_ID="$2"
-            local SVC_ID="$3"
-            local ENV_NAME="$4"  # staging or production
-            local VERBOSE="${5:-}"  # non-empty = add --verbose (e.g. for backend to see tarball size)
+            local TOKEN PROJ_ID SVC_ID ENV_NAME VERBOSE
+            TOKEN="$(mtx_normalize_railway_token "$1")"
+            PROJ_ID="$(mtx_normalize_railway_token "$2")"
+            SVC_ID="$(mtx_normalize_railway_token "$3")"
+            ENV_NAME="$(mtx_normalize_railway_token "$4")"  # staging or production
+            VERBOSE="${5:-}"  # non-empty = add --verbose (e.g. for backend to see tarball size)
             
             # Set token for Railway CLI
             export RAILWAY_TOKEN="$TOKEN"
@@ -773,7 +802,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         # This is the primary token needed for production deployments
         echo ""
         PRODUCTION_TOKEN_VAR="RAILWAY_PROJECT_TOKEN_PRODUCTION"
-        PRODUCTION_TOKEN="${!PRODUCTION_TOKEN_VAR:-}"
+        PRODUCTION_TOKEN="$(mtx_normalize_railway_token "${!PRODUCTION_TOKEN_VAR:-}")"
         
         if [ -z "$PRODUCTION_TOKEN" ]; then
             echo ""
@@ -790,6 +819,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             read -sp "PRODUCTION Project Token: " PRODUCTION_TOKEN
             echo ""
             echo ""
+            PRODUCTION_TOKEN="$(mtx_normalize_railway_token "$PRODUCTION_TOKEN")"
             
             if [ -z "$PRODUCTION_TOKEN" ]; then
                 echo -e "${RED}❌ No token provided. Deployment cancelled.${NC}"
@@ -822,7 +852,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         # Step 2: Always check if staging environment should be created
         # This happens regardless of which environment we're deploying to
         STAGING_TOKEN_VAR="RAILWAY_PROJECT_TOKEN_STAGING"
-        STAGING_TOKEN="${!STAGING_TOKEN_VAR:-}"
+        STAGING_TOKEN="$(mtx_normalize_railway_token "${!STAGING_TOKEN_VAR:-}")"
         
         # Check if staging environment exists using production token (we can check with any valid token)
         echo -e "${BLUE}ℹ️  Checking if STAGING environment exists...${NC}"
@@ -911,6 +941,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     read -sp "STAGING Project Token: " STAGING_TOKEN
                     echo ""
                     echo ""
+                    STAGING_TOKEN="$(mtx_normalize_railway_token "$STAGING_TOKEN")"
                     
                     if [ -z "$STAGING_TOKEN" ]; then
                         echo -e "${RED}❌ No token provided. Staging setup incomplete.${NC}"
@@ -955,10 +986,10 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 echo -e "${YELLOW}   Please set up staging environment first${NC}"
                 exit 1
             fi
-            PROJECT_TOKEN="$STAGING_TOKEN"
+            PROJECT_TOKEN="$(mtx_normalize_railway_token "$STAGING_TOKEN")"
         else
             # For production, use production token
-            PROJECT_TOKEN="$PRODUCTION_TOKEN"
+            PROJECT_TOKEN="$(mtx_normalize_railway_token "$PRODUCTION_TOKEN")"
         fi
         
         # Step 3: Check if environment exists using the environment-specific project token
@@ -1027,9 +1058,13 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 echo -e "${GREEN}✅ Deployment successful!${NC}"
             else
                 # Check if it was a token error (wrong project, expired, or Unauthorized)
-                if echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "Unauthorized|Invalid RAILWAY_TOKEN|invalid.*token|token.*invalid|valid and has access"; then
+                if echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "Unauthorized|Invalid RAILWAY_TOKEN|invalid.*token|token.*invalid|valid and has access|Login state is corrupt|failed to parse header value"; then
                     echo ""
-                    echo -e "${RED}❌ Token validation failed - the ${ENVIRONMENT^^} token is invalid, for a different project, or expired${NC}"
+                    if echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "Login state is corrupt|failed to parse header value"; then
+                        echo -e "${RED}❌ Railway CLI rejected the token as an HTTP header (often newline, spaces, or quotes in .env).${NC}"
+                    else
+                        echo -e "${RED}❌ Token validation failed - the ${ENVIRONMENT^^} token is invalid, for a different project, or expired${NC}"
+                    fi
                     echo ""
                     
                     # Determine which token variable to update
@@ -1057,6 +1092,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     echo -e "${CYAN}   Note: Input will not be shown for security${NC}"
                     read -sp "${ENVIRONMENT^^} Project Token: " NEW_TOKEN
                     echo ""
+                    NEW_TOKEN="$(mtx_normalize_railway_token "$NEW_TOKEN")"
                     
                     if [ -z "$NEW_TOKEN" ]; then
                         echo -e "${RED}❌ No token provided. Deployment cancelled.${NC}"
@@ -1084,8 +1120,12 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     # Non-token error, don't retry
                     echo -e "${RED}❌ Deployment failed${NC}"
                     echo ""
-                    echo -e "${YELLOW}💡 Tip: Make sure the token is a project token for the $ENVIRONMENT environment${NC}"
-                    echo "   Get it from: https://railway.app/project/$PROJECT_ID/settings/tokens"
+                    if echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "Login state is corrupt|failed to parse header value"; then
+                        echo -e "${YELLOW}💡 The Railway CLI maps bad HTTP headers to \"Login state is corrupt\". Usually RAILWAY_PROJECT_TOKEN_* in .env has a trailing newline, spaces, or quotes — use a single-line unquoted token.${NC}"
+                    else
+                        echo -e "${YELLOW}💡 Tip: Make sure the token is a project token for the $ENVIRONMENT environment${NC}"
+                        echo "   Get it from: https://railway.app/project/$PROJECT_ID/settings/tokens"
+                    fi
                     exit 1
                 fi
             fi
