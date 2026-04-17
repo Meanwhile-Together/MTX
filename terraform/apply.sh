@@ -814,20 +814,21 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             local DB_SVC_NAME="mtx-db-${ENV_NAME}"
             local DB_SVC_ID=""
             local SERVICES_QUERY SERVICES_RESPONSE DB_REF APP_VARS DB_URL_VAL
+            local ACCOUNT_API_TOKEN="${ACCOUNT_TOKEN:-$TOKEN}"
 
             echo -e "${BLUE}🗄️  Ensuring central database service (${DB_SVC_NAME})...${NC}"
 
-            SERVICES_QUERY='{"query":"query($projectId: String!) { project(id: $projectId) { services { edges { node { id name } } } }", "variables": {"projectId": "'"$PROJ_ID"'"}}'
+            SERVICES_QUERY='{"query":"query($projectId: String!) { project(id: $projectId) { services { edges { node { id name } } } } }", "variables": {"projectId": "'"$PROJ_ID"'"}}'
             SERVICES_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
-                -H "Authorization: Bearer ${ACCOUNT_TOKEN:-$TOKEN}" \
+                -H "Authorization: Bearer $ACCOUNT_API_TOKEN" \
                 -H "Content-Type: application/json" \
                 -d "$SERVICES_QUERY" 2>/dev/null)
             DB_SVC_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$DB_SVC_NAME" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
 
             if [ -z "$DB_SVC_ID" ] || [ "$DB_SVC_ID" = "null" ]; then
                 echo -e "${CYAN}ℹ️  DB service ${DB_SVC_NAME} not found; creating PostgreSQL service...${NC}"
-                export RAILWAY_TOKEN="${ACCOUNT_TOKEN:-$TOKEN}"
-                unset RAILWAY_API_TOKEN
+                unset RAILWAY_TOKEN
+                export RAILWAY_API_TOKEN="$ACCOUNT_API_TOKEN"
                 export RAILWAY_PROJECT_ID="$PROJ_ID"
                 local ADD_OUT
                 ADD_OUT=$(cd "$PROJECT_ROOT" && railway add --database postgres --service "$DB_SVC_NAME" 2>&1) || {
@@ -837,7 +838,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 }
 
                 SERVICES_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
-                    -H "Authorization: Bearer ${ACCOUNT_TOKEN:-$TOKEN}" \
+                    -H "Authorization: Bearer $ACCOUNT_API_TOKEN" \
                     -H "Content-Type: application/json" \
                     -d "$SERVICES_QUERY" 2>/dev/null)
                 DB_SVC_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$DB_SVC_NAME" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
