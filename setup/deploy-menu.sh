@@ -338,7 +338,7 @@ guided_setup() {
     fi
     
     # Step 5: Deploy to Railway (if Railway is configured)
-    # DATABASE_URL: When Postgres is added to the db service, Railway auto-propagates DATABASE_URL to all services in the project (backend, app, any future services). One DB per owner project.
+    # DATABASE_URL: When Postgres is added to the db service, Railway auto-propagates DATABASE_URL to all services in the project (backend, app, any future services). One DB per Railway project.
     if [ "$HAS_RAILWAY" = "true" ]; then
         echo ""
         echo -e "${CYAN}Step 5: Deploying to Railway...${NC}"

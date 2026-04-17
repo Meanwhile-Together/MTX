@@ -38,7 +38,7 @@ Single reference for infra and deployment across **MTX** (wrapper/CLI) and **pro
 
 4. **Resolve workspace & project**
    - Workspace: from `config/app.json` `app.owner` via Railway GraphQL, or `RAILWAY_WORKSPACE_ID` in `.env`.
-   - Project: `RAILWAY_PROJECT_ID` in `.env`, or discover by owner name in workspace. Optional: `RAILWAY_PROJECT_ID_STAGING` / `RAILWAY_PROJECT_ID_PRODUCTION` for two-project setup.
+   - Project: `RAILWAY_PROJECT_ID` in `.env`, or discover by project name in workspace. Optional: `RAILWAY_PROJECT_ID_STAGING` / `RAILWAY_PROJECT_ID_PRODUCTION` for two-project setup.
 
 5. **Service discovery**
    - GraphQL: list services in project. Names: `backend-staging`, `backend-production`, `{slug}-staging`, `{slug}-production` (slug from app.json).
@@ -62,15 +62,11 @@ GitHub Actions (and any other CI) should use the **same flow** as local `mtx dep
 
 ---
 
-## 3. Railway Model (One Project, Two Environments)
+## 3. Railway Model (One Project per Deploy Root, Two Environments)
 
-- **One Railway project** per owner (name from `app.owner`).
+- **One Railway project** per **deploy root** (the repo where you run `mtx deploy`): selected by `RAILWAY_PROJECT_ID` in that repo’s `.env`, or created when missing. `app.owner` helps **workspace** discovery and supplies the **default name** when Terraform creates a project; it is not a platform rule that each “owner” globally gets exactly one Railway project. Multiple org repos can share a workspace and either **different** projects or the **same** project with **different** `{slug}-*` services, depending on how you set `.env`.
 - **Environments:** `staging`, `production` (Railway environments inside that project).
-- **Services (all in same project):**
-  - `backend-staging` → backend for staging env.
-  - `backend-production` → backend for production env.
-  - `{slug}-staging` → app for staging (e.g. `project-bridge-staging`).
-  - `{slug}-production` → app for production.
+- **Services (in that project):** unified server deploys to **`{slug}-staging`** / **`{slug}-production`**. Legacy `backend-*` names may still appear in older state; new layouts use the app services only.
 
 Terraform creates or adopts these; apply.sh discovers existing IDs and passes them in so nothing is destroyed.
 
@@ -99,7 +95,7 @@ Terraform creates or adopts these; apply.sh discovers existing IDs and passes th
 
 ## 5. Config Files
 
-- **config/app.json:** `app.name`, `app.owner`, `app.slug` (and version, etc.). Owner used for workspace/project naming and discovery.
+- **config/app.json:** `app.name`, `app.owner`, `app.slug` (and version, etc.). `owner` helps workspace discovery and the default name when Terraform **creates** a Railway project; the live project is always whatever `RAILWAY_PROJECT_ID` points to.
 - **config/deploy.json:** `platform: ["railway"]`, optional `projectId`, `staging.healthEndpoints`, `production.healthEndpoints`.
 - **.env (project-bridge):** `RAILWAY_WORKSPACE_ID`, `RAILWAY_PROJECT_ID`, `RAILWAY_ACCOUNT_TOKEN`, `RAILWAY_PROJECT_TOKEN_STAGING`, `RAILWAY_PROJECT_TOKEN_PRODUCTION`. Optional: `RAILWAY_PROJECT_ID_STAGING`, `RAILWAY_PROJECT_ID_PRODUCTION`.
 - **railway.json (root):** App build/start (RAILPACK; build:server; start `node targets/server/dist/index.js`).

@@ -16,7 +16,7 @@ The platform must support a **project-bridge central host** that serves **payloa
 |-------|----------|
 | Deploy SOT | **MTX** is the source of truth for human and CI deploy entry (`mtx deploy`). Terraform/apply are implementation details behind MTX, not the primary user contract. |
 | Topology (now) | **Shared host (A)** — one app-host service per env carries bundled payloads; roadmap to **hybrid (C)** (promote dedicated hosts when policy requires). |
-| Railway layout | **One project per owner**; **two service roles** per environment: **app-host** (unified server, app payloads) and **backend/admin** (unified server, admin payload + backend addons). |
+| Railway layout | **One Railway project per deploy host** (repo + `.env`); **two service roles** per environment: **app-host** (unified server, app payloads) and **backend/admin** (unified server, admin payload + backend addons). |
 | Payload identity | **`payloadEntry.id`** — canonical internal key (grants, audit, stable references). **`payloadEntry.slug`** — URL and routing segment (`/api/<slug>`). |
 | Isolation | **A + B:** (A) **DB boundary** — default payload-scoped schema/DB; (B) **service boundary** — cross-payload access only via **admin-governed**, auditable paths. |
 | App-host packaging | **Bundled (B)** — payload build outputs copied into the host artifact at build time; deterministic; supports offline-capable client releases. |

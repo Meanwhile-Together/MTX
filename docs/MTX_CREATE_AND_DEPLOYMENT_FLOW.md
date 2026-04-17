@@ -37,7 +37,7 @@ This document describes the **desired end-to-end flow**: how a **new app** is cr
 |-------|------------|-----------------------------|
 | **Central host** | **project-bridge** — runs the unified server, **hosts** payloads (apps) via `config/server.json` | Deploy **one** project-bridge instance (or one per tenant/org); it **points to** many payloads. |
 | **App** | A **payload**: one entry in `server.apps` with `source` (path, package, or git). The server discovers and serves it; no server code change to add one. | **New app** = new payload: create payload code, add entry to `config/server.json`; optionally source from **git** (own repo). Redeploy host or restart. |
-| **Infrastructure (Railway)** | One project per owner; staging + production; 4 services (backend-staging, backend-production, app-staging, app-production) | **mtx deploy** → **terraform/apply.sh** — discover or create project/services, then deploy the **host** (project-bridge) code. |
+| **Infrastructure (Railway)** | One Railway project per **deploy root** (`.env` `RAILWAY_PROJECT_ID`); staging + production; unified app services `{slug}-staging` / `{slug}-production` | **mtx deploy** → **terraform/apply.sh** — discover or create project/services, then deploy the **host** code. |
 | **Admin/backend servers** | Same **unified server** with `config/server.json` listing the **admin** payload; serves admin UI + backend addons | **mtx deploy** / **mtx deploy asadmin** — backend services get server + backend build, `railway up`. |
 | **App (payload) serving** | Same **unified server** with `config/server.json` listing **app payloads**; serves client UIs by domain/path | **mtx deploy** — app services get server build; at runtime the host serves all payloads listed in config. |
 
@@ -103,7 +103,7 @@ Deploy is the **single path** that both provisions infrastructure and deploys co
 
 ### 3.2 Config and tokens (required for apply.sh)
 
-- **config/app.json** — `app.name`, `app.slug`, `app.owner` (owner used for Railway workspace/project naming and discovery).
+- **config/app.json** — `app.name`, `app.slug`, `app.owner` (`owner` helps Railway **workspace** discovery and the **default name** for a **new** Railway project when Terraform creates one).
 - **config/deploy.json** — `platform: ["railway"]`, optional `projectId`, health endpoints per env.
 - **.env** (project root):  
   - **Account:** `RAILWAY_ACCOUNT_TOKEN` (or `RAILWAY_TOKEN`) — Terraform + Railway GraphQL (discovery, create project/services).  
@@ -117,7 +117,7 @@ Deploy is the **single path** that both provisions infrastructure and deploys co
 2. **Parse config** — `config/deploy.json` (platform array), `config/app.json` (name, slug, owner).
 3. **Railway tokens** — Ensure account token (prompt if missing, persist to .env). Project token for chosen env (staging/production) required for deploy step.
 4. **Resolve workspace** — From `app.owner` via GraphQL or `RAILWAY_WORKSPACE_ID`.
-5. **Resolve project** — From `.env` or discover by owner name in workspace. If existing project ID is used, Terraform will **import** it so it doesn’t create a duplicate.
+5. **Resolve project** — From `.env` (`RAILWAY_PROJECT_ID`) or discover by name in workspace. If an existing project ID is set, Terraform will **import** it so it doesn’t create a duplicate.
 6. **Service discovery** — GraphQL list services in project; look for `backend-staging`, `backend-production`, `{slug}-staging`, `{slug}-production`. If found, pass IDs as Terraform vars so Terraform **adopts** them (state rm + pass IDs); no destroy/recreate.
 7. **Terraform** — `terraform init -reconfigure`, optional import of existing project, state rm for legacy or “use existing” resources, then **terraform apply -auto-approve** with TF_VARS. Modules: **railway-owner** (one project, backend-staging, backend-production, optional db), **railway** (app-staging, app-production).
 8. **Outputs** — After apply: `railway_app_service_id_staging` / `_production`, `railway_backend_staging_service_id` / `railway_backend_production_service_id`, `railway_project_id`.
