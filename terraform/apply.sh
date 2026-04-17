@@ -214,11 +214,13 @@ if [ "$HAS_RAILWAY" = "true" ]; then
     TF_VARS+=(-var="railway_token=$RAILWAY_TOKEN_VALUE")
     echo -e "${GREEN}✅${NC} Railway account token ready"
 
-    # Project token for module (fallback); deploy step uses project token for railway up
+    # Project token for module + Terraform provider (when set); deploy step uses project token for railway up
     if [ "$ENVIRONMENT" = "staging" ] && [ -n "${RAILWAY_PROJECT_TOKEN_STAGING:-}" ]; then
         TF_VARS+=(-var="railway_project_token=$RAILWAY_PROJECT_TOKEN_STAGING")
     elif [ "$ENVIRONMENT" = "production" ] && [ -n "${RAILWAY_PROJECT_TOKEN_PRODUCTION:-}" ]; then
         TF_VARS+=(-var="railway_project_token=$RAILWAY_PROJECT_TOKEN_PRODUCTION")
+    elif [ -n "${RAILWAY_PROJECT_TOKEN:-}" ]; then
+        TF_VARS+=(-var="railway_project_token=$RAILWAY_PROJECT_TOKEN")
     fi
 
     # Resolve workspace ID from app owner name (config/app.json); no manual RAILWAY_WORKSPACE_ID needed
@@ -353,6 +355,8 @@ if [ "$HAS_RAILWAY" = "true" ] && [ -n "${RAILWAY_PROJECT_ID_FOR_RUN:-}" ] && [ 
             export TF_VAR_railway_project_token="$RAILWAY_PROJECT_TOKEN_STAGING"
         elif [ "$ENVIRONMENT" = "production" ] && [ -n "${RAILWAY_PROJECT_TOKEN_PRODUCTION:-}" ]; then
             export TF_VAR_railway_project_token="$RAILWAY_PROJECT_TOKEN_PRODUCTION"
+        elif [ -n "${RAILWAY_PROJECT_TOKEN:-}" ]; then
+            export TF_VAR_railway_project_token="$RAILWAY_PROJECT_TOKEN"
         fi
         if ! terraform import -input=false 'module.railway_owner[0].railway_project.owner[0]' "$RAILWAY_PROJECT_ID_FOR_RUN"; then
             echo ""
