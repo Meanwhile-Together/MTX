@@ -152,6 +152,12 @@ mtx_create_print_server_json_snippet() {
   echo "  }"
   echo "}"
   echo ""
+  echoc cyan "Compatibility hints (wave1 validation/router baseline):"
+  echo "  - Declare payload contract exports in payload-manifest entries (exports.views/api)."
+  echo "  - Keep app routes deterministic; avoid dynamic wildcard patterns in manifest paths unless intentionally reviewed."
+  echo "  - For protected views, use shared AuthContext gating helpers (canAccessView / useViewAuthorization)."
+  echo "  - Enable strict startup checks in hosted environments with PAYLOAD_MANIFEST_STRICT=1."
+  echo ""
 }
 
 # Interactive defaults for org host config (secrets never prompted — use backend.example.json / env).

@@ -63,6 +63,17 @@ Use **`mtx create org`** when you truly need a **new repository** for a differen
 
 ---
 
+## Compatibility baseline for new payloads
+
+When scaffolding new `payload-*` repos, keep these compatibility conventions so hosts pass startup validation and routing checks:
+
+- Include payload manifest export contract hints (`exports.views`, `exports.api`) when generating bundle manifests.
+- Prefer static view routes; if dynamic patterns are needed (e.g. `/foo/:id`), keep them explicit and avoid catch-all patterns in manifest routing metadata.
+- Keep client bundles free of secret-like keys (`*_SECRET`, private tokens, API keys) in exposed config manifests.
+- For protected views, use shared auth/view gating helpers built around `AuthContext` instead of ad-hoc checks.
+
+---
+
 ## See also
 
 - [MTX_CREATE_AND_DEPLOYMENT_FLOW.md](MTX_CREATE_AND_DEPLOYMENT_FLOW.md) — create + deploy steps  
