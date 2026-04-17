@@ -28,6 +28,85 @@ declare -F error >/dev/null || error() { echo "[ERROR] $*" >&2; }
 declare -F success >/dev/null || success() { echo "[SUCCESS] $*"; }
 declare -F mtx_run >/dev/null || mtx_run() { "$@"; }
 
+mtx_detect_standalone_react_root() {
+  local root="$1"
+  local pkg="$root/package.json"
+  [ -f "$pkg" ] || return 1
+  # Must look like a React app root.
+  if ! grep -qE '"react"\s*:' "$pkg"; then
+    return 1
+  fi
+  # Exclude already-standard host/payload roots.
+  [ -d "$root/config" ] && [ -f "$root/config/app.json" ] && return 1
+  [ -d "$root/terraform" ] && return 1
+  [ -d "$root/payloads" ] && return 1
+  return 0
+}
+
+mtx_payload_migrate_standalone_into_repo() {
+  local src="$1" repo_path="$2" app_slug="$3"
+  local target="$repo_path/payloads/$app_slug"
+  local move_source="${MTX_CREATE_MOVE_SOURCE:-1}"
+  mkdir -p "$target"
+  if command -v rsync &>/dev/null; then
+    rsync -a --delete \
+      --exclude=.git \
+      --exclude=node_modules \
+      --exclude=dist \
+      --exclude=build \
+      --exclude=.next \
+      --exclude=coverage \
+      --exclude=.turbo \
+      --exclude=.mtx-import \
+      "$src/" "$target/"
+  else
+    warn "rsync not found; using cp fallback for payload migration."
+    shopt -s dotglob nullglob
+    local p base
+    for p in "$src"/* "$src"/.[!.]* "$src"/..?*; do
+      [ -e "$p" ] || continue
+      base=$(basename "$p")
+      case "$base" in .git|node_modules|dist|build|.next|coverage|.turbo|.mtx-import) continue ;; esac
+      cp -a "$p" "$target/"
+    done
+    shopt -u dotglob nullglob
+  fi
+
+  cat > "$target/README.mtx-migrated.md" <<EOF
+# Migrated by mtx create payload
+
+This payload content was migrated from standalone React app root:
+\`$src\`
+
+Target payload path:
+\`payloads/$app_slug\`
+EOF
+
+  # Default behavior is to move source content after successful migration.
+  # Set MTX_CREATE_MOVE_SOURCE=0 to keep original app root untouched.
+  if [ "$move_source" = "1" ] || [ "$move_source" = "true" ]; then
+    if [ -d "$src" ] && [ "$src" != "$repo_path" ]; then
+      shopt -s dotglob nullglob
+      local p base
+      for p in "$src"/* "$src"/.[!.]* "$src"/..?*; do
+        [ -e "$p" ] || continue
+        base=$(basename "$p")
+        case "$base" in .|..|.git) continue ;; esac
+        rm -rf "$p"
+      done
+      shopt -u dotglob nullglob
+      cat > "$src/README.mtx-moved.md" <<EOF
+# App moved by mtx create payload
+
+This standalone app was moved into:
+\`$repo_path/payloads/$app_slug\`
+
+Set \`MTX_CREATE_MOVE_SOURCE=0\` before running create if you prefer copy-only behavior.
+EOF
+    fi
+  fi
+}
+
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*\|-*$//g'
 }
@@ -719,13 +798,15 @@ mtx_create_template_from_payload_run() {
 
 mtx_create_from_template_run() {
   local WORKSPACE_ROOT GITHUB_ORG TEMPLATE_REPO TEMPLATE_URL LOCAL_TEMPLATE_PATH
-  local NEW_APP_NAME APP_SLUG REPO_PATH
+  local NEW_APP_NAME APP_SLUG REPO_PATH CREATE_CWD
+  local MIGRATE_STANDALONE=0
 
   : "${MTX_REPO_PREFIX:?Set MTX_REPO_PREFIX (payload-, org-, or template-)}"
   : "${MTX_TEMPLATE_REPO:?Set MTX_TEMPLATE_REPO}"
   : "${MTX_KIND_LABEL:?Set MTX_KIND_LABEL}"
   : "${MTX_CREATE_CMD:?Set MTX_CREATE_CMD}"
 
+  CREATE_CWD="$(pwd -P)"
   WORKSPACE_ROOT="${MTX_WORKSPACE_ROOT:-$(cd "$MTX_ROOT/.." && pwd)}"
   GITHUB_ORG="${MTX_GITHUB_ORG:-Meanwhile-Together}"
   TEMPLATE_REPO="$MTX_TEMPLATE_REPO"
@@ -778,6 +859,12 @@ mtx_create_from_template_run() {
     APP_SLUG=$(slugify "$NEW_APP_NAME")
     [ -z "$APP_SLUG" ] && APP_SLUG="app"
     REPO_NAME=$(ensure_mtx_repo_prefix "$APP_SLUG" "$MTX_REPO_PREFIX")
+    if [ "${MTX_CREATE_VARIANT:-}" = "payload" ] && mtx_detect_standalone_react_root "$CREATE_CWD"; then
+      MIGRATE_STANDALONE=1
+      echoc cyan "Detected standalone React app root at $CREATE_CWD"
+      echoc dim "Will migrate app into payloads/$APP_SLUG in the new payload repo."
+      echo ""
+    fi
   fi
   REPO_PATH="$WORKSPACE_ROOT/$REPO_NAME"
 
@@ -820,6 +907,17 @@ mtx_create_from_template_run() {
 
   unset MTX_TEMPLATE_SNAPSHOT_FROM
   export MTX_CREATE_SOURCE_NOTE="$TEMPLATE_REPO"
+
+  if [ "$MIGRATE_STANDALONE" = "1" ]; then
+    echoc cyan "Migrating standalone app into $REPO_PATH/payloads/$APP_SLUG ..."
+    mtx_payload_migrate_standalone_into_repo "$CREATE_CWD" "$REPO_PATH" "$APP_SLUG"
+    if [ "${MTX_CREATE_MOVE_SOURCE:-1}" = "0" ] || [ "${MTX_CREATE_MOVE_SOURCE:-1}" = "false" ]; then
+      echoc dim "Migration complete (source preserved): $CREATE_CWD"
+    else
+      echoc dim "Migration complete (source moved): $CREATE_CWD -> $REPO_PATH/payloads/$APP_SLUG"
+    fi
+    echo ""
+  fi
 
   if mtx_create_is_org_flow; then
     mtx_org_scaffold_deploy_config_surface "$REPO_PATH" "$REPO_NAME" "$NEW_APP_NAME" "$WORKSPACE_ROOT" "$GITHUB_ORG" || {

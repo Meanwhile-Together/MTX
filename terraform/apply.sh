@@ -1297,6 +1297,11 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 RUN_AS_MASTER_VAL="true"
                 (railway_set_var "RUN_AS_MASTER=$RUN_AS_MASTER_VAL" && echo -e "${GREEN}✅ RUN_AS_MASTER=$RUN_AS_MASTER_VAL on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RUN_AS_MASTER via CLI${NC}"
             fi
+            # Master admin addon reads Railway env vars at runtime to list services/logs/apps.
+            # Persist project-scoped token + project id on the deployed service.
+            [ -n "${PROJECT_TOKEN:-}" ] && (railway_set_var "RAILWAY_PROJECT_TOKEN=$PROJECT_TOKEN" && echo -e "${GREEN}✅ RAILWAY_PROJECT_TOKEN set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RAILWAY_PROJECT_TOKEN via CLI${NC}"
+            [ -n "${PROJECT_TOKEN:-}" ] && (railway_set_var "RAILWAY_TOKEN=$PROJECT_TOKEN" && echo -e "${GREEN}✅ RAILWAY_TOKEN set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RAILWAY_TOKEN via CLI${NC}"
+            [ -n "${PROJECT_ID:-}" ] && (railway_set_var "RAILWAY_PROJECT_ID=$PROJECT_ID" && echo -e "${GREEN}✅ RAILWAY_PROJECT_ID set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RAILWAY_PROJECT_ID via CLI${NC}"
             [ -n "${MASTER_JWT_SECRET:-}" ] && (railway_set_var "MASTER_JWT_SECRET=$MASTER_JWT_SECRET" && echo -e "${GREEN}✅ MASTER_JWT_SECRET set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set MASTER_JWT_SECRET via CLI${NC}"
             # Keep legacy/server auth paths happy: if running as master and JWT_SECRET is unset,
             # mirror MASTER_JWT_SECRET into JWT_SECRET on the same service.
