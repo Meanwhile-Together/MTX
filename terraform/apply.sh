@@ -828,8 +828,11 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 echo -e "${CYAN}ℹ️  DB service ${DB_SVC_NAME} not found; creating PostgreSQL service...${NC}"
                 export RAILWAY_TOKEN="${ACCOUNT_TOKEN:-$TOKEN}"
                 unset RAILWAY_API_TOKEN
-                (cd "$PROJECT_ROOT" && railway add --database postgres --service "$DB_SVC_NAME" >/dev/null 2>&1) || {
+                export RAILWAY_PROJECT_ID="$PROJ_ID"
+                local ADD_OUT
+                ADD_OUT=$(cd "$PROJECT_ROOT" && railway add --database postgres --service "$DB_SVC_NAME" 2>&1) || {
                     echo -e "${RED}❌ Failed to create PostgreSQL service ${DB_SVC_NAME}.${NC}"
+                    [ -n "${ADD_OUT:-}" ] && echo "$ADD_OUT"
                     return 1
                 }
 
