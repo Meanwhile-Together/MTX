@@ -838,12 +838,18 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             else
                 DB_SVC_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$DB_SVC_NAME" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
                 if [ -z "$DB_SVC_ID" ] || [ "$DB_SVC_ID" = "null" ]; then
-                    mapfile -t DB_MATCHES < <(echo "$SERVICES_RESPONSE" | jq -r '.data.project.services.edges[]?.node | select(.name | test("^Postgres")) | (.id + "\t" + .name)' 2>/dev/null)
+                    # Auto-adopt exactly one plausible DB service when present.
+                    mapfile -t DB_MATCHES < <(echo "$SERVICES_RESPONSE" | jq -r '
+                        .data.project.services.edges[]?.node
+                        | select(.name | test("(^Postgres|postgres|database|\\bdb\\b)"; "i"))
+                        | (.id + "\t" + .name)
+                      ' 2>/dev/null)
                     DB_MATCH_COUNT="${#DB_MATCHES[@]}"
                     if [ "$DB_MATCH_COUNT" -eq 1 ]; then
                         DB_SVC_ID="$(echo "${DB_MATCHES[0]}" | cut -f1)"
                         DB_SVC_NAME="$(echo "${DB_MATCHES[0]}" | cut -f2)"
                         echo -e "${YELLOW}ℹ️  Using existing Postgres service for ${ENV_NAME}: ${DB_SVC_NAME}${NC}"
+                        set_env_var_in_file "$DB_ID_VAR" "$DB_SVC_ID"
                     elif [ "$DB_MATCH_COUNT" -gt 1 ]; then
                         echo -e "${RED}❌ Multiple Postgres services found; refusing auto-pick to avoid more DB sprawl.${NC}"
                         echo "Set ${DB_ID_VAR} in .mtx.prepare.env to one of:"
