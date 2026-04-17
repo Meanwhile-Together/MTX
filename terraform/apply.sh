@@ -810,6 +810,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             local PROJ_ID="$2"
             local ENV_NAME="$3"
             local APP_SVC_ID="$4"
+            local ACCOUNT_TOKEN="$5"
             local DB_SVC_NAME="mtx-db-${ENV_NAME}"
             local DB_SVC_ID=""
             local SERVICES_QUERY SERVICES_RESPONSE DB_REF APP_VARS DB_URL_VAL
@@ -818,14 +819,14 @@ if [ "$HAS_RAILWAY" = "true" ]; then
 
             SERVICES_QUERY='{"query":"query($projectId: String!) { project(id: $projectId) { services { edges { node { id name } } } }", "variables": {"projectId": "'"$PROJ_ID"'"}}'
             SERVICES_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
-                -H "Authorization: Bearer $TOKEN" \
+                -H "Authorization: Bearer ${ACCOUNT_TOKEN:-$TOKEN}" \
                 -H "Content-Type: application/json" \
                 -d "$SERVICES_QUERY" 2>/dev/null)
             DB_SVC_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$DB_SVC_NAME" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
 
             if [ -z "$DB_SVC_ID" ] || [ "$DB_SVC_ID" = "null" ]; then
                 echo -e "${CYAN}ℹ️  DB service ${DB_SVC_NAME} not found; creating PostgreSQL service...${NC}"
-                export RAILWAY_TOKEN="$TOKEN"
+                export RAILWAY_TOKEN="${ACCOUNT_TOKEN:-$TOKEN}"
                 unset RAILWAY_API_TOKEN
                 (cd "$PROJECT_ROOT" && railway add --database postgres --service "$DB_SVC_NAME" >/dev/null 2>&1) || {
                     echo -e "${RED}❌ Failed to create PostgreSQL service ${DB_SVC_NAME}.${NC}"
@@ -833,7 +834,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 }
 
                 SERVICES_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
-                    -H "Authorization: Bearer $TOKEN" \
+                    -H "Authorization: Bearer ${ACCOUNT_TOKEN:-$TOKEN}" \
                     -H "Content-Type: application/json" \
                     -d "$SERVICES_QUERY" 2>/dev/null)
                 DB_SVC_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$DB_SVC_NAME" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
@@ -1102,7 +1103,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         fi
 
         # Step 3b: enforce shared DB policy and wire DATABASE_URL onto the deploy target service.
-        if ! ensure_central_database_for_env "$PROJECT_TOKEN" "$PROJECT_ID" "$ENVIRONMENT" "$SERVICE_ID"; then
+        if ! ensure_central_database_for_env "$PROJECT_TOKEN" "$PROJECT_ID" "$ENVIRONMENT" "$SERVICE_ID" "$RAILWAY_TOKEN_VALUE"; then
             echo -e "${RED}❌ Central database wiring failed; aborting deployment.${NC}"
             exit 1
         fi
