@@ -12,6 +12,16 @@ This document defines the **canonical deploy interface** for Meanwhile-Together:
 
 **Skip build during deploy:** set **`MTX_SKIP_BUILD=1`** so `apply.sh` does not run `mtx build` steps (use when artifacts were built already, e.g. `mtx build all && MTX_SKIP_BUILD=1 mtx deploy staging`).
 
+## Import adapter (wave2)
+
+`mtx import payload <standalone-app-dir> [output-dir]` provides the standalone->payload import path without changing deploy behavior. It scans a target app directory, calls project-bridge validators, and writes a non-destructive scaffold bundle:
+
+- `payload-manifest.skeleton.json`
+- `import-warnings.txt`
+- `import-plan.json`
+
+Default output is `<standalone-app-dir>/.mtx-import`. Existing files are preserved; import never overwrites generated files unless you remove them first.
+
 Implementation references: [build.sh](../build.sh), [deploy.sh](../deploy.sh), [deploy/asadmin.sh](../deploy/asadmin.sh), [terraform/apply.sh](../terraform/apply.sh).
 
 ## Bootstrap vs steady state (target resolution: hybrid)
