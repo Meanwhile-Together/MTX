@@ -830,6 +830,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 unset RAILWAY_TOKEN
                 export RAILWAY_API_TOKEN="$ACCOUNT_API_TOKEN"
                 export RAILWAY_PROJECT_ID="$PROJ_ID"
+                (cd "$PROJECT_ROOT" && railway link --project "$PROJ_ID" >/dev/null 2>&1) || true
                 local ADD_OUT
                 ADD_OUT=$(cd "$PROJECT_ROOT" && railway add --database postgres --service "$DB_SVC_NAME" 2>&1) || {
                     echo -e "${RED}❌ Failed to create PostgreSQL service ${DB_SVC_NAME}.${NC}"
