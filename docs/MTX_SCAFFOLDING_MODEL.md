@@ -26,6 +26,22 @@ This document is the **single narrative** for how **MTX `create`** relates to **
 | New **org product repo** (rare) | `mtx create org [name]` | **`org-*`** from `MTX_ORG_TEMPLATE_REPO` (default **`template-basic`**). Template **`config/`** matches project-bridge ( **`app.json`** full shape, **`deploy*.json`**, **`server*.example`**, **`backend*.json`**, examples). **Interactive prompts** (with defaults): repo name, slug, owner, version, dev/staging/prod URLs, optional Railway **`projectId`**, **`server.json`** port / `projectRoot` / `stateDir`. Non-interactive: set **`MTX_ORG_*`** env vars (see `lib/create-from-template.sh` header). Vendors **`terraform/`** from sibling **`project-bridge`** when present. **`npm run dev`** / **`build:server`** / **`prepare:railway`**: project-bridge comes **only** from your workspace (`../project-bridge`, **`PROJECT_BRIDGE_ROOT`**, or **`vendor/`** after **`prepare:railway`**); hosts do not fetch it remotely. Railway: **`npm run prepare:railway`** then **`railway up`**; build mirrors **`targets/server/dist`**. |
 | **Register** any payload | Edit **project-bridge** `config/server.json` **`apps[]`** | No MTX create required if code already exists |
 
+### Standalone React auto-migration (`mtx create payload`)
+
+When you run `mtx create payload` **from inside a standalone React app root**, MTX now auto-detects that context and performs migration without a separate import step:
+
+1. Scaffolds a new `payload-*` repo from the configured payload template.
+2. Migrates the current app into `payload-<slug>/payloads/<slug>/`.
+3. By default, **moves** source content out of the original app root after successful migration.
+
+Default behavior is move-first for clean handoff. If you want copy-only behavior:
+
+```bash
+MTX_CREATE_MOVE_SOURCE=0 mtx create payload "My App"
+```
+
+Detection is intentionally strict to avoid false positives. It must look like a React app root (`package.json` with `react`) and not already be a standard host/payload root (`config/app.json`, `terraform/`, or `payloads/` present).
+
 ---
 
 ## Universal org (default mental model)
