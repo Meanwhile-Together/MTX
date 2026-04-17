@@ -339,6 +339,15 @@ mtx_org_scaffold_deploy_config_surface() {
       echo "targets/server/runtime/"
     } >> "$gitignore"
   fi
+  if [ -f "$gitignore" ] && ! grep -qE '^\.env$|^\.env\.\*$' "$gitignore" 2>/dev/null; then
+    {
+      echo ""
+      echo "# Local secrets (Railway / JWT / DB URLs — mtx deploy reads .env)"
+      echo ".env"
+      echo ".env.*"
+      echo "!.env.example"
+    } >> "$gitignore"
+  fi
 }
 
 # Wire package.json + railway.json so org repos run the full unified server build via sibling (or vendor) project-bridge.
