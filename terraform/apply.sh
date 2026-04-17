@@ -830,7 +830,12 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 unset RAILWAY_TOKEN
                 export RAILWAY_API_TOKEN="$ACCOUNT_API_TOKEN"
                 export RAILWAY_PROJECT_ID="$PROJ_ID"
-                (cd "$PROJECT_ROOT" && railway link --project "$PROJ_ID" >/dev/null 2>&1) || true
+                local LINK_OUT
+                LINK_OUT=$(cd "$PROJECT_ROOT" && railway link --project "$PROJ_ID" --workspace "$RAILWAY_WORKSPACE_ID" --environment "$ENV_NAME" 2>&1) || {
+                    echo -e "${RED}❌ Failed to link Railway project context for DB provisioning.${NC}"
+                    [ -n "${LINK_OUT:-}" ] && echo "$LINK_OUT"
+                    return 1
+                }
                 local ADD_OUT
                 ADD_OUT=$(cd "$PROJECT_ROOT" && railway add --database postgres --service "$DB_SVC_NAME" 2>&1) || {
                     echo -e "${RED}❌ Failed to create PostgreSQL service ${DB_SVC_NAME}.${NC}"
