@@ -815,6 +815,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             local DB_SVC_ID=""
             local SERVICES_QUERY SERVICES_RESPONSE DB_REF APP_VARS DB_URL_VAL
             local ACCOUNT_API_TOKEN="${ACCOUNT_TOKEN:-$TOKEN}"
+            local DB_ID_VAR DB_ID_FROM_ENV DB_MATCH_COUNT
+            local -a DB_MATCHES
 
             echo -e "${BLUE}🗄️  Ensuring central database service (${DB_SVC_NAME})...${NC}"
 
@@ -823,36 +825,36 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 -H "Authorization: Bearer $ACCOUNT_API_TOKEN" \
                 -H "Content-Type: application/json" \
                 -d "$SERVICES_QUERY" 2>/dev/null)
-            DB_SVC_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$DB_SVC_NAME" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
+            DB_ID_VAR="MTX_DB_SERVICE_ID_${ENV_NAME^^}"
+            DB_ID_FROM_ENV="${!DB_ID_VAR:-}"
 
-            if [ -z "$DB_SVC_ID" ] || [ "$DB_SVC_ID" = "null" ]; then
-                echo -e "${CYAN}ℹ️  DB service ${DB_SVC_NAME} not found; creating PostgreSQL service...${NC}"
-                unset RAILWAY_TOKEN
-                export RAILWAY_API_TOKEN="$ACCOUNT_API_TOKEN"
-                export RAILWAY_PROJECT_ID="$PROJ_ID"
-                local LINK_OUT
-                LINK_OUT=$(cd "$PROJECT_ROOT" && railway link --project "$PROJ_ID" --workspace "$RAILWAY_WORKSPACE_ID" --environment "$ENV_NAME" 2>&1) || {
-                    echo -e "${RED}❌ Failed to link Railway project context for DB provisioning.${NC}"
-                    [ -n "${LINK_OUT:-}" ] && echo "$LINK_OUT"
+            if [ -n "$DB_ID_FROM_ENV" ] && [ "$DB_ID_FROM_ENV" != "null" ]; then
+                DB_SVC_ID="$DB_ID_FROM_ENV"
+                DB_SVC_NAME=$(echo "$SERVICES_RESPONSE" | jq -r --arg id "$DB_SVC_ID" '.data.project.services.edges[]? | select(.node.id == $id) | .node.name // empty' 2>/dev/null | head -1)
+                if [ -z "$DB_SVC_NAME" ]; then
+                    echo -e "${RED}❌ ${DB_ID_VAR}=${DB_SVC_ID} was not found in project services.${NC}"
                     return 1
-                }
-                local ADD_OUT
-                ADD_OUT=$(cd "$PROJECT_ROOT" && railway add --database postgres --service "$DB_SVC_NAME" 2>&1) || {
-                    echo -e "${RED}❌ Failed to create PostgreSQL service ${DB_SVC_NAME}.${NC}"
-                    [ -n "${ADD_OUT:-}" ] && echo "$ADD_OUT"
-                    return 1
-                }
-
-                SERVICES_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
-                    -H "Authorization: Bearer $ACCOUNT_API_TOKEN" \
-                    -H "Content-Type: application/json" \
-                    -d "$SERVICES_QUERY" 2>/dev/null)
+                fi
+            else
                 DB_SVC_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$DB_SVC_NAME" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
-            fi
-
-            if [ -z "$DB_SVC_ID" ] || [ "$DB_SVC_ID" = "null" ]; then
-                echo -e "${RED}❌ Could not resolve central DB service ${DB_SVC_NAME}.${NC}"
-                return 1
+                if [ -z "$DB_SVC_ID" ] || [ "$DB_SVC_ID" = "null" ]; then
+                    mapfile -t DB_MATCHES < <(echo "$SERVICES_RESPONSE" | jq -r '.data.project.services.edges[]?.node | select(.name | test("^Postgres")) | (.id + "\t" + .name)' 2>/dev/null)
+                    DB_MATCH_COUNT="${#DB_MATCHES[@]}"
+                    if [ "$DB_MATCH_COUNT" -eq 1 ]; then
+                        DB_SVC_ID="$(echo "${DB_MATCHES[0]}" | cut -f1)"
+                        DB_SVC_NAME="$(echo "${DB_MATCHES[0]}" | cut -f2)"
+                        echo -e "${YELLOW}ℹ️  Using existing Postgres service for ${ENV_NAME}: ${DB_SVC_NAME}${NC}"
+                    elif [ "$DB_MATCH_COUNT" -gt 1 ]; then
+                        echo -e "${RED}❌ Multiple Postgres services found; refusing auto-pick to avoid more DB sprawl.${NC}"
+                        echo "Set ${DB_ID_VAR} in .mtx.prepare.env to one of:"
+                        printf '  %s\n' "${DB_MATCHES[@]}"
+                        return 1
+                    else
+                        echo -e "${RED}❌ No Postgres service found and auto-create is disabled to prevent duplicates.${NC}"
+                        echo "Create one DB service manually, then set ${DB_ID_VAR} in .mtx.prepare.env."
+                        return 1
+                    fi
+                fi
             fi
 
             DB_REF="\${{${DB_SVC_NAME}.DATABASE_URL}}"
