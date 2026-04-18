@@ -10,7 +10,7 @@
 
 | Item | Status |
 |------|--------|
-| **INFRA_AND_DEPLOY_REFERENCE.md** — `mtx deploy` vs `./terraform/apply.sh` | **Updated:** `deploy.sh` always runs **`$MTX_ROOT/deploy/terraform/apply.sh`**; PROJECT_ROOT resolves to project-bridge for Terraform. |
+| **INFRA_AND_DEPLOY_REFERENCE.md** — `mtx deploy` vs `./terraform/apply.sh` | **Updated:** `deploy.sh` always runs **`$MTX_ROOT/deploy/terraform/apply.sh`**; **PROJECT_ROOT** = tree with **`config/app.json`** (normatively **`org-*`**; legacy **project-bridge** checkout during migration). |
 | **MTX_CREATE_AND_DEPLOYMENT_FLOW.md** — §2.2 fork narrative | **Updated:** Describes actual **`create.sh`** (payload template, not project-bridge fork). |
 | **create.sh** | **Implementation:** Clones **`template-payload`** (or `MTX_PAYLOAD_TEMPLATE_REPO`), **`payload-*`** naming — see script header in repo. |
 
@@ -50,3 +50,16 @@ Framework phase rules and **framework-doctrine.mdc** still reference **MASTER_FL
 | **`mtx deploy`** | Project’s `./terraform/apply.sh` | **MTX** `$MTX_ROOT/deploy/terraform/apply.sh` only. |
 | **New app on existing host** | N/A | Payload + **`server.apps`** entry on the **org host**. |
 | **Deploy root** | “project-bridge checkout is the product host” | **`org-*`** first-class; **project-bridge** = framework ([rule-of-law.md](rule-of-law.md) §1, §6). |
+
+---
+
+## Org-shaped payloads: aigotchi and org-nack-ai batch
+
+**Incident (named):** **`payload-aigotchi`** and **~24** sibling **`payload-*`** repos were **org-host trees** (`payloads/`, **`prepare:railway`**, unified-server wiring) while keeping **`payload-*`** names — including **nested** **`payloads/aigotchi/payloads/mt-platform/`** (a **second host-like tree inside a payload path**) under **`org-nack-ai`**. Same root cause class as **`mtx create payload`** + **org-shaped** template (**`template-basic`** / wrong **`MTX_PAYLOAD_TEMPLATE_REPO`**).
+
+| What to read | Where |
+|--------------|--------|
+| Law + failure class + remediation order | [rule-of-law.md](rule-of-law.md) §1 (cross-repo **org-shaped `payload-*`** bullet), §2 last implication, §4 **Org-shaped `payload-*`**, §7 todos (**pilot `payload-aigotchi`**, batch the rest) |
+| Step-by-step migration (hoist / reclassify) | [PAYLOAD_ORG_SHAPE_MIGRATION.md](PAYLOAD_ORG_SHAPE_MIGRATION.md) |
+| Workspace inventory | [`scripts/inventory-org-shaped-payloads.sh`](../scripts/inventory-org-shaped-payloads.sh) |
+| Hoist helper | [`scripts/hoist-payload-subdir-to-root.sh`](../scripts/hoist-payload-subdir-to-root.sh) |

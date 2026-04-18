@@ -20,7 +20,7 @@ Clone this repo (or your organization’s mirror), then change the config or run
 
 - **First time:** Run the install one-liner above (or clone and run the wrapper script). It will install itself and then you can use the command.
 - **Customizing:** Run `./reconfigure.sh` to set display name, repo, wrapper filename, and paths; or edit the config block at the top of the wrapper script.
-- **Running scripts:** From any directory, run `mtx <category> <script>` (or whatever your installed command name is). Examples: `mtx deploy staging`, `mtx create org`, `mtx run dev` — see `mtx help` for this repo’s categories.
+- **Running scripts:** From any directory, run `mtx <category> <script>` or a top-level command (or whatever your installed command name is). Examples: `mtx deploy staging`, `mtx create org`, `mtx run dev`, `mtx clean` — see `mtx help` for this repo’s categories.
 
 The wrapper checks the repo for updates on each run and resets to the remote branch when needed.
 

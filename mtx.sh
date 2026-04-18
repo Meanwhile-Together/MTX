@@ -378,8 +378,29 @@ case "$1" in
 
             # git remote update = fetch from remote, update local refs (nothing is pushed)
             if git -C "$scriptDir" remote update &>/dev/null; then
-                if ! git -C "$scriptDir" diff --ignore-space-at-eol --quiet origin/main; then
-                    info "New changes on remote; pulling..."
+                # chmod +x on tracked mtx.sh after reset makes mode-only diffs vs origin; ignore for dirtiness.
+                git -C "$scriptDir" config core.filemode false 2>/dev/null || true
+
+                LOCAL_SHA=$(git -C "$scriptDir" rev-parse HEAD 2>/dev/null || echo "")
+                REMOTE_SHA=$(git -C "$scriptDir" rev-parse origin/main 2>/dev/null || echo "")
+                dirty_wt=0
+                if ! git -C "$scriptDir" diff --ignore-space-at-eol --quiet origin/main 2>/dev/null; then
+                    dirty_wt=1
+                fi
+
+                mtx_update_reason=""
+                if [ -n "$LOCAL_SHA" ] && [ -n "$REMOTE_SHA" ] && [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+                    mtx_update_reason=pull
+                elif [ "$dirty_wt" = 1 ]; then
+                    mtx_update_reason=normalize
+                fi
+
+                if [ -n "$mtx_update_reason" ]; then
+                    if [ "$mtx_update_reason" = pull ]; then
+                        info "New changes on remote; pulling..."
+                    else
+                        info "Normalizing MTX checkout to match origin/main..."
+                    fi
                     shaBefore=$(git -C "$scriptDir" rev-parse HEAD)
                     info "Pre-update SHA: $(color yellow "$shaBefore")"
                     if [ $verbose -ge 3 ]; then
@@ -404,17 +425,21 @@ case "$1" in
                         chmod +x "$scriptDir/$wrapperName"
                         ln -sf "$scriptDir/$wrapperName" "$binDir/$installedName"
                     fi
-                    success "Pulled latest from remote."
+                    if [ "$mtx_update_reason" = pull ]; then
+                        success "Pulled latest from remote."
+                    else
+                        success "Checkout matches origin/main."
+                    fi
                     shaNow=$(git -C "$scriptDir" rev-parse HEAD)
                     info "Post update SHA: $(color yellow "$shaNow")"
                     if [ -n "$shaBefore" ] && [ "$shaBefore" != "$shaNow" ]; then
                         info "Commits in this update:"
                         git -C "$scriptDir" log --oneline "$shaBefore..$shaNow" 2>/dev/null | sed 's/^/  /' || true
-                    fi
-                    print_banner
-                    # Bash may keep reading the old mtx.sh inode after git replaces files; re-exec loads the new script.
-                    if [ -z "${MTX_UPDATECHECK_NO_REEXEC:-}" ]; then
-                        MTX_INTERNAL_SELF_UPDATE=1
+                        print_banner
+                        # Bash may keep reading the old mtx.sh inode after git replaces files; re-exec loads the new script.
+                        if [ -z "${MTX_UPDATECHECK_NO_REEXEC:-}" ]; then
+                            MTX_INTERNAL_SELF_UPDATE=1
+                        fi
                     fi
                 else
                     success "Already up to date."

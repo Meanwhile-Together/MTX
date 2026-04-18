@@ -40,6 +40,7 @@ This doc covers **mtx.sh** (the wrapper): how it runs, loads includes, builds he
 
 - The wrapper expects every runnable script (top-level `*.sh` or `*/subcommand.sh`) to define **`desc`** in the first **30 lines** so the help menu can show a one-line description.
 - **Format:** `desc="Short description here"` or `desc='Short description here'`. Single or double quotes; they are stripped when displayed.
+- **Deprecation:** When a command is kept only for compatibility, say so in **`desc=`** and name the supported replacement (for example **`mtx sys clean`** is deprecated in favor of **`mtx clean`**).
 - **Extraction:** `get_desc "$file"` reads the first 30 lines of the script, takes the first line that matches `^desc=`, strips the `desc=` and the quotes, and echoes the value. If there is no `desc=` line or the script isn't readable, nothing is echoed and the help entry shows the label only (no description).
 
 ### Help menu (`mtx help`)

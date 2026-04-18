@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared implementation for mtx clean / mtx sys clean / clean/<scope>.sh
+# Shared implementation for mtx clean (and deprecated mtx sys clean) / clean/<scope>.sh
 # shellcheck disable=SC2034  # colors used with echo -e at call sites
 
 mtx_clean_color_setup() {
@@ -12,7 +12,9 @@ mtx_clean_color_setup() {
 
 mtx_clean_usage() {
     echo "Usage: mtx clean [payload|org|all] [--scope=payload|org|all] [--yes]"
-    echo "       mtx sys clean …   (same behavior, legacy path)"
+    echo "       mtx clean payload|org|all   (explicit scope subcommands)"
+    echo ""
+    echo "  mtx sys clean is deprecated and forwards here; use mtx clean."
     echo ""
     echo "  With no scope: auto-detect from cwd (after precond):"
     echo "    • Under an org host's payloads/…  → payload (this package only)."

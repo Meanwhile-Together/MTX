@@ -101,6 +101,7 @@ Single curated ledger for **facts**, **constraints**, **failure modes**, **inten
 
 ## 8. Things to remember (operator gotchas)
 
+- **2026-04-18 —** **aigotchi / org-nack-ai batch (named):** **`payload-aigotchi`** showed **nested** **`payloads/.../payloads/mt-platform/`**; **org-nack-ai** and the workspace mirrored **~25** **`payload-*`** repos that are **org-shaped** at root — **white UI / MIME / wrong static root** until each tree is **flattened** to **`template-payload`** shape or **reclassified** as **`org-*`**. Registry: [MISALIGNMENT.md — Org-shaped payloads: aigotchi and org-nack-ai batch](MISALIGNMENT.md#org-shaped-payloads-aigotchi-and-org-nack-ai-batch); playbook: [PAYLOAD_ORG_SHAPE_MIGRATION.md](PAYLOAD_ORG_SHAPE_MIGRATION.md); scan: [`scripts/inventory-org-shaped-payloads.sh`](../scripts/inventory-org-shaped-payloads.sh).
 - **2026-04-18 —** **Canonical `mtx` loop:** land changes on **Meanwhile-Together/MTX `main`** (**commit + push**), then run **`mtx`** so the **auto-updating** install matches; do not assume **`PATH` `mtx`** reads your **unpushed** working copy.
 - Until **`template-org`** exists beside MTX (or on GitHub), **`ln -sf template-basic template-org`** next to MTX or **`MTX_ORG_TEMPLATE_REPO=template-basic`** — **`template-basic`** is **legacy**, not the long-term name ([MTX_SCAFFOLDING_MODEL.md](MTX_SCAFFOLDING_MODEL.md)).
 - After changing MTX scripts locally, **`mtx help`** may still show the old menu until the **installed** MTX clone is updated.

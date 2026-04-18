@@ -8,6 +8,7 @@ This guide is for adding new scripts to MTX so they appear in `mtx help` and run
 
 - **Top-level command:** A single script `mtx.sh` in the repo root is the wrapper. Your scripts go in **directories** next to it.
 - **Command category:** Each directory is a category. Examples: `dev/`, `setup/`, `deploy/` (including **`deploy/terraform/`** for Terraform orchestration), `sys/`. The user runs `mtx <category> <script>` (e.g. `mtx dev run-electron`, `mtx deploy terraform apply`).
+- **Top-level script (no category dir):** A **`*.sh`** next to **`mtx.sh`** becomes **`mtx <basename>`** (e.g. **`clean.sh`** → **`mtx clean`**), optionally paired with a same-name folder for subcommands (e.g. **`clean/payload.sh`** → **`mtx clean payload`**). Prefer this for cross-cutting tools that are not naturally a “domain.”
 - **Script file:** Put your script in that category as `<name>.sh`. So `dev/run-electron.sh` is run with `mtx dev run-electron`.
 - **Subcommands only:** If a category has no `category.sh` and only `category/*.sh`, those appear as subcommands (e.g. `mtx compile android-debug`). If there is both `deploy.sh` and `deploy/*.sh`, the wrapper merges them so the directory’s scripts show as subcommands of `deploy`.
 

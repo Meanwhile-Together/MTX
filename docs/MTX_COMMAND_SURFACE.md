@@ -28,12 +28,19 @@ Non-create operations live under a **domain** directory in the MTX repo (what `m
 
 Other domains (**`deploy`**, **`setup`**, **`project`**, …) follow the same pattern: **`mtx <domain> <script>`**.
 
+### Top-level operator: `mtx clean`
+
+**`mtx clean`** is a **top-level** script (**`clean.sh`** + **`clean/`**), not a domain folder. It removes build artifacts with **smart defaults** (org host vs single payload) and optional scopes **`payload`**, **`org`**, **`all`** (see **`mtx clean --help`**). Subcommands **`mtx clean payload`**, **`mtx clean org`**, **`mtx clean all`** map to **`clean/payload.sh`**, **`clean/org.sh`**, **`clean/all.sh`**.
+
+**`mtx sys clean`** is **deprecated** (still runs the same engine and prints a warning); use **`mtx clean`** in scripts and docs.
+
 ### Nested segments under a domain (structural, not accidental)
 
 The wrapper resolves **extra tokens** after a domain into **`domain/<segment>.sh`** when that file exists (and can chain again when both `domain/segment.sh` and `domain/segment/` exist). **Purpose:** keep the top-level **`mtx help`** list small and **group** related operator steps under one **domain** instead of minting new root verbs. Example: **`mtx deploy terraform apply`** uses **`deploy/terraform.sh`** to reach **`deploy/terraform/apply.sh`** — same deploy engine as **`mtx deploy`** after you pick an environment, without a misleading top-level **`mtx terraform`** that reads like a second product CLI. Mechanical detail: [getting-started.md](getting-started.md) §“Where scripts live”.
 
 ## What *not* to do
 
+- **No** **`mtx sys clean`** in new scripts or docs — use **`mtx clean`** (**`mtx sys clean`** is deprecated).
 - **No** top-level **`mtx install`** for payload registration — use **`mtx payload install`** only.
 - **No** **`mtx payload create`** / **`mtx template create`** — use **`mtx create payload`** / **`mtx create template`**.
 - **No** top-level **`mtx terraform …`** for MTX’s Railway/Terraform **orchestrator** — that logic lives under **`mtx deploy terraform …`** (see **Nested segments** above). HashiCorp **`terraform`** still runs **inside** the project’s **`$PROJECT_ROOT/terraform/`** when the orchestrator applies infra.

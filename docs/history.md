@@ -31,6 +31,10 @@ Summary of changes from the MTX repository git history. Use this for context whe
 - run-electron.sh: remove cross-env; use inline NODE_ENV; simplify; use npx for Electron; conditional desktop build if main entry missing; later refactor to invoke desktop dev script directly.
 - future.md: prefer inline env vars over cross-env on Unix.
 
+**Clean**
+
+- **`mtx clean`** (`clean.sh` + **`clean/`**, shared **`clean/_lib.sh`**) is the supported entry for removing build artifacts (smart org vs payload; **`all`** uses workspace root from precond). **`mtx sys clean`** is deprecated (still forwards with a warning).
+
 **Compile and run scripts**
 
 - Removed deprecated android-debug.sh, menu.sh, rebrand.sh.
