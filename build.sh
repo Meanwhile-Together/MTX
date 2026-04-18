@@ -12,7 +12,7 @@ set -e
 
 MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
-# Match terraform/apply.sh PROJECT_ROOT resolution
+# Match deploy/terraform/apply.sh PROJECT_ROOT resolution
 PROJECT_ROOT=""
 if [ -f "config/app.json" ]; then
   PROJECT_ROOT="$(pwd)"
@@ -97,6 +97,15 @@ run_prepare_railway_bundle() {
   echo "🔨 Building Railway deploy bundle (npm run prepare:railway)..." >&2
   npm run prepare:railway || { echo "❌ prepare:railway failed" >&2; exit 1; }
   echo "✅ prepare:railway complete" >&2
+  # After payload vendor/build: portable MTX pre-deploy (org hook + HTML/asset fixes). See includes/mtx-predeploy.sh.
+  if [ -f "$MTX_ROOT/includes/mtx-predeploy.sh" ]; then
+    # shellcheck source=includes/mtx-predeploy.sh
+    source "$MTX_ROOT/includes/mtx-predeploy.sh"
+    mtx_predeploy_after_payload_assembly "$PROJECT_ROOT" || {
+      echo "❌ mtx pre-deploy after prepare:railway failed" >&2
+      exit 1
+    }
+  fi
 }
 
 run_server_build() {

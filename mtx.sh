@@ -254,6 +254,8 @@ case "$1" in
         echo "   --submerge Remove all hoisted instances of the current script"
         ;;
     *)
+        # Full argv for re-exec after self-update (must be before flag parsing shifts $@).
+        mtx_invocation_args=("$@")
         while [[ $# -gt 0 ]]; do
             case "$1" in
             "--version")
@@ -305,6 +307,9 @@ case "$1" in
                 debug "Submerge flag detected, will remove all hoisted instances of current script"
                 shift
                 ;;
+            "--update")
+                shift
+                ;;
             *)
                 break
                 ;;
@@ -337,7 +342,9 @@ case "$1" in
                 mkdir -p "$scriptDir"
                 chown "$ug" "$scriptDir"
             fi
+            MTX_UPDATECHECK_NO_REEXEC=1
             updateCheck
+            unset MTX_UPDATECHECK_NO_REEXEC
             touch "$packageListFile" 2>/dev/null || true
             if [ ! -f "$scriptDir/$wrapperName" ]; then
                 error "Install failed: $wrapperName not found in $scriptDir"
@@ -377,16 +384,17 @@ case "$1" in
                     info "Pre-update SHA: $(color yellow "$shaBefore")"
                     if [ $verbose -ge 3 ]; then
                         git -C "$scriptDir" fetch --all
+                        git -C "$scriptDir" reset --hard origin/main
                     else
                         git -C "$scriptDir" fetch --all --quiet
-                    fi
-                    if [ $verbose -ge 3 ]; then
-                        git -C "$scriptDir" fetch --all
-                    else
                         git -C "$scriptDir" reset --hard origin/main --quiet
                     fi
                     if [ "$(id -u 2>/dev/null)" = "0" ]; then
-                        ug="${ug:-$USER:$(id -gn 2>/dev/null || echo staff)}"
+                        if [ -n "${SUDO_USER:-}" ]; then
+                            ug="${SUDO_USER}:$(id -gn "$SUDO_USER" 2>/dev/null || echo staff)"
+                        else
+                            ug="${ug:-$USER:$(id -gn 2>/dev/null || echo staff)}"
+                        fi
                         chown -R "$ug" "$scriptDir" 2>/dev/null || true
                     fi
                     if command -v sudo &>/dev/null; then
@@ -404,6 +412,10 @@ case "$1" in
                         git -C "$scriptDir" log --oneline "$shaBefore..$shaNow" 2>/dev/null | sed 's/^/  /' || true
                     fi
                     print_banner
+                    # Bash may keep reading the old mtx.sh inode after git replaces files; re-exec loads the new script.
+                    if [ -z "${MTX_UPDATECHECK_NO_REEXEC:-}" ]; then
+                        MTX_INTERNAL_SELF_UPDATE=1
+                    fi
                 else
                     success "Already up to date."
                 fi
@@ -431,6 +443,9 @@ case "$1" in
                     else
                         chown -R "$ug" "$scriptDir"
                     fi
+                fi
+                if [ -z "${MTX_UPDATECHECK_NO_REEXEC:-}" ]; then
+                    MTX_INTERNAL_SELF_UPDATE=1
                 fi
             fi
         }
@@ -488,6 +503,15 @@ case "$1" in
             # Preserve normal interactive behavior, but skip auto-update when no TTY.
             if [ -z "${MTX_SKIP_UPDATE:-}" ] && [ -t 0 ] && [ -t 1 ]; then
                 updateCheck
+            fi
+            if [ -n "${MTX_INTERNAL_SELF_UPDATE:-}" ]; then
+                unset MTX_INTERNAL_SELF_UPDATE
+                info "Restarting $(c yellow "$installedName") so this run uses the updated script..."
+                exec env MTX_SKIP_UPDATE=1 MTX_VERBOSE="$verbose" \
+                    "$binDir/$installedName" "${mtx_invocation_args[@]}" || {
+                    error "Failed to re-exec $installedName after self-update."
+                    exit 9
+                }
             fi
 
             if [ $verbose -ge 2 ]; then

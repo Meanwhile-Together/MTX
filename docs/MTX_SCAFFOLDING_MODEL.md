@@ -9,11 +9,15 @@ This document is the **single narrative** for how **MTX `create`** relates to **
 | Concept | What it is |
 |--------|------------|
 | **Payload** | Anything the unified server loads from `server.apps`: client apps, org surface, admin UI, etc. **Same mechanism** (path, package, or git). |
-| **Payload templates** | **`template-*`** repos are **for payloads only**. **`mtx create payload`** clones from **`MTX_PAYLOAD_TEMPLATE_REPO`** (default **`template-basic`**). To publish a **new** template from an existing payload, run **`mtx create template [name]`** from **that payload’s repo root**; it snapshots the tree into **`template-<name>`** (excludes `.git`, `node_modules`, `dist`, …). |
-| **Org surface** | Usually **one shared** org payload (one git repo or path), **reused** across tenants; **routing and config** differ per deployment (`domains`, `pathPrefix`, env). **`mtx create org`** exists for the **exceptional** case where you need a **separate org product line** as its own `org-*` repo. |
-| **Admin** | **A payload**, not a separate platform. Typically **`payload-admin`** (or another app entry) with **`slug`/name** expressing “admin”; add another payload template later only if you need a **second admin product line**. |
+| **Payload app template** | **`template-payload`** — default GitHub/local folder name for **`mtx create payload`**. **Single-app** shape at repo root (Vite SPA, `npm run build` → `dist/`), like **`payload-admin`**, **not** an org host tree with `payloads/*` + unified server scripts. Override with **`MTX_PAYLOAD_TEMPLATE_REPO`**. |
+| **Org host template** | **`template-org`** — default for **`mtx create org`**: multi-app / host layout (`payloads/`, `prepare:railway`, org build scripts, `config/` aligned with project-bridge). Override with **`MTX_ORG_TEMPLATE_REPO`**. |
+| **Forkable `template-*` snapshots** | **`mtx create template [name]`** (run from a **payload** repo root) copies the tree into **`template-<name>`** beside MTX (excludes `.git`, `node_modules`, `dist`, …). Point **`MTX_PAYLOAD_TEMPLATE_REPO`** at that folder/repo so **`mtx create payload`** clones your custom starter. |
+| **Org surface** | Usually **one shared** org payload (one git repo or path), **reused** across tenants; **routing and config** differ per deployment (`domains`, `pathPrefix`, env). **`mtx create org`** is for the **exceptional** case where you need a **separate org product line** as its own `org-*` repo. |
+| **Admin** | **A payload**, not a separate platform. Typically **`payload-admin`** with **`staticDir: "dist"`** in server config. |
 
-**Templates in MTX mean “templates for building payloads.”** We do **not** maintain parallel template families for org or admin as first-class `mtx create` types—those surfaces are still **payloads**, distinguished in **`config/server.json`** (`id`, `name`, `slug`, optional fields you add later).
+**`template-basic`** (legacy name) is the **old unified default**; it matches the **org host** shape. Prefer **`template-org`** for org scaffolds and **`template-payload`** for new app repos. Until GitHub repos are renamed, keep a **local sibling** named **`template-org`** (for example `ln -sf template-basic template-org` next to MTX) or set **`MTX_ORG_TEMPLATE_REPO=template-basic`**.
+
+**Mis-scaffolded `payload-*`:** repos that look like **org hosts** but use a **`payload-*`** name (top-level **`payloads/`**, **`prepare:railway`**, etc.) need a **deliberate migration** — flatten to single-app or reclassify as **`org-*`**. Playbook: [PAYLOAD_ORG_SHAPE_MIGRATION.md](PAYLOAD_ORG_SHAPE_MIGRATION.md).
 
 ---
 
@@ -21,10 +25,10 @@ This document is the **single narrative** for how **MTX `create`** relates to **
 
 | Goal | Command | Repo / result |
 |------|---------|-----------------|
-| New **customer / app** repo | `mtx create payload [name]` or `mtx create [name]` | **`payload-*`** from `MTX_PAYLOAD_TEMPLATE_REPO` (default **`template-basic`**) |
-| New **payload template** from an existing payload | `cd` into payload root, then `mtx create template [name]` or `mtx template create [name]` | Snapshots cwd → **`template-*`** beside MTX; then point **`MTX_PAYLOAD_TEMPLATE_REPO`** / **`MTX_TEMPLATE_SOURCE_REPO`** at it for **`mtx create payload`** |
-| New **org product repo** (rare) | `mtx create org [name]` | **`org-*`** from `MTX_ORG_TEMPLATE_REPO` (default **`template-basic`**). Template **`config/`** matches project-bridge ( **`app.json`** full shape, **`deploy*.json`**, **`server*.example`**, **`backend*.json`**, examples). **Interactive prompts** (with defaults): repo name, slug, owner, version, dev/staging/prod URLs, optional Railway **`projectId`**, **`server.json`** port / `projectRoot` / `stateDir`. Non-interactive: set **`MTX_ORG_*`** env vars (see `lib/create-from-template.sh` header). Vendors **`terraform/`** from sibling **`project-bridge`** when present. **`npm run dev`** / **`build:server`** / **`prepare:railway`**: project-bridge comes **only** from your workspace (`../project-bridge`, **`PROJECT_BRIDGE_ROOT`**, or **`vendor/`** after **`prepare:railway`**); hosts do not fetch it remotely. Railway: **`npm run prepare:railway`** then **`railway up`**; build mirrors **`targets/server/dist`**. |
-| **Register** any payload | Edit **project-bridge** `config/server.json` **`apps[]`** | No MTX create required if code already exists |
+| New **customer / app** repo | **`mtx create payload [name]`** (legacy: `mtx create [name]` without the `payload` keyword still works; prefer the explicit form — [MTX_COMMAND_SURFACE.md](MTX_COMMAND_SURFACE.md)) | **`payload-*`** from **`MTX_PAYLOAD_TEMPLATE_REPO`** (default **`template-payload`**) |
+| New **payload template** from an existing payload | `cd` into payload root, then **`mtx create template [name]`** | Snapshots cwd → **`template-*`** beside MTX; then point **`MTX_PAYLOAD_TEMPLATE_REPO`** (or **`MTX_TEMPLATE_SOURCE_REPO`** in docs for the same idea) at it for **`mtx create payload`** |
+| New **org product repo** (rare) | **`mtx create org [name]`** | **`org-*`** from **`MTX_ORG_TEMPLATE_REPO`** (default **`template-org`**). Template **`config/`** matches project-bridge ( **`app.json`** full shape, **`deploy*.json`**, **`server*.example`**, **`backend*.json`**, examples). **Interactive prompts** (with defaults): repo name, slug, owner, version, dev/staging/prod URLs, optional Railway **`projectId`**, **`server.json`** port / `projectRoot` / `stateDir`. Non-interactive: set **`MTX_ORG_*`** env vars (see `lib/create-from-template.sh` header). Vendors **`terraform/`** from sibling **`project-bridge`** when present. **`npm run dev`** / **`build:server`** / **`prepare:railway`**: project-bridge comes **only** from your workspace (`../project-bridge`, **`PROJECT_BRIDGE_ROOT`**, or **`vendor/`** after **`prepare:railway`**); hosts do not fetch it remotely. Railway: **`npm run prepare:railway`** then **`railway up`**; build mirrors **`targets/server/dist`**. |
+| **Register** a payload on a host | **`mtx payload install <payload-id>`** from the host root (or edit **`config/server.json`** **`apps[]`** by hand) | No **`mtx create`** required if the repo already exists |
 
 ### Standalone React auto-migration (`mtx create payload`)
 
@@ -65,7 +69,9 @@ Use **`mtx create org`** when you truly need a **new repository** for a differen
 
 ## Naming rule
 
-**`template-<name>`** always means a **payload** template (scaffold for **`mtx create payload`**). There is no separate `template-org-*` / `template-admin-*` MTX command—org and admin are **payloads** in **`server.apps`**, not different template taxonomies.
+- **`template-payload`** — canonical default **source** for **`mtx create payload`** (single-app payload repo).  
+- **`template-org`** — canonical default **source** for **`mtx create org`** (org host / multi-app bundle).  
+- **`template-<name>`** (other names) — typically a **snapshot** produced by **`mtx create template`**; treat as a **custom** forkable starter and point **`MTX_PAYLOAD_TEMPLATE_REPO`** at it when you want **`mtx create payload`** to clone that tree instead.
 
 ---
 
@@ -73,9 +79,9 @@ Use **`mtx create org`** when you truly need a **new repository** for a differen
 
 | Variable | Role |
 |----------|------|
-| **`MTX_PAYLOAD_TEMPLATE_REPO`** | Source repo for **`mtx create payload`** (default **`template-basic`**) |
-| **`MTX_ORG_TEMPLATE_REPO`** | Source repo for **`mtx create org`** (default **`template-basic`**) |
-| **`MTX_TEMPLATE_SOURCE_REPO`** | When **`mtx create template`**, which repo to clone **from** (defaults chain to **`template-basic`**) |
+| **`MTX_PAYLOAD_TEMPLATE_REPO`** | Source repo/folder name for **`mtx create payload`** (default **`template-payload`**) |
+| **`MTX_ORG_TEMPLATE_REPO`** | Source repo/folder name for **`mtx create org`** (default **`template-org`**) |
+| **`MTX_TEMPLATE_SOURCE_REPO`** | Documented alias for “which template-* should `mtx create payload` clone”; use **`MTX_PAYLOAD_TEMPLATE_REPO`** in scripts (same effect). |
 
 ---
 
@@ -93,4 +99,5 @@ When scaffolding new `payload-*` repos, keep these compatibility conventions so 
 ## See also
 
 - [MTX_CREATE_AND_DEPLOYMENT_FLOW.md](MTX_CREATE_AND_DEPLOYMENT_FLOW.md) — create + deploy steps  
+- [PAYLOAD_ORG_SHAPE_MIGRATION.md](PAYLOAD_ORG_SHAPE_MIGRATION.md) — mis-scaffolded org-shaped **`payload-*`** (legacy **`template-basic`**) — flatten vs **`org-*`**  
 - [project-bridge: Payload creation and server config](../../project-bridge/docs/PAYLOAD_CREATION_AND_SERVER_CONFIG.md) — `server.apps` registration (GitHub: [link](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/PAYLOAD_CREATION_AND_SERVER_CONFIG.md))  

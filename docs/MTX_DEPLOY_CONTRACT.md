@@ -6,8 +6,8 @@ This document defines the **canonical deploy interface** for Meanwhile-Together:
 
 | Command | Purpose |
 |---------|---------|
-| `mtx build` [server\|backend\|all] | Builds the same **npm** artifacts deploy uses (`build:server` / `build:backend-server`) from the resolved project root (`config/app.json`). **No** Terraform or `railway up`. Default target is **all**. Implementation: [build.sh](../build.sh). |
-| `mtx deploy` [staging\|production] | Interactive menu if env omitted; runs MTX `terraform/apply.sh` for the chosen env; provisions/adopts infra; deploys app-host and backend artifacts. |
+| `mtx build` [server\|backend\|all] | Builds the same **npm** artifacts deploy uses (`build:server` / `build:backend-server`) from the resolved project root (`config/app.json`). **No** Terraform or `railway up`. Default target is **all**. Implementation: [build.sh](../build.sh). **Org `prepare:railway` repos:** after **`npm run prepare:railway`**, MTX runs **pre-deploy** ([`includes/mtx-predeploy.sh`](../includes/mtx-predeploy.sh)) — optional **`scripts/org-pre-deploy.sh`**, then payload HTML/Vite normalization; ledger: [rule-of-law.md](rule-of-law.md) §1 / §8. |
+| `mtx deploy` [staging\|production] | Interactive menu if env omitted; runs MTX `deploy/terraform/apply.sh` for the chosen env; provisions/adopts infra; deploys app-host and backend artifacts. |
 | `mtx deploy asadmin` [staging\|production] | Same flow with `RUN_AS_MASTER=true` and `MASTER_JWT_SECRET` handling for master backend. |
 
 **Skip build during deploy:** set **`MTX_SKIP_BUILD=1`** so `apply.sh` does not run `mtx build` steps (use when artifacts were built already, e.g. `mtx build all && MTX_SKIP_BUILD=1 mtx deploy staging`).
@@ -22,13 +22,13 @@ This document defines the **canonical deploy interface** for Meanwhile-Together:
 
 Default output is `<standalone-app-dir>/.mtx-import`. Existing files are preserved; import never overwrites generated files unless you remove them first.
 
-Implementation references: [build.sh](../build.sh), [deploy.sh](../deploy.sh), [deploy/asadmin.sh](../deploy/asadmin.sh), [terraform/apply.sh](../terraform/apply.sh).
+Implementation references: [build.sh](../build.sh), [deploy.sh](../deploy.sh), [deploy/asadmin.sh](../deploy/asadmin.sh), [deploy/terraform/apply.sh](../deploy/terraform/apply.sh). Advanced: `mtx deploy terraform apply|destroy` routes through [deploy/terraform.sh](../deploy/terraform.sh).
 
 ## Bootstrap vs steady state (target resolution: hybrid)
 
 ### First run (bootstrap)
 
-- Resolve **project root** (directory containing `config/app.json`).
+- Resolve **project root** (directory containing `config/app.json`) — **normatively an `org-*` host**; a **project-bridge** checkout may still satisfy this during migration ([rule-of-law.md](rule-of-law.md) §6).
 - Require `config/deploy.json` with `platform` including `railway`.
 - Use **Railway account token** for Terraform / GraphQL (create or adopt project and services).
 - **Discover services by name** in the project (e.g. `backend-staging`, `{slug}-staging`, per [INFRA_AND_DEPLOY_REFERENCE.md](INFRA_AND_DEPLOY_REFERENCE.md)).

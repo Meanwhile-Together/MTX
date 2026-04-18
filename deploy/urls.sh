@@ -6,7 +6,7 @@ desc="Ensure deploy URLs (Railway domains) and print app/backend URLs for an env
 nobanner=1
 set -e
 
-# Resolve project root (same logic as terraform/apply.sh)
+# Resolve project root (same logic as deploy/terraform/apply.sh)
 PROJECT_ROOT=""
 if [ -f "config/app.json" ]; then
   PROJECT_ROOT="$(pwd)"
@@ -99,9 +99,9 @@ if ! command -v railway &>/dev/null; then
 fi
 
 # Subroutine: ensure Railway domain
-# shellcheck source=../terraform/ensure-railway-domain.sh
-if [ -f "$MTX_ROOT/terraform/ensure-railway-domain.sh" ]; then
-  source "$MTX_ROOT/terraform/ensure-railway-domain.sh"
+# shellcheck source=terraform/ensure-railway-domain.sh
+if [ -f "$MTX_ROOT/deploy/terraform/ensure-railway-domain.sh" ]; then
+  source "$MTX_ROOT/deploy/terraform/ensure-railway-domain.sh"
 fi
 
 run_with_timeout() {

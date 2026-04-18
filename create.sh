@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Backward-compatible: `mtx create` = payload from template-basic. Prefer `mtx create payload|org|template` or `mtx payload create`.
+# Normative: mtx create <payload|org|template> … — see docs/MTX_COMMAND_SURFACE.md.
 # Optional name: `mtx create org My Org` / `mtx create payload foo` — args are the display name (joined if multiple words).
 # `mtx create template` → snapshot cwd payload into template-* (run from payload root; see docs/MTX_SCAFFOLDING_MODEL.md).
-desc="Create payload-* repo from template-basic (same as mtx payload create / mtx create payload)"
+# Legacy: `mtx create` with no kind keyword still runs the payload flow (prefer `mtx create payload`).
+desc="Create payload-*, org-*, or template-* repos (mtx create <type>)"
 nobanner=1
 set -e
 
 MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+declare -F warn >/dev/null || warn() { echo "[WARN] $*" >&2; }
 
 # Defensive dispatch when invoked directly (outside mtx wrapper).
 case "${1:-}" in
@@ -32,11 +34,15 @@ case "${1:-}" in
     ;;
 esac
 
+if [ -n "${1:-}" ]; then
+  warn "[MTX] Prefer explicit kind: mtx create payload … (see mtx help create / docs/MTX_COMMAND_SURFACE.md)" >&2
+fi
+
 export MTX_CREATE_VARIANT="${MTX_CREATE_VARIANT:-payload}"
 export MTX_REPO_PREFIX="payload-"
-export MTX_TEMPLATE_REPO="${MTX_PAYLOAD_TEMPLATE_REPO:-template-basic}"
+export MTX_TEMPLATE_REPO="${MTX_PAYLOAD_TEMPLATE_REPO:-template-payload}"
 export MTX_KIND_LABEL="Payload"
-export MTX_CREATE_CMD="mtx create"
+export MTX_CREATE_CMD="mtx create payload"
 
 # shellcheck source=lib/create-from-template.sh
 source "$MTX_ROOT/lib/create-from-template.sh"

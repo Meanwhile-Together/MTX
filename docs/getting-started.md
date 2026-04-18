@@ -1,13 +1,13 @@
 # Getting started: writing and adding scripts
 
-This guide is for adding new scripts to MTX so they appear in `mtx help` and run in the project directory. For patterns and anti-patterns, see **script-patterns.md**. For how the wrapper works (help, includes), see **mtx-patterns.md**. For change history derived from git, see **history.md**.
+This guide is for adding new scripts to MTX so they appear in `mtx help` and run in the project directory. For the **normative CLI layout** (create vs domain actions), see **MTX_COMMAND_SURFACE.md**. For patterns and anti-patterns, see **script-patterns.md**. For how the wrapper works (help, includes), see **mtx-patterns.md**. For change history derived from git, see **history.md**.
 
 ---
 
 ## Where scripts live
 
 - **Top-level command:** A single script `mtx.sh` in the repo root is the wrapper. Your scripts go in **directories** next to it.
-- **Command category:** Each directory is a category. Examples: `dev/`, `setup/`, `deploy/`, `sys/`, `terraform/`. The user runs `mtx <category> <script>` (e.g. `mtx dev run-electron`).
+- **Command category:** Each directory is a category. Examples: `dev/`, `setup/`, `deploy/` (including **`deploy/terraform/`** for Terraform orchestration), `sys/`. The user runs `mtx <category> <script>` (e.g. `mtx dev run-electron`, `mtx deploy terraform apply`).
 - **Script file:** Put your script in that category as `<name>.sh`. So `dev/run-electron.sh` is run with `mtx dev run-electron`.
 - **Subcommands only:** If a category has no `category.sh` and only `category/*.sh`, those appear as subcommands (e.g. `mtx compile android-debug`). If there is both `deploy.sh` and `deploy/*.sh`, the wrapper merges them so the directory’s scripts show as subcommands of `deploy`.
 

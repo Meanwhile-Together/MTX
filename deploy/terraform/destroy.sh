@@ -3,8 +3,8 @@
 desc="Destroy Terraform-managed resources for environment"
 set -e
 
-MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
-# shellcheck source=../includes/prepare-env.sh
+MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
+# shellcheck source=../../includes/prepare-env.sh
 source "$MTX_ROOT/includes/prepare-env.sh"
 
 PROJECT_ROOT="$(pwd)"

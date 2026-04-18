@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MTX deploy: no args → interactive menu (staging / production), then terraform apply
-desc="Interactive deploy menu (choose staging or production), then terraform apply"
+# MTX deploy: run from org host (or transitional) project root — menu (staging|production) then deploy/terraform/apply.sh
+desc="Interactive deploy menu (choose staging or production), then deploy/terraform apply"
 nobanner=1
 set -e
 
@@ -33,11 +33,11 @@ if [ -z "$ENV" ]; then
 fi
 
 [ -n "${FORCE_BACKEND:-}" ] && export FORCE_BACKEND
-# Run MTX's terraform/apply.sh (never project's copy)
+# Run MTX's deploy/terraform/apply.sh (never the project's ./terraform/apply.sh)
 if [ -n "${FORCE_BACKEND:-}" ]; then
-  "$MTX_ROOT/terraform/apply.sh" --force-backend "$ENV"
+  "$MTX_ROOT/deploy/terraform/apply.sh" --force-backend "$ENV"
 else
-  "$MTX_ROOT/terraform/apply.sh" "$ENV"
+  "$MTX_ROOT/deploy/terraform/apply.sh" "$ENV"
 fi
 # After successful deploy, ensure deploy URLs and print them (same as mtx deploy urls)
 if [ -f "$MTX_ROOT/deploy/urls.sh" ]; then

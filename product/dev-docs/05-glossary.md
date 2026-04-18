@@ -10,7 +10,7 @@ Key terms and what they mean in this system. Only includes terms explicitly revi
 
 **Payload** — A user-facing (or operator) experience served by a Project Bridge host: **client apps, org surface, admin UI**, etc. Each payload has its own responsibility; payloads are registered in **`server.apps`** and can be sourced from a local path, an npm package, or a git repo. **Admin is a payload**, not a separate platform type.
 
-**Payload template (starter)** — Default repo name **`template-basic`**, or any **`template-*`** repo you maintain (**payload-only**). **`mtx create template`** (from a payload root) snapshots a payload into a new **`template-*`**; **`mtx create payload`** clones from `MTX_PAYLOAD_TEMPLATE_REPO`. See [MTX_SCAFFOLDING_MODEL.md](../../docs/MTX_SCAFFOLDING_MODEL.md).
+**Payload template (starter)** — Default repo name **`template-payload`** (single-app SPA); org host default is **`template-org`**. Any **`template-*`** from **`mtx create template`** can be pointed at with **`MTX_PAYLOAD_TEMPLATE_REPO`**. See [MTX_SCAFFOLDING_MODEL.md](../../docs/MTX_SCAFFOLDING_MODEL.md).
 
 **Org surface** — Usually **one shared** org payload + **per-tenant routing/config**; **`mtx create org`** only when you need a **new `org-*` product repo**.
 

@@ -130,7 +130,7 @@ First-time developer deploying for the first time.
 - **No pre-deploy checklist.** A developer might not know they need: (1) a Railway account, (2) an account token, (3) later a project token per environment. The deploy script handles discovery but the overall prerequisites aren't documented in a quickstart.
 
 ### What the deploy flow does (if tokens were present)
-Based on reading `MTX/terraform/apply.sh` (1228 lines):
+Based on reading `MTX/deploy/terraform/apply.sh` (1228 lines):
 1. Load `.env` for tokens.
 2. Parse `config/deploy.json` (platform) and `config/app.json` (name, slug, owner).
 3. Check/prompt for Railway account token. Save to `.env`.

@@ -1,9 +1,14 @@
-#!/usr/bin/env bash
-desc="Install payload in current project and register routing in config/server.json"
-nobanner=1
-set -e
+# shellcheck shell=bash
+# Payload host wiring: add a payload source to the current host and register apps[].
+# Canonical CLI: mtx payload install (see docs/MTX_COMMAND_SURFACE.md).
+# Sourced by payload/install.sh; call mtx_install_payload_main "$@".
 
-MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mtx_install_payload_main() {
+  nobanner=1
+  set -e
+  local _lib_dir
+  _lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  MTX_ROOT="${MTX_ROOT:-$(cd "$_lib_dir/.." && pwd)}"
 if [ -d "$MTX_ROOT/includes" ]; then
   # shellcheck disable=SC1091
   for f in "$MTX_ROOT"/includes/*.sh; do source "$f"; done
@@ -67,7 +72,7 @@ find_project_root() {
 show_help() {
   cat <<'EOF'
 Usage:
-  mtx install <payload-id>
+  mtx payload install <payload-id>
 
 Installs a payload package/source into the current host repo, then updates
 config/server.json (or server.json) with an idempotent apps[] entry.
@@ -78,7 +83,7 @@ or an org payload repo (directory name org-* or package name @meanwhile-together
 <payload-id> is the app entry id (e.g. payload-client-portal). Default npm package is
 @meanwhile-together/<payload-id> unless you override.
 
-Same as: mtx payload install (run from org or project-bridge root).
+Run from org or project-bridge host root.
 EOF
 }
 
@@ -340,3 +345,4 @@ echo "     # or: mtx deploy staging|production"
 echo "  3) Verify routes:"
 echo "     - UI route host/path matches domains + pathPrefix"
 echo "     - API route uses ${API_PREFIX:-/api/$INPUT_SLUG} (or payload default)"
+}

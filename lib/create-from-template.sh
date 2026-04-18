@@ -1,8 +1,8 @@
 # Shared: scaffold a GitHub repo from a template with a fixed name prefix (payload-, org-, or template-).
-# Loaded only from mtx create/payload|org|template, payload/template create (legacy), or top-level create — NOT from includes/ (mtx auto-sources includes/*.sh at boot).
+# Loaded only from mtx create <payload|org|template> entrypoints (create/*.sh or create.sh legacy path) — NOT from includes/ (mtx auto-sources includes/*.sh at boot).
 # Callers must set MTX_ROOT to the MTX repo root before sourcing this file.
 # Callers set: MTX_REPO_PREFIX, MTX_TEMPLATE_REPO, MTX_KIND_LABEL, MTX_CREATE_CMD, MTX_CREATE_VARIANT (org|payload)
-# Repo prefixes: payload-, org-, template- (`template-*` = payload templates only; see docs/MTX_SCAFFOLDING_MODEL.md).
+# Repo prefixes: payload-, org-, template- (`template-*` = forkable snapshots from `mtx create template`; see docs/MTX_SCAFFOLDING_MODEL.md).
 # Optional: MTX_WORKSPACE_ROOT, MTX_GITHUB_ORG, MTX_CREATE_SKIP_GITHUB=1 (local git + snippet only; no gh).
 # Optional CLI name: mtx_create_from_template_run "$@" — if any args are given, they are joined with
 # spaces (trimmed) and used as the display name; otherwise the script prompts interactively.
@@ -11,7 +11,7 @@
 #   MTX_ORG_APP_SLUG, MTX_ORG_OWNER, MTX_ORG_VERSION, MTX_ORG_DEV_PORT, MTX_ORG_DEV_URL, MTX_ORG_STAGING_PORT,
 #   MTX_ORG_STAGING_URL, MTX_ORG_PROD_PORT, MTX_ORG_PROD_URL, MTX_ORG_DEPLOY_PROJECT_ID, MTX_ORG_SERVER_PORT,
 #   MTX_ORG_PROJECT_ROOT, MTX_ORG_STATE_DIR (secrets stay in backend.example.json / .env — not prompted).
-# Default clone source repo name: template-basic (override with MTX_PAYLOAD_TEMPLATE_REPO / MTX_ORG_TEMPLATE_REPO / MTX_TEMPLATE_SOURCE_REPO).
+# Default clone sources: template-payload (`mtx create payload`), template-org (`mtx create org`). Override with MTX_PAYLOAD_TEMPLATE_REPO / MTX_ORG_TEMPLATE_REPO. MTX_TEMPLATE_SOURCE_REPO is documented for pointing `mtx create payload` at a custom template-* snapshot.
 # With gh: new repos use `gh repo create org/repo --source=. --remote=origin --push`; existing repos get origin + git push.
 
 : "${MTX_ROOT:?Set MTX_ROOT to the MTX repository root before sourcing lib/create-from-template.sh}"
@@ -165,7 +165,7 @@ mtx_create_ensure_template_available() {
   fi
 
   echoc yellow "No local template at: $local_path"
-  echoc dim "Expected a sibling of MTX: $ws/$repo (clone or copy template-basic there), or set MTX_WORKSPACE_ROOT."
+  echoc dim "Expected a sibling of MTX: $ws/$repo (clone the template repo there, or symlink template-org → template-basic during migration), or set MTX_WORKSPACE_ROOT."
   if ! command -v git &>/dev/null; then
     warn "git is required to fetch template from $url"
     exit 1
@@ -739,7 +739,7 @@ mtx_create_template_from_payload_run() {
 
   WORKSPACE_ROOT="${MTX_WORKSPACE_ROOT:-$(cd "$MTX_ROOT/.." && pwd)}"
   GITHUB_ORG="${MTX_GITHUB_ORG:-Meanwhile-Together}"
-  export TEMPLATE_REPO="${MTX_PAYLOAD_TEMPLATE_REPO:-template-basic}"
+  export TEMPLATE_REPO="${MTX_PAYLOAD_TEMPLATE_REPO:-template-payload}"
 
   echoc cyan "Create template-* repo from current payload tree"
   echoc dim "Payload root: $PAYLOAD_ROOT"
@@ -897,7 +897,7 @@ mtx_create_from_template_run() {
       rm -rf "$REPO_PATH/.git"
     else
       if ! git clone --depth 1 "$TEMPLATE_URL" "$REPO_PATH"; then
-        warn "Template clone failed. Check local template '$LOCAL_TEMPLATE_PATH' or remote '$TEMPLATE_URL'."
+        warn "Template clone failed. Check local template '$LOCAL_TEMPLATE_PATH' or remote '$TEMPLATE_URL' (org default: template-org; payload default: template-payload — see docs/MTX_SCAFFOLDING_MODEL.md)."
         exit 1
       fi
     fi

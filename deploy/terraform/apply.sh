@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# MTX terraform apply: run from project root (wrapper sets cwd); use project's terraform dir
+# MTX terraform apply: PROJECT_ROOT = tree with config/app.json (normatively org-* host); terraform runs in $PROJECT_ROOT/terraform/
 desc="Apply Terraform (Railway etc.); deploy unified app service"
 set -e
 
-# Directory where this script lives (MTX/terraform); use for sourcing subroutines, not project's terraform
+# Directory where this script lives (MTX/deploy/terraform); use for sourcing subroutines, not project's terraform
 APPLY_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-MTX_ROOT="$(cd "$APPLY_SCRIPT_DIR/.." && pwd)"
+MTX_ROOT="$(cd "$APPLY_SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=../includes/prepare-env.sh
 source "$MTX_ROOT/includes/prepare-env.sh"
 
@@ -154,7 +154,7 @@ mtx_print_network_help() {
     echo "Please check your network and DNS, then run the same command again."
 }
 
-# Subroutine: ensure Railway public domain (source from MTX/terraform, not project dir)
+# Subroutine: ensure Railway public domain (source from MTX/deploy/terraform, not project dir)
 # shellcheck source=ensure-railway-domain.sh
 [ -f "$APPLY_SCRIPT_DIR/ensure-railway-domain.sh" ] && source "$APPLY_SCRIPT_DIR/ensure-railway-domain.sh"
 
@@ -609,43 +609,14 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             echo -e "${BLUE}ℹ️  MTX_SKIP_BUILD=1 — skipping build (use mtx build server if needed)${NC}"
             echo ""
         else
-            if [ -f "$MTX_ROOT/build.sh" ]; then
-                bash "$MTX_ROOT/build.sh" server || {
-                    echo -e "${RED}❌ Build failed${NC}"
-                    exit 1
-                }
-            else
-                if [ -f "$PROJECT_ROOT/scripts/prepare-railway-artifact.sh" ] && [ -f "$PROJECT_ROOT/scripts/generate-railway-deploy-manifest.sh" ]; then
-                    echo -e "${BLUE}🔨 Building Railway deploy bundle (npm run prepare:railway)...${NC}"
-                    npm run prepare:railway || {
-                        echo -e "${RED}❌ prepare:railway failed${NC}"
-                        exit 1
-                    }
-                    echo -e "${GREEN}✅ prepare:railway complete${NC}"
-                else
-                    if [ ! -f "node_modules/.bin/prisma" ] && [ -f "package.json" ]; then
-                        echo -e "${BLUE}ℹ️  Prisma/dependencies not found, running npm install...${NC}"
-                        NPM_INSTALL_LOG="/tmp/mtx-npm-install-$$.log"
-                        if ! npm install 2>&1 | tee "$NPM_INSTALL_LOG"; then
-                            echo -e "${RED}❌ npm install failed${NC}"
-                            if [ -f "$NPM_INSTALL_LOG" ] && mtx_output_looks_like_network_problem "$(cat "$NPM_INSTALL_LOG")"; then
-                                echo ""
-                                mtx_print_network_help
-                            fi
-                            rm -f "$NPM_INSTALL_LOG"
-                            exit 1
-                        fi
-                        rm -f "$NPM_INSTALL_LOG"
-                        echo ""
-                    fi
-                    echo -e "${BLUE}🔨 Building project...${NC}"
-                    npm run build:server || {
-                        echo -e "${RED}❌ Build failed${NC}"
-                        exit 1
-                    }
-                    echo -e "${GREEN}✅ Build complete${NC}"
-                fi
+            if [ ! -f "$MTX_ROOT/build.sh" ]; then
+                echo -e "${RED}❌ MTX build.sh missing at $MTX_ROOT/build.sh (incomplete MTX install?)${NC}" >&2
+                exit 1
             fi
+            bash "$MTX_ROOT/build.sh" server || {
+                echo -e "${RED}❌ Build failed${NC}"
+                exit 1
+            }
             echo ""
         fi
         

@@ -5,6 +5,8 @@ MTX_WORKSPACE_REPOS=(
   MTX
   project-bridge
   template-basic
+  template-org
+  template-payload
   org-sandbox
   payload-admin
   payload-client-portal
