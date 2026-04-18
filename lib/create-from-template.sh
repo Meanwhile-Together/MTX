@@ -11,7 +11,7 @@
 #   MTX_ORG_APP_SLUG, MTX_ORG_OWNER, MTX_ORG_VERSION, MTX_ORG_DEV_PORT, MTX_ORG_DEV_URL, MTX_ORG_STAGING_PORT,
 #   MTX_ORG_STAGING_URL, MTX_ORG_PROD_PORT, MTX_ORG_PROD_URL, MTX_ORG_DEPLOY_PROJECT_ID, MTX_ORG_SERVER_PORT,
 #   MTX_ORG_PROJECT_ROOT, MTX_ORG_STATE_DIR (secrets stay in backend.example.json / .env — not prompted).
-# Default clone sources: template-payload (`mtx create payload`), template-org (`mtx create org`). Override with MTX_PAYLOAD_TEMPLATE_REPO / MTX_ORG_TEMPLATE_REPO. MTX_TEMPLATE_SOURCE_REPO is documented for pointing `mtx create payload` at a custom template-* snapshot.
+# Default clone sources: template-payload (`mtx create payload`), template-basic for org (`mtx create org` via create/org.sh until template-org exists on GitHub). Override with MTX_PAYLOAD_TEMPLATE_REPO / MTX_ORG_TEMPLATE_REPO. MTX_TEMPLATE_SOURCE_REPO is documented for pointing `mtx create payload` at a custom template-* snapshot.
 # With gh: new repos use `gh repo create org/repo --source=. --remote=origin --push`; existing repos get origin + git push.
 
 : "${MTX_ROOT:?Set MTX_ROOT to the MTX repository root before sourcing lib/create-from-template.sh}"
@@ -897,7 +897,7 @@ mtx_create_from_template_run() {
       rm -rf "$REPO_PATH/.git"
     else
       if ! git clone --depth 1 "$TEMPLATE_URL" "$REPO_PATH"; then
-        warn "Template clone failed. Check local template '$LOCAL_TEMPLATE_PATH' or remote '$TEMPLATE_URL' (org default: template-org; payload default: template-payload — see docs/MTX_SCAFFOLDING_MODEL.md)."
+        warn "Template clone failed. Check local template '$LOCAL_TEMPLATE_PATH' or remote '$TEMPLATE_URL' (org default: template-basic unless MTX_ORG_TEMPLATE_REPO is set; payload default: template-payload — see docs/MTX_SCAFFOLDING_MODEL.md)."
         exit 1
       fi
     fi

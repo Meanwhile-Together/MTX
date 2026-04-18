@@ -36,9 +36,17 @@ for repo in "${REPOS[@]}"; do
 done
 echo "{\"folders\":[$folders_json]}" > "$WORKSPACE_FILE"
 
+clone_failures=0
 for repo in "${REPOS[@]}"; do
   echo "🔨 clone $repo..." >&2
-  git clone "https://github.com/${GITHUB_ORG}/${repo}.git" "$repo"
+  if ! git clone "https://github.com/${GITHUB_ORG}/${repo}.git" "$repo"; then
+    echo "⚠️  clone failed (private, renamed, or not on GitHub yet): $repo — add manually if needed." >&2
+    clone_failures=$((clone_failures + 1))
+  fi
 done
 
-echo "✅ Done. Open $WORKSPACE_FILE in VS Code." >&2
+if [ "$clone_failures" -gt 0 ]; then
+  echo "✅ Workspace file written; $clone_failures repo(s) failed to clone. Open $WORKSPACE_FILE in VS Code." >&2
+else
+  echo "✅ Done. Open $WORKSPACE_FILE in VS Code." >&2
+fi
