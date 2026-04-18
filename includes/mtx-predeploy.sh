@@ -21,6 +21,8 @@ mtx_predeploy_normalize_html_file() {
   local tmp
   tmp="$(mktemp)"
   mtx_predeploy__write_sed "$tmp" \
+    -e 's|href"\./|href="./|g' \
+    -e 's|src"\./|src="./|g' \
     -e 's|="/assets/|"./assets/|g' \
     -e "s|='/assets/|'./assets/|g" \
     -e 's|="/vite.svg|"./vite.svg|g' \
