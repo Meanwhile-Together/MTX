@@ -35,6 +35,10 @@ Summary of changes from the MTX repository git history. Use this for context whe
 
 - **`mtx clean`** (`clean.sh` + **`clean/`**, shared **`clean/_lib.sh`**) is the supported entry for removing build artifacts (smart org vs payload; **`all`** uses workspace root from precond). **`mtx sys clean`** is deprecated (still forwards with a warning).
 
+**Org Railway bundle**
+
+- Path payload vendoring (**`lib/vendor-payloads-from-config.sh`**, bash + **`jq`**) lives in **MTX** and runs from **`mtx build`** before org **`npm run prepare:railway`**; org **`scripts/prepare-railway-artifact.sh`** no longer duplicates it.
+
 **Compile and run scripts**
 
 - Removed deprecated android-debug.sh, menu.sh, rebrand.sh.

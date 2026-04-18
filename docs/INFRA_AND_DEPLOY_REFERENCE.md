@@ -11,6 +11,7 @@ Single reference for infra and deployment across **MTX** (wrapper/CLI), **org ho
 | What | Repo / path | Notes |
 |------|-------------|--------|
 | **Deploy entry (CLI)** | MTX `deploy.sh` | Menu (staging/production), then always runs **`$MTX_ROOT/deploy/terraform/apply.sh`** (MTX’s copy — never the project tree’s `terraform/apply.sh`) |
+| **Path payload vendoring** | MTX **`lib/vendor-payloads-from-config.sh`** (bash + **`jq`**) | Run from **`mtx build`** / **`mtx deploy`** (before org **`npm run prepare:railway`**) when the org uses **`scripts/prepare-railway-artifact.sh`**: builds local **`apps[].source.path`** trees, copies into **`./payloads/<slug>/`**, writes **`config/server.json.railway`**. Env: **`MTX_SKIP_PAYLOAD_VENDOR`**, **`MTX_VENDOR_FAIL_ON_ERROR`**. |
 | **Apply + deploy logic** | MTX `deploy/terraform/apply.sh` + **`$PROJECT_ROOT/terraform/`** | **`deploy.sh`** invokes **only** MTX’s `deploy/terraform/apply.sh`. That script resolves **PROJECT_ROOT** to the directory containing **`config/app.json`** (normatively an **`org-*`** host; a **project-bridge** checkout may still satisfy that during migration) and runs Terraform from **`$PROJECT_ROOT/terraform/`**. Reference **`*.tf`** in **project-bridge** is the upstream template orgs vendor or mirror. A **copy** of `apply.sh` may exist under a project tree for direct runs; keep behavior aligned with MTX’s script. See [MTX_DEPLOY_CONTRACT.md](MTX_DEPLOY_CONTRACT.md). |
 | **Terraform (IaC)** | **Org host** `terraform/` (often derived from **project-bridge**) | `main.tf`, `variables.tf`, `outputs.tf`, `backend.tf`, `modules/railway-owner`, `modules/railway` — **MTX has no main.tf**; **project-bridge** ships the canonical module tree for copying/vendoring |
 | **Config (app/deploy)** | **Deploy root** (`org-*` or transitional checkout) | `config/app.json`, `config/deploy.json` |
@@ -52,7 +53,7 @@ Single reference for infra and deployment across **MTX** (wrapper/CLI), **org ho
 7. **Deploy code (after successful apply)**
    - Read outputs: `railway_app_service_id_staging`/`_production`, `railway_backend_staging_service_id`/`railway_backend_production_service_id`, `railway_project_id`.
    - Ensure env exists (staging/production); prompt for project tokens if missing.
-   - **App:** Link `.railway` to app service, `npm run build:server`, `railway up` with **project token** for chosen env.
+   - **App:** Link `.railway` to app service, **`mtx build server`** (org template: primes project-bridge, runs **`lib/vendor-payloads-from-config.cjs`**, then **`npm run prepare:railway`**), `railway up` with **project token** for chosen env.
    - **Backend:** Swap root `railway.json` to `targets/backend-server/railway.json`, `npm run build:backend-server`, `railway link` to backend service, `railway up` with same project token; then restore root `railway.json` and `.railway` link.
    - On backend 404/upload failure: optional self-heal (state rm backend_${env}, touch `.railway-backend-invalidated`, re-run apply).
 

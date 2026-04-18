@@ -5,12 +5,14 @@
 # npm install and npm run db:generate (matches org-build-server expectations).
 # Org repos with scripts/prepare-railway-artifact.sh: run npm run prepare:railway instead of
 # build:server — produces targets/server/dist, npm-packs, and deploy manifests for Railway.
+# Path payloads: MTX runs lib/vendor-payloads-from-config.sh on the org root before prepare:railway.
 # Usage: mtx build [server|backend|all]   (default: all)
 desc="Build server artifacts (no deploy); optional: server, backend, or all"
 nobanner=1
 set -e
 
 MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+export MTX_ROOT
 
 # Match deploy/terraform/apply.sh PROJECT_ROOT resolution
 PROJECT_ROOT=""
@@ -35,7 +37,7 @@ case "$TARGET" in
   all|a|'') TARGET=all ;;
   -h|--help|help)
     echo "Usage: mtx build [server|backend|all]"
-    echo "  server   — npm run build:server, or npm run prepare:railway when org Railway scripts exist"
+    echo "  server   — npm run build:server, or prepare:railway when org Railway scripts exist (path payloads: MTX lib/vendor-payloads-from-config.sh runs first)"
     echo "  backend  — npm run build:backend-server (or same prepare:railway when unified)"
     echo "  all      — both (default; org repos run one unified build if backend aliases to server)"
     echo "  Org repos: project-bridge is primed with npm install + db:generate first (sibling, vendor/, or PROJECT_BRIDGE_ROOT)."
@@ -95,6 +97,15 @@ mtx_org_use_prepare_railway() {
 
 run_prepare_railway_bundle() {
   echo "🔨 Building Railway deploy bundle (npm run prepare:railway)..." >&2
+  # Path payloads: vendor + build from config/server.json (canonical MTX lib; do not duplicate in org scripts/).
+  if [ "${MTX_SKIP_PAYLOAD_VENDOR:-}" != "1" ] && [ -f "$PROJECT_ROOT/config/server.json" ]; then
+    if [ ! -f "$MTX_ROOT/lib/vendor-payloads-from-config.sh" ]; then
+      echo "❌ MTX lib missing: $MTX_ROOT/lib/vendor-payloads-from-config.sh" >&2
+      exit 1
+    fi
+    echo "==> mtx build: vendor path payloads from config/server.json (MTX lib)" >&2
+    bash "$MTX_ROOT/lib/vendor-payloads-from-config.sh" "$PROJECT_ROOT"
+  fi
   npm run prepare:railway || { echo "❌ prepare:railway failed" >&2; exit 1; }
   echo "✅ prepare:railway complete" >&2
   # After payload vendor/build: portable MTX pre-deploy (org hook + HTML/asset fixes). See includes/mtx-predeploy.sh.
