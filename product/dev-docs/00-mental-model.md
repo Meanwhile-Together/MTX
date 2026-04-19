@@ -7,7 +7,7 @@ You use them together, but for different jobs.
 
 **MTX** is the developer operating surface. It is how you run the workflows that shape and ship those experiences.
 
-**Payloads** are the actual user-facing app experiences inside that system (including **admin** and **org** surfaces—they are still payloads; see [MTX_SCAFFOLDING_MODEL.md](../../docs/MTX_SCAFFOLDING_MODEL.md)).
+**Payloads** are the actual user-facing app experiences inside that system (including **admin** and **org** surfaces—they are still payloads; see [MTX_SCAFFOLDING_MODEL.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_SCAFFOLDING_MODEL.md)).
 
 ## How they connect
 

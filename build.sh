@@ -110,7 +110,7 @@ run_prepare_railway_bundle() {
   fi
   npm run prepare:railway || { echo "❌ prepare:railway failed" >&2; exit 1; }
   echo "✅ prepare:railway complete" >&2
-  # After payload vendor/build: portable MTX pre-deploy (org hook + HTML/asset fixes). See includes/mtx-predeploy.sh.
+  # After payload vendor/build: portable MTX pre-deploy (org hook + root-path HTML/Vite fixes). See includes/mtx-predeploy.sh + fixes/root-paths-lib.sh.
   if [ -f "$MTX_ROOT/includes/mtx-predeploy.sh" ]; then
     # shellcheck source=includes/mtx-predeploy.sh
     source "$MTX_ROOT/includes/mtx-predeploy.sh"

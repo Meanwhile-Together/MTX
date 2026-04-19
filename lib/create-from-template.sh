@@ -2,8 +2,11 @@
 # Loaded only from mtx create <payload|org|template> entrypoints (create/*.sh or create.sh legacy path) — NOT from includes/ (mtx auto-sources includes/*.sh at boot).
 # Callers must set MTX_ROOT to the MTX repo root before sourcing this file.
 # Callers set: MTX_REPO_PREFIX, MTX_TEMPLATE_REPO, MTX_KIND_LABEL, MTX_CREATE_CMD, MTX_CREATE_VARIANT (org|payload)
-# Repo prefixes: payload-, org-, template- (`template-*` = forkable snapshots from `mtx create template`; see docs/MTX_SCAFFOLDING_MODEL.md).
+# Repo prefixes: payload-, org-, template- (`template-*` = forkable snapshots from `mtx create template`; see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_SCAFFOLDING_MODEL.md).
 # Optional: MTX_WORKSPACE_ROOT, MTX_GITHUB_ORG, MTX_CREATE_SKIP_GITHUB=1 (local git + snippet only; no gh).
+# Standalone migration (payload flow): disabled when cwd is under workspace sibling `payload-*` or `org-*`
+# (avoids migrating the wrong app when `mtx create payload` is run from inside another repo). Override with
+# MTX_CREATE_ALLOW_STANDALONE_MIGRATE=1. Each successful apply writes `.mtx-from-template` for tooling.
 # Optional CLI name: mtx_create_from_template_run "$@" — if any args are given, they are joined with
 # spaces (trimmed) and used as the display name; otherwise the script prompts interactively.
 # Org (org-*): prompts for repo name, app slug, owner, URLs, deploy projectId, server.json paths (defaults always shown).
@@ -27,6 +30,62 @@ declare -F warn >/dev/null || warn() { echo "[WARN] $*" >&2; }
 declare -F error >/dev/null || error() { echo "[ERROR] $*" >&2; }
 declare -F success >/dev/null || success() { echo "[SUCCESS] $*"; }
 declare -F mtx_run >/dev/null || mtx_run() { "$@"; }
+
+# Export: MTX_CREATE_RUN_CONTEXT — workspace_root | mtx_repo | org_tree | flat_payload_app | other
+mtx_create_classify_run_context() {
+  local cwd="$1" ws="$2" mtx_r="$3"
+  if ! cwd="$(cd "$cwd" && pwd -P 2>/dev/null)"; then
+    MTX_CREATE_RUN_CONTEXT="other"
+    return 0
+  fi
+  ws="$(cd "$ws" && pwd -P)"
+  mtx_r="$(cd "$mtx_r" && pwd -P)"
+  if [ "$cwd" = "$ws" ]; then
+    MTX_CREATE_RUN_CONTEXT="workspace_root"
+  elif [ "$cwd" = "$mtx_r" ]; then
+    MTX_CREATE_RUN_CONTEXT="mtx_repo"
+  elif [[ "$cwd" == "$ws"/org-* ]]; then
+    MTX_CREATE_RUN_CONTEXT="org_tree"
+  elif [[ "$cwd" == "$ws"/payload-* ]]; then
+    MTX_CREATE_RUN_CONTEXT="flat_payload_app"
+  else
+    MTX_CREATE_RUN_CONTEXT="other"
+  fi
+}
+
+# Return 0 if standalone→payloads/<slug> migration is allowed; 1 to skip (safe default inside workspace org/payload trees).
+mtx_create_payload_migrate_standalone_ok() {
+  local cwd="$1" ws="$2"
+  case "${MTX_CREATE_ALLOW_STANDALONE_MIGRATE:-}" in
+    1 | true | yes) return 0 ;;
+  esac
+  cwd="$(cd "$cwd" && pwd -P)"
+  ws="$(cd "$ws" && pwd -P)"
+  case "$cwd" in
+    "$ws"/payload-* | "$ws"/org-*)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+mtx_create_write_scaffold_marker() {
+  local repo_path="$1" ts ctx
+  repo_path="$(cd "$repo_path" && pwd -P)"
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%Y-%m-%dT%H:%MZ)"
+  ctx="${MTX_CREATE_RUN_CONTEXT:-}"
+  cat > "$repo_path/.mtx-from-template" <<EOF
+# MTX scaffold marker — mtx create applied template/snapshot metadata here. Importers may treat absence as
+# "never bootstrapped by MTX" and presence as "first-pass naming/README/package updates already applied".
+MTX_SCAFFOLD=1
+MTX_SCAFFOLD_AT=$ts
+MTX_REPO_NAME=$REPO_NAME
+MTX_TEMPLATE_REPO=$TEMPLATE_REPO
+MTX_CREATE_CMD=$MTX_CREATE_CMD
+MTX_REPO_PREFIX=$MTX_REPO_PREFIX
+MTX_CREATE_RUN_CONTEXT=$ctx
+EOF
+}
 
 mtx_detect_standalone_react_root() {
   local root="$1"
@@ -644,6 +703,7 @@ mtx_create_apply_metadata_and_github_publish() {
 
   echoc cyan "Applying package name and metadata..."
   update_repo_metadata_from_template "$REPO_PATH"
+  mtx_create_write_scaffold_marker "$REPO_PATH"
   echo ""
 
   if [ "${MTX_CREATE_SKIP_GITHUB:-}" = "1" ]; then
@@ -784,6 +844,8 @@ mtx_create_template_from_payload_run() {
   echoc cyan "Workspace: $WORKSPACE_ROOT"
   echoc cyan "New template repo: $(color yellow "$REPO_NAME")"
   echoc dim "Command: $MTX_CREATE_CMD"
+  mtx_create_classify_run_context "$PAYLOAD_ROOT" "$WORKSPACE_ROOT" "$MTX_ROOT"
+  echoc dim "Run context: ${MTX_CREATE_RUN_CONTEXT:-unknown} (cwd: $PAYLOAD_ROOT)"
   echo ""
 
   if [ -d "$REPO_PATH" ] && [ -f "$REPO_PATH/package.json" ]; then
@@ -815,10 +877,13 @@ mtx_create_from_template_run() {
 
   CREATE_CWD="$(pwd -P)"
   WORKSPACE_ROOT="${MTX_WORKSPACE_ROOT:-$(cd "$MTX_ROOT/.." && pwd)}"
+  WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd -P)"
   GITHUB_ORG="${MTX_GITHUB_ORG:-Meanwhile-Together}"
   TEMPLATE_REPO="$MTX_TEMPLATE_REPO"
   TEMPLATE_URL="https://github.com/${GITHUB_ORG}/${TEMPLATE_REPO}.git"
   LOCAL_TEMPLATE_PATH="$WORKSPACE_ROOT/$TEMPLATE_REPO"
+
+  mtx_create_classify_run_context "$CREATE_CWD" "$WORKSPACE_ROOT" "$MTX_ROOT"
 
   if ! command -v git &>/dev/null; then
     warn "git is required for mtx create (template clone and commits)."
@@ -867,10 +932,16 @@ mtx_create_from_template_run() {
     [ -z "$APP_SLUG" ] && APP_SLUG="app"
     REPO_NAME=$(ensure_mtx_repo_prefix "$APP_SLUG" "$MTX_REPO_PREFIX")
     if [ "${MTX_CREATE_VARIANT:-}" = "payload" ] && mtx_detect_standalone_react_root "$CREATE_CWD"; then
-      MIGRATE_STANDALONE=1
-      echoc cyan "Detected standalone React app root at $CREATE_CWD"
-      echoc dim "Will migrate app into payloads/$APP_SLUG in the new payload repo."
-      echo ""
+      if mtx_create_payload_migrate_standalone_ok "$CREATE_CWD" "$WORKSPACE_ROOT"; then
+        MIGRATE_STANDALONE=1
+        echoc cyan "Detected standalone React app root at $CREATE_CWD"
+        echoc dim "Will migrate app into payloads/$APP_SLUG in the new payload repo."
+        echo ""
+      else
+        echoc yellow "Standalone React app root detected at $CREATE_CWD, but migration into payloads/$APP_SLUG is disabled (cwd is under workspace payload-* or org-*)."
+        echoc dim "The new repo is created from $TEMPLATE_REPO only. To force migration from this directory, set MTX_CREATE_ALLOW_STANDALONE_MIGRATE=1."
+        echo ""
+      fi
     fi
   fi
   REPO_PATH="$WORKSPACE_ROOT/$REPO_NAME"
@@ -880,6 +951,7 @@ mtx_create_from_template_run() {
   echoc cyan "Template: $TEMPLATE_REPO"
   echoc cyan "New repo: $(color yellow "$REPO_NAME")"
   echoc dim "Command: $MTX_CREATE_CMD"
+  echoc dim "Run context: ${MTX_CREATE_RUN_CONTEXT:-unknown} (cwd: $CREATE_CWD)"
   echo ""
 
   if [ -d "$REPO_PATH" ]; then
@@ -904,7 +976,7 @@ mtx_create_from_template_run() {
       rm -rf "$REPO_PATH/.git"
     else
       if ! git clone --depth 1 "$TEMPLATE_URL" "$REPO_PATH"; then
-        warn "Template clone failed. Check local template '$LOCAL_TEMPLATE_PATH' or remote '$TEMPLATE_URL' (org default: template-basic unless MTX_ORG_TEMPLATE_REPO is set; payload default: template-payload — see docs/MTX_SCAFFOLDING_MODEL.md)."
+        warn "Template clone failed. Check local template '$LOCAL_TEMPLATE_PATH' or remote '$TEMPLATE_URL' (org default: template-basic unless MTX_ORG_TEMPLATE_REPO is set; payload default: template-payload — see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_SCAFFOLDING_MODEL.md)."
         exit 1
       fi
     fi

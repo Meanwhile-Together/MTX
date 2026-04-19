@@ -18,8 +18,22 @@ SERVER_JSON="$CONFIG_DIR/server.json"
 RAILWAY_JSON="$CONFIG_DIR/server.json.railway"
 
 MTX_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+MTX_ROOT="$(cd "$MTX_LIB_DIR/.." && pwd)"
 # shellcheck source=mtx-vendor-pinned.sh
 [ -f "$MTX_LIB_DIR/mtx-vendor-pinned.sh" ] && source "$MTX_LIB_DIR/mtx-vendor-pinned.sh"
+
+mtx_vendor_normalize_payload_dir() {
+  local dir="$1"
+  [ -d "$dir" ] || return 0
+  [ -f "$MTX_ROOT/includes/mtx-predeploy.sh" ] || return 0
+  if [ "${MTX_VENDOR_PREDEPLOY_LOADED:-}" != 1 ]; then
+    # Loads fixes/root-paths-lib.sh (HTML / Vite base normalization for path-prefixed mounts).
+    # shellcheck disable=SC1091
+    source "$MTX_ROOT/includes/mtx-predeploy.sh"
+    MTX_VENDOR_PREDEPLOY_LOADED=1
+  fi
+  mtx_predeploy_normalize_payload_dir "$dir" || return 1
+}
 
 mtx_vendor_clip() {
   local s="$1" max="$2"
@@ -225,7 +239,9 @@ for ((i = 0; i < n; i++)); do
   esac
   if [ "$in_repo" = true ]; then
     echo "[vendor-payloads] build in-repo payload $build_dir"
-    if ! mtx_vendor_run_build_or_banner "$build_dir" "in-repo \"$entry_id\""; then
+    if mtx_vendor_run_build_or_banner "$build_dir" "in-repo \"$entry_id\""; then
+      mtx_vendor_normalize_payload_dir "$build_dir" || true
+    else
       vendor_build_failures=$((vendor_build_failures + 1))
     fi
     continue
@@ -241,6 +257,7 @@ for ((i = 0; i < n; i++)); do
 
   mkdir -p "$(dirname "$dest")"
   rsync -a --delete --exclude node_modules --exclude .git "$resolved/" "$dest/"
+  mtx_vendor_normalize_payload_dir "$dest" || true
 
   rel_out="./payloads/$slug"
   TMP="$(mktemp)"

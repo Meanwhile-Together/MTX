@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Fetch origin and hard-reset each workspace sibling repo to match the remote tip (discards local commits and dirty trees).
 # Repo list: includes/workspace-repos.sh (same as mtx workspace). Override root: MTX_WORKSPACE_ROOT (default: parent of MTX).
-desc="Fetch and hard-reset all workspace repos to origin (main/master); discards local changes"
+# The MTX repo itself is skipped by default (it is the tool checkout, not an app payload); set MTX_PULL_INCLUDE_MTX=1 to include it.
+desc="Fetch and hard-reset workspace sibling repos to origin (skips MTX unless MTX_PULL_INCLUDE_MTX=1)"
 nobanner=1
 set -e
 
@@ -15,12 +16,13 @@ WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd)"
 case "${1:-}" in
   -h|--help|help)
     echo "Usage: mtx pull"
-    echo "  For each repo in the workspace list (see MTX/includes/workspace-repos.sh):"
+    echo "  For each repo in the workspace list (see MTX/includes/workspace-repos.sh), except MTX by default:"
     echo "    git fetch origin --prune"
     echo "    git checkout -B <branch> origin/<branch>   (default branch: origin/HEAD, else main, else master)"
     echo ""
     echo "  Workspace root: $WORKSPACE_ROOT (set MTX_WORKSPACE_ROOT to override)"
     echo "  Destructive: uncommitted work and unpushed commits in those repos are discarded."
+    echo "  MTX is skipped (tool repo). Include it: MTX_PULL_INCLUDE_MTX=1 mtx pull"
     exit 0
     ;;
 esac
@@ -52,6 +54,10 @@ mtx_pull_resolve_branch() {
 
 failures=0
 for repo in "${MTX_WORKSPACE_REPOS[@]}"; do
+  if [ "$repo" = "MTX" ] && [ "${MTX_PULL_INCLUDE_MTX:-}" != "1" ]; then
+    echo "⏭️  skip (MTX is the tool repo; use MTX_PULL_INCLUDE_MTX=1 to reset it too): $repo"
+    continue
+  fi
   path="$WORKSPACE_ROOT/$repo"
   if [ ! -d "$path" ]; then
     echo "⏭️  skip (missing): $repo"

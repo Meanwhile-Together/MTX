@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Normative: mtx create template … (see docs/MTX_COMMAND_SURFACE.md).
-# Run from a payload repo root: snapshots the current tree into a new template-* git repo. See docs/MTX_SCAFFOLDING_MODEL.md.
+# Normative: mtx create template … (see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_COMMAND_SURFACE.md).
+# Run from a payload repo root: snapshots the current tree into a new template-* git repo. See https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_SCAFFOLDING_MODEL.md.
 desc="Create a template-* repo by snapshotting the current payload directory (run from payload root; optional name arg)"
 nobanner=1
 set -e

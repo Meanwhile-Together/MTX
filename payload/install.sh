@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Canonical: mtx payload install — registers a payload on a host (see docs/MTX_COMMAND_SURFACE.md).
+# Canonical: mtx payload install — registers a payload on a host (see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_COMMAND_SURFACE.md).
 desc="Install a payload and register it in config/server.json (org or project-bridge host)"
 nobanner=1
 set -e

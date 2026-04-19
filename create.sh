@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Normative: mtx create <payload|org|template> … — see docs/MTX_COMMAND_SURFACE.md.
+# Normative: mtx create <payload|org|template> … — see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_COMMAND_SURFACE.md.
 # Optional name: `mtx create org My Org` / `mtx create payload foo` — args are the display name (joined if multiple words).
-# `mtx create template` → snapshot cwd payload into template-* (run from payload root; see docs/MTX_SCAFFOLDING_MODEL.md).
+# `mtx create template` → snapshot cwd payload into template-* (run from payload root; see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_SCAFFOLDING_MODEL.md).
 # Legacy: `mtx create` with no kind keyword still runs the payload flow (prefer `mtx create payload`).
 desc="Create payload-*, org-*, or template-* repos (mtx create <type>)"
 nobanner=1
@@ -35,7 +35,7 @@ case "${1:-}" in
 esac
 
 if [ -n "${1:-}" ]; then
-  warn "[MTX] Prefer explicit kind: mtx create payload … (see mtx help create / docs/MTX_COMMAND_SURFACE.md)" >&2
+  warn "[MTX] Prefer explicit kind: mtx create payload … (see mtx help create / https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_COMMAND_SURFACE.md)" >&2
 fi
 
 export MTX_CREATE_VARIANT="${MTX_CREATE_VARIANT:-payload}"

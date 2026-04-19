@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Payload host wiring: add a payload source to the current host and register apps[].
-# Canonical CLI: mtx payload install (see docs/MTX_COMMAND_SURFACE.md).
+# Canonical CLI: mtx payload install (see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_COMMAND_SURFACE.md).
 # Sourced by payload/install.sh; call mtx_install_payload_main "$@".
 
 mtx_install_payload_main() {

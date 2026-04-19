@@ -16,7 +16,7 @@ Documented friction points discovered during developer onboarding review. Each i
 
 **Confusion:** `mtx deploy`, `npm run deploy:staging`, direct `bash MTX/deploy.sh`, and `./terraform/apply.sh` are all valid ways to deploy. No single doc says "use this one."
 
-**Fix (open):** Establish and document one canonical developer-facing deploy entry point. The deploy contract doc (`MTX/docs/MTX_DEPLOY_CONTRACT.md`) defines `mtx deploy` as canonical, but this is not stated in either README or quickstart.
+**Fix (open):** Establish and document one canonical developer-facing deploy entry point. The deploy contract doc (`project-bridge/docs/MTX_DEPLOY_CONTRACT.md`) defines `mtx deploy` as canonical, but this is not stated in either README or quickstart.
 
 ---
 
@@ -38,7 +38,7 @@ Documented friction points discovered during developer onboarding review. Each i
 
 ## 5. README and getting-started examples reference nonexistent paths
 
-**Confusion:** MTX README uses `mtx do update` and `mtx git clean-branches` as examples but no `do/` or `git/` directories exist. `docs/getting-started.md` references `dev/run-electron.sh` but no `dev/` directory exists.
+**Confusion:** MTX README uses `mtx do update` and `mtx git clean-branches` as examples but no `do/` or `git/` directories exist. `project-bridge/docs/getting-started.md` references `dev/run-electron.sh` but no `dev/` directory exists.
 
 **Fix (open):** Update examples to match actual command paths in the current repo, or remove/label them as illustrative-only.
 

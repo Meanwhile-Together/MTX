@@ -21,13 +21,13 @@ The same doc structure exists in `project-bridge/product/dev-docs/`. Content is 
 
 ## Authoritative technical docs (deep detail)
 
-These live in the main `docs/` folders and go deeper than the developer-user docs above:
+These live in **project-bridge** `docs/` and go deeper than the developer-user docs above:
 
-- `MTX/docs/MTX_SCAFFOLDING_MODEL.md` — **`template-payload`** vs **`template-org`**, **`template-*`** snapshots, universal org, admin as payload.
-- `MTX/docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md` — Canonical architecture: payload = app, Project Bridge = central host, fork path optional.
-- `MTX/docs/MTX_DEPLOY_CONTRACT.md` — Deploy entry point contract.
-- `MTX/docs/INFRA_AND_DEPLOY_REFERENCE.md` — Tokens, config, Terraform, Railway, CI.
-- `MTX/docs/MISALIGNMENT.md` — Tracks legacy fork-first wording that needs updating.
+- `project-bridge/docs/MTX_SCAFFOLDING_MODEL.md` — **`template-payload`** vs **`template-org`**, **`template-*`** snapshots, universal org, admin as payload.
+- `project-bridge/docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md` — Canonical architecture: payload = app, Project Bridge = central host, fork path optional.
+- `project-bridge/docs/MTX_DEPLOY_CONTRACT.md` — Deploy entry point contract.
+- `project-bridge/docs/INFRA_AND_DEPLOY_REFERENCE.md` — Tokens, config, Terraform, Railway, CI.
+- `project-bridge/docs/MISALIGNMENT.md` — Tracks legacy fork-first wording that needs updating.
 - `project-bridge/docs/MTX_AND_PROJECT_B.md` — Relationship between MTX and project-bridge.
 - `project-bridge/docs/SERVER_CONFIG.md` — Server config and payload hosting detail.
 - `project-bridge/docs/PAYLOAD_CREATION_AND_SERVER_CONFIG.md` — Payload creation and registration detail.
@@ -40,4 +40,4 @@ These docs use **payload-first** language consistently:
 - Project Bridge = central host/runtime, not "the repo you fork."
 - MTX = developer operating surface, not a GUI dashboard.
 
-This aligns with `MTX/docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md` as the authoritative architecture narrative.
+This aligns with `project-bridge/docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md` as the authoritative architecture narrative.

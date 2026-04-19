@@ -258,13 +258,13 @@ First-time developer user trying to use MTX as the operating surface for Project
 
 ### Friction
 
-- **Cross-repo onboarding gap:** Neither README links to the other. A developer cloning both repos has no single path that says "you need both, here is what to do first." The relationship between MTX and project-bridge must be inferred from internal docs like `docs/MTX_AND_PROJECT_B.md` (project-bridge) and `docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md` (MTX).
+- **Cross-repo onboarding gap:** Neither README links to the other. A developer cloning both repos has no single path that says "you need both, here is what to do first." The relationship between MTX and project-bridge must be inferred from internal docs like `project-bridge/docs/MTX_AND_PROJECT_B.md` and `project-bridge/docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md`.
 - **Command ambiguity:** `mtx deploy` vs `npm run deploy:staging` vs direct `bash MTX/deploy.sh` vs `./terraform/apply.sh` are all valid entry points for deploy. No single doc says "use this one."
 - **Legacy terminology drift:** Banner and help output still reference "NNW" (`mtx.sh` printVersion, help options). The product is MTX but code-level naming has not fully transitioned.
 - **Hidden assumptions about repo layout:** `create.sh` defaults workspace root to parent directory (`cd ..`). `scripts/run-mtx-deploy.sh` in project-bridge expects MTX as a sibling at `../MTX`. These assumptions are not documented in primary surfaces.
-- **Docs discoverability:** The authoritative "how to use both repos" narrative lives in `docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md` and `docs/INFRA_AND_DEPLOY_REFERENCE.md`, but neither is linked from the README. `docs/getting-started.md` is about writing scripts for MTX, not about using MTX as a product consumer.
+- **Docs discoverability:** The authoritative "how to use both repos" narrative lives in `project-bridge/docs/MTX_CREATE_AND_DEPLOYMENT_FLOW.md` and `project-bridge/docs/INFRA_AND_DEPLOY_REFERENCE.md`, but neither is linked from the README. `project-bridge/docs/getting-started.md` is about writing scripts for MTX, not about using MTX as a product consumer.
 - **README examples reference nonexistent paths:** README uses `mtx do update` and `mtx git clean-branches` as examples but no `do/` or `git/` directories exist in the repo.
-- **`getting-started.md` references nonexistent paths:** Describes `dev/run-electron.sh` and `mtx dev run-electron` but no `dev/` directory exists.
+- **`project-bridge/docs/getting-started.md` references nonexistent paths:** Describes `dev/run-electron.sh` and `mtx dev run-electron` but no `dev/` directory exists.
 - **Hard reset on every command run:** Before sourcing a script, `mtx.sh` runs `git reset --hard origin/main` on the installed clone. Local edits are silently wiped.
 
 ### Severity
@@ -294,7 +294,7 @@ Trying to understand what MTX is and how to use it alongside project-bridge as a
 ### What was confusing or hard
 - **Relationship to project-bridge:** The README doesn't mention project-bridge at all. You have to read across multiple docs in both repos to understand they're companions.
 - **No single getting-started path:** After cloning both repos, the question is "what do I do now?" There's no walkthrough that says: clone both, cd here, run this, expect that.
-- **`docs/getting-started.md`** is useful for writing new MTX scripts but doesn't cover first-time setup as a user of the tool.
+- **`project-bridge/docs/getting-started.md`** is useful for writing new MTX scripts but doesn't cover first-time setup as a user of the tool.
 
 ### Suggestions
 1. Add a quick-start assuming the user has both MTX and project-bridge cloned side by side.

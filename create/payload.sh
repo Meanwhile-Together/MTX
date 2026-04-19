@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Normative: mtx create payload … (see docs/MTX_COMMAND_SURFACE.md).
-# New payload templates: `mtx create template` from a payload root snapshots into template-* (see docs/MTX_SCAFFOLDING_MODEL.md).
+# Normative: mtx create payload … (see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_COMMAND_SURFACE.md).
+# New payload templates: `mtx create template` from a payload root snapshots into template-* (see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_SCAFFOLDING_MODEL.md).
 desc="Create a payload-* repo from template-payload (GitHub + local); register in project-bridge apps[]"
 nobanner=1
 set -e
