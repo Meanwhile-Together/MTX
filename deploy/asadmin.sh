@@ -55,10 +55,16 @@ fi
 [ -n "${MASTER_CORS_ORIGINS:-}" ] && export MASTER_CORS_ORIGINS
 
 # Same flow as deploy.sh: choose env, run terraform apply, then deploy urls
+unset MTX_VENDOR_REVENDOR 2>/dev/null || true
 ENV=""
-case "${1:-}" in
-  staging|production) ENV="$1" ;;
-esac
+MTX_VENDOR_REVENDOR=0
+for _arg in "$@"; do
+  case "$_arg" in
+    staging|production) ENV="$_arg" ;;
+    --revendor) MTX_VENDOR_REVENDOR=1 ;;
+  esac
+done
+[ "$MTX_VENDOR_REVENDOR" = 1 ] && export MTX_VENDOR_REVENDOR=1
 if [ -z "$ENV" ]; then
   echo "Deploy as admin (master) – environment:"
   echo "  1) staging"

@@ -401,6 +401,9 @@ mtx_org_scaffold_deploy_config_surface() {
       rm -f "$repo_path/terraform/terraform.tfstate" "$repo_path/terraform"/terraform.tfstate.* 2>/dev/null || true
     fi
     echoc dim "terraform/ uses ../config/app.json — run terraform init on first mtx deploy."
+    if [ -f "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" ]; then
+      bash "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" --write-digest "$repo_path" || true
+    fi
   else
     echoc yellow "Sibling project-bridge/terraform not found at $tf_src — skipped. Place a project-bridge checkout next to this workspace to vendor terraform/."
   fi
@@ -415,7 +418,11 @@ mtx_org_scaffold_deploy_config_surface() {
       echo "terraform/.terraform/"
       echo "terraform/terraform.tfstate"
       echo "terraform/terraform.tfstate.*"
+      echo "terraform/.mtx-bridge-terraform.sha256"
     } >> "$gitignore"
+  fi
+  if [ -f "$gitignore" ] && ! grep -qF 'terraform/.mtx-bridge-terraform.sha256' "$gitignore" 2>/dev/null; then
+    printf '\n# MTX: bridge terraform fingerprint (local; do not commit)\nterraform/.mtx-bridge-terraform.sha256\n' >> "$gitignore"
   fi
   if [ -f "$gitignore" ] && ! grep -q 'targets/server/runtime' "$gitignore" 2>/dev/null; then
     {

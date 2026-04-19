@@ -21,6 +21,7 @@ case "$cmd" in
     echo "Usage: mtx deploy terraform <apply|destroy> [arguments...]"
     echo ""
     echo "  apply    — Full deploy pipeline (infra + build + railway up). Same engine as mtx deploy."
+    echo "            Optional: --revendor (force re-sync vendored terraform from project-bridge)."
     echo "  destroy  — Tear down Terraform-managed resources for an environment."
     exit 0
     ;;

@@ -17,6 +17,10 @@ CONFIG_DIR="$ROOT/config"
 SERVER_JSON="$CONFIG_DIR/server.json"
 RAILWAY_JSON="$CONFIG_DIR/server.json.railway"
 
+MTX_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=mtx-vendor-pinned.sh
+[ -f "$MTX_LIB_DIR/mtx-vendor-pinned.sh" ] && source "$MTX_LIB_DIR/mtx-vendor-pinned.sh"
+
 mtx_vendor_clip() {
   local s="$1" max="$2"
   s="$(echo "$s" | tr -s '[:space:]' ' ')"
@@ -130,6 +134,11 @@ fi
 if [ ! -f "$SERVER_JSON" ]; then
   echo "vendor-payloads-from-config: no config/server.json, skip"
   [ ! -f "$RAILWAY_JSON" ] || rm -f "$RAILWAY_JSON"
+  exit 0
+fi
+
+if declare -F mtx_vendor_is_pinned &>/dev/null && mtx_vendor_is_pinned "$ROOT" payloads; then
+  echo "vendor-payloads-from-config: payloads pinned in .mtx-vendor.pinned — skip" >&2
   exit 0
 fi
 

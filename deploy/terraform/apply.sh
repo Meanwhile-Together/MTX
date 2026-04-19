@@ -183,7 +183,7 @@ PLATFORMS=$(jq -r '.platform | join(", ")' "$PROJECT_ROOT/config/deploy.json")
 echo -e "📋 Platforms in deploy.json: ${GREEN}[$PLATFORMS]${NC}"
 echo ""
 
-# Parse script args: [environment] [--force-backend] (flag ignored; unified server has no separate backend service)
+# Parse script args: [environment] [--force-backend] [--revendor] (flag ignored; unified server has no separate backend service)
 ENVIRONMENT="staging"
 FORCE_BACKEND="${FORCE_BACKEND:-}"
 while [ $# -gt 0 ]; do
@@ -191,6 +191,10 @@ while [ $# -gt 0 ]; do
         --force-backend)
             echo -e "${CYAN}ℹ️  --force-backend is deprecated (single unified Railway service).${NC}"
             FORCE_BACKEND="1"
+            shift
+            ;;
+        --revendor)
+            export MTX_VENDOR_REVENDOR=1
             shift
             ;;
         *) ENVIRONMENT="$1"; shift ;;
@@ -366,6 +370,19 @@ else
     exit 1
 fi
 
+# Refresh vendored terraform/ from project-bridge before init/apply (prompt on drift when interactive; see .mtx-vendor.pinned).
+if [ -f "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" ]; then
+  VTF_MODE=prompt
+  if [ ! -t 0 ] || [ -n "${MTX_NONINTERACTIVE:-}" ]; then
+    VTF_MODE=auto
+  fi
+  [ -n "${MTX_DEPLOY_VENDOR_AUTO:-}" ] && VTF_MODE=auto
+  [ -n "${MTX_VENDOR_TERRAFORM_MODE:-}" ] && VTF_MODE="$MTX_VENDOR_TERRAFORM_MODE"
+  VTF_EXTRA=()
+  [ "${MTX_VENDOR_REVENDOR:-}" = 1 ] && VTF_EXTRA+=(--revendor)
+  bash "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" --sync-mode="$VTF_MODE" "${VTF_EXTRA[@]}" "$PROJECT_ROOT"
+fi
+
 echo ""
 echo -e "${BLUE}🚀 Running terraform apply...${NC}"
 echo ""
@@ -497,6 +514,11 @@ if [ $TERRAFORM_EXIT -ne 0 ]; then
     echo ""
     
     exit 1
+fi
+
+# Record project-bridge/terraform fingerprint so mtx build can re-vendor when canon drifts.
+if [ -f "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" ]; then
+  bash "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" --write-digest "$PROJECT_ROOT" || true
 fi
 
 # Output was already shown in real-time above, no need to echo again

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # MTX deploy: run from org host (or transitional) project root — menu (staging|production) then deploy/terraform/apply.sh
-desc="Interactive deploy menu (choose staging or production), then deploy/terraform apply"
+desc="Interactive deploy menu (choose staging or production), then deploy/terraform apply; optional --revendor"
 nobanner=1
 set -e
 
@@ -14,11 +14,17 @@ source "$MTX_ROOT/includes/prepare-env.sh"
 # All token/id-aware deploy flows require workspace prepare context.
 mtx_require_prepare_env "$(pwd)" || exit 1
 
-# Only use $1 as env if it's a valid environment; otherwise show menu (avoids "deploy" or other junk as env)
+# Accept staging|production and optional --revendor in any order
+unset MTX_VENDOR_REVENDOR 2>/dev/null || true
 ENV=""
-case "${1:-}" in
-  staging|production) ENV="$1" ;;
-esac
+MTX_VENDOR_REVENDOR=0
+for _arg in "$@"; do
+  case "$_arg" in
+    staging|production) ENV="$_arg" ;;
+    --revendor) MTX_VENDOR_REVENDOR=1 ;;
+  esac
+done
+[ "$MTX_VENDOR_REVENDOR" = 1 ] && export MTX_VENDOR_REVENDOR=1
 if [ -z "$ENV" ]; then
   echo "Deploy environment:"
   echo "  1) staging"

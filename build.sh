@@ -6,6 +6,8 @@
 # Org repos with scripts/prepare-railway-artifact.sh: run npm run prepare:railway instead of
 # build:server — produces targets/server/dist, npm-packs, and deploy manifests for Railway.
 # Path payloads: MTX runs lib/vendor-payloads-from-config.sh on the org root before prepare:railway.
+# Terraform: when terraform/main.tf exists, MTX runs lib/vendor-terraform-from-bridge.sh to re-sync
+# project-bridge/terraform if its fingerprint changed since the last mtx deploy digest.
 # Usage: mtx build [server|backend|all]   (default: all)
 desc="Build server artifacts (no deploy); optional: server, backend, or all"
 nobanner=1
@@ -140,6 +142,12 @@ run_backend_build() {
   npm run build:backend-server || { echo "❌ build:backend-server failed" >&2; exit 1; }
   echo "✅ build:backend-server complete" >&2
 }
+
+# When this tree has vendored terraform/, refresh from project-bridge if the canonical tree changed
+# since the last mtx deploy (see terraform/.mtx-bridge-terraform.sha256) or first run.
+if [ -f "$PROJECT_ROOT/terraform/main.tf" ] && [ -f "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" ]; then
+  bash "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" --sync-mode=auto "$PROJECT_ROOT"
+fi
 
 mtx_prime_org_project_bridge_if_needed
 
