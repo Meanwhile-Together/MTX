@@ -86,9 +86,9 @@ Terraform creates or adopts these; apply.sh discovers existing IDs and passes th
   - Outputs: project id, backend_staging_service_id, backend_production_service_id, db_service_id.
 
 - **modules/railway**
-  - `railway_service.app_staging` / `app_production` (count 0 if existing ID passed).
-  - service_name_base from app slug (e.g. `project-bridge`).
-  - Outputs: service_id_staging, service_id_production, etc.
+  - One `railway_service.app` named from app slug (`service_name_base`); **staging vs production** = Railway **environments**, not separate service names.
+  - Optional `railway_service_id` when adopting an existing service (count 0 if ID passed).
+  - Outputs: `service_id`, `service_name` (root re-exports `railway_app_service_id` and legacy `railway_app_service_id_staging` / `_production` aliases pointing at the same id).
 
 - **State:** `backend "local" { path = "terraform.tfstate" }` in project-bridge/terraform/backend.tf. Terraform Cloud block is commented out.
 
@@ -104,7 +104,7 @@ Terraform creates or adopts these; apply.sh discovers existing IDs and passes th
 
 ### 5.1 PostgreSQL and `DATABASE_URL` (each org app service)
 
-The **unified server** deploys to **`{slug}-staging`** / **`{slug}-production`** only. A separate backend service no longer auto-provides the database. **Each** of those app services needs **`DATABASE_URL`** (and **`JWT_SECRET`**) in Railway, usually by adding **PostgreSQL** in the same project and **referencing** its `DATABASE_URL` on the app service variables. See project-bridge **[RAILWAY_DATABASE.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/RAILWAY_DATABASE.md)** (Railway database templates, variable references, optional Terraform `railway_create_db_service` caveat).
+The **unified server** deploys to **one** Railway app service (name = app **slug**). Use **`--environment staging`** or **`production`** (and matching project tokens) so each Railway environment has its own **`DATABASE_URL`** / **`JWT_SECRET`**. Add **PostgreSQL** in the project and reference it on that service per environment. See project-bridge **[RAILWAY_DATABASE.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/RAILWAY_DATABASE.md)** (Railway database templates, variable references, optional Terraform `railway_create_db_service` caveat).
 
 ---
 

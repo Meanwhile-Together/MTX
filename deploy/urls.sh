@@ -63,11 +63,10 @@ NC='\033[0m'
 
 # Terraform outputs (run from project's terraform dir)
 cd "$TERRAFORM_DIR" || exit 1
+SERVICE_ID=$(terraform output -raw railway_app_service_id 2>/dev/null || echo "")
 if [ "$ENVIRONMENT" = "staging" ]; then
-  SERVICE_ID=$(terraform output -raw railway_app_service_id_staging 2>/dev/null || echo "")
   BACKEND_SERVICE_ID=$(terraform output -raw railway_backend_staging_service_id 2>/dev/null || echo "")
 else
-  SERVICE_ID=$(terraform output -raw railway_app_service_id_production 2>/dev/null || echo "")
   BACKEND_SERVICE_ID=$(terraform output -raw railway_backend_production_service_id 2>/dev/null || echo "")
 fi
 PROJECT_ID=$(terraform output -raw railway_project_id 2>/dev/null || echo "")
