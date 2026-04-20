@@ -152,7 +152,10 @@ if [ ! -f "$SERVER_JSON" ]; then
 fi
 
 if declare -F mtx_vendor_is_pinned &>/dev/null && mtx_vendor_is_pinned "$ROOT" payloads; then
-  echo "vendor-payloads-from-config: payloads pinned in .mtx-vendor.pinned — skip" >&2
+  if declare -F mtx_vendor_console_log_pinned &>/dev/null; then
+    mtx_vendor_console_log_pinned "$ROOT" payloads ""
+  fi
+  echo "vendor-payloads-from-config: payloads pinned — skipping path payload vendor (see line above)." >&2
   exit 0
 fi
 

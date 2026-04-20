@@ -79,11 +79,13 @@ if [ -z "$ENV" ]; then
 fi
 
 [ -n "${FORCE_BACKEND:-}" ] && export FORCE_BACKEND
+REV_ARGS=()
+[ "${MTX_VENDOR_REVENDOR:-}" = 1 ] && REV_ARGS+=(--revendor)
 # Run MTX's deploy/terraform/apply.sh (never the project's ./terraform/apply.sh)
 if [ -n "${FORCE_BACKEND:-}" ]; then
-  "$MTX_ROOT/deploy/terraform/apply.sh" --force-backend "$ENV"
+  "$MTX_ROOT/deploy/terraform/apply.sh" --force-backend "${REV_ARGS[@]}" "$ENV"
 else
-  "$MTX_ROOT/deploy/terraform/apply.sh" "$ENV"
+  "$MTX_ROOT/deploy/terraform/apply.sh" "${REV_ARGS[@]}" "$ENV"
 fi
 if [ -f "$MTX_ROOT/deploy/urls.sh" ]; then
   "$MTX_ROOT/deploy/urls.sh" "$ENV"

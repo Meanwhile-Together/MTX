@@ -8,12 +8,14 @@
 # (avoids migrating the wrong app when `mtx create payload` is run from inside another repo). Override with
 # MTX_CREATE_ALLOW_STANDALONE_MIGRATE=1. Each successful apply writes `.mtx-from-template` for tooling.
 # Optional CLI name: mtx_create_from_template_run "$@" — if any args are given, they are joined with
-# spaces (trimmed) and used as the display name; otherwise the script prompts interactively.
-# Org (org-*): prompts for repo name, app slug, owner, URLs, deploy projectId, server.json paths (defaults always shown).
-#   Non-interactive: MTX_CREATE_NONINTERACTIVE=1 or no TTY — use MTX_ORG_REPO_NAME, MTX_ORG_DISPLAY_NAME,
-#   MTX_ORG_APP_SLUG, MTX_ORG_OWNER, MTX_ORG_VERSION, MTX_ORG_DEV_PORT, MTX_ORG_DEV_URL, MTX_ORG_STAGING_PORT,
-#   MTX_ORG_STAGING_URL, MTX_ORG_PROD_PORT, MTX_ORG_PROD_URL, MTX_ORG_DEPLOY_PROJECT_ID, MTX_ORG_SERVER_PORT,
-#   MTX_ORG_PROJECT_ROOT, MTX_ORG_STATE_DIR (secrets stay in backend.example.json / .env — not prompted).
+# spaces (trimmed): payload flow uses that as the app display name; org flow uses it as the org repo basename (org- added).
+# Otherwise the script prompts interactively (org: one repo-name prompt; payload: display name).
+# Org (org-*): host config (app.json / server.json placeholders, URLs, owner) is filled from the org repo id and
+# MTX_GITHUB_ORG — no TTY prompts for those fields. Override any field with MTX_ORG_DISPLAY_NAME, MTX_ORG_APP_SLUG,
+# MTX_ORG_OWNER, MTX_ORG_VERSION, MTX_ORG_DEV_PORT, MTX_ORG_DEV_URL, MTX_ORG_STAGING_PORT, MTX_ORG_STAGING_URL,
+# MTX_ORG_PROD_PORT, MTX_ORG_PROD_URL, MTX_ORG_DEPLOY_PROJECT_ID, MTX_ORG_SERVER_PORT, MTX_ORG_PROJECT_ROOT,
+# MTX_ORG_STATE_DIR. Non-interactive org create: set MTX_ORG_REPO_NAME or pass basename on the command line.
+# Secrets stay in backend.example.json / .env — not prompted.
 # Default clone sources: template-payload (`mtx create payload`), template-basic for org (`mtx create org` via create/org.sh until template-org exists on GitHub). Override with MTX_PAYLOAD_TEMPLATE_REPO / MTX_ORG_TEMPLATE_REPO. MTX_TEMPLATE_SOURCE_REPO is documented for pointing `mtx create payload` at a custom template-* snapshot.
 # With gh: new repos use `gh repo create org/repo --source=. --remote=origin --push`; existing repos get origin + git push.
 
@@ -194,6 +196,10 @@ ensure_gh_auth_create() {
     return 1
   fi
   if gh auth status &>/dev/null; then
+    # gh repo create --push uses git over HTTPS; without this, git may not use gh's token → "Repository not found".
+    if ! gh auth setup-git &>/dev/null; then
+      echoc dim "gh auth setup-git skipped or failed (git may still work if credentials are configured)."
+    fi
     return 0
   fi
   # Non-interactive: never hang on browser login
@@ -209,6 +215,7 @@ ensure_gh_auth_create() {
       return 1
     fi
     if gh auth status &>/dev/null; then
+      gh auth setup-git &>/dev/null || true
       return 0
     fi
   done
@@ -298,15 +305,16 @@ mtx_create_print_server_json_snippet() {
   echo ""
 }
 
-# Interactive defaults for org host config (secrets never prompted — use backend.example.json / env).
-# Sets ORG_CFG_* and APP_SLUG. Non-interactive: MTX_ORG_* env vars or defaults only.
+# Org host config merged into template config files (secrets never prompted — use backend.example.json / env).
+# Sets ORG_CFG_* and APP_SLUG from the org repo id and workspace GitHub org. No TTY prompts — override with MTX_ORG_* only.
+# app.json name/slug/version are host placeholders until per-payload metadata exists (org repos are not a single app).
 mtx_org_collect_host_config() {
-  local repo_name="$1" display_name="$2" github_org="$3"
+  local repo_name="$1" github_org="$2"
   local default_slug
   default_slug=$(slugify "${repo_name#org-}")
   [ -z "$default_slug" ] && default_slug=$(slugify "$repo_name")
 
-  ORG_CFG_DISPLAY_NAME="${MTX_ORG_DISPLAY_NAME:-$display_name}"
+  ORG_CFG_DISPLAY_NAME="${MTX_ORG_DISPLAY_NAME:-$repo_name}"
   ORG_CFG_APP_SLUG="${MTX_ORG_APP_SLUG:-$default_slug}"
   ORG_CFG_OWNER=$(printf '%s' "${MTX_ORG_OWNER:-$github_org}" | tr '[:upper:]' '[:lower:]')
   ORG_CFG_VERSION="${MTX_ORG_VERSION:-1.0.0}"
@@ -321,38 +329,6 @@ mtx_org_collect_host_config() {
   ORG_CFG_PROJECT_ROOT="${MTX_ORG_PROJECT_ROOT:-..}"
   ORG_CFG_STATE_DIR="${MTX_ORG_STATE_DIR:-.state}"
 
-  if [ -t 0 ] && [ -t 1 ] && [ "${MTX_CREATE_NONINTERACTIVE:-}" != "1" ]; then
-    echo ""
-    echoc cyan "Org repo — host & deploy (Enter = keep default):"
-    local _v
-    read -rp "  Display name (app.json / UI) [$ORG_CFG_DISPLAY_NAME]: " _v
-    [ -n "$_v" ] && ORG_CFG_DISPLAY_NAME="$_v"
-    read -rp "  Slug (config + Railway) [$ORG_CFG_APP_SLUG]: " _v
-    [ -n "$_v" ] && ORG_CFG_APP_SLUG="$(slugify "$_v")"
-    [ -z "$ORG_CFG_APP_SLUG" ] && ORG_CFG_APP_SLUG="$default_slug"
-    read -rp "  Railway / workspace owner (GitHub org name) [$ORG_CFG_OWNER]: " _v
-    [ -n "$_v" ] && ORG_CFG_OWNER=$(printf '%s' "$_v" | tr '[:upper:]' '[:lower:]')
-    read -rp "  App version [$ORG_CFG_VERSION]: " _v
-    [ -n "$_v" ] && ORG_CFG_VERSION="$_v"
-    read -rp "  Development port [$ORG_CFG_DEV_PORT]: " _v
-    [ -n "$_v" ] && ORG_CFG_DEV_PORT="$_v"
-    read -rp "  Development URL [$ORG_CFG_DEV_URL]: " _v
-    [ -n "$_v" ] && ORG_CFG_DEV_URL="$_v"
-    read -rp "  Staging URL [$ORG_CFG_STAGING_URL]: " _v
-    [ -n "$_v" ] && ORG_CFG_STAGING_URL="$_v"
-    read -rp "  Production URL [$ORG_CFG_PROD_URL]: " _v
-    [ -n "$_v" ] && ORG_CFG_PROD_URL="$_v"
-    read -rp "  Railway deploy.json projectId (optional) [$ORG_CFG_DEPLOY_PROJECT_ID]: " _v
-    ORG_CFG_DEPLOY_PROJECT_ID="${_v:-$ORG_CFG_DEPLOY_PROJECT_ID}"
-    read -rp "  server.json — HTTP port [$ORG_CFG_SERVER_PORT]: " _v
-    [ -n "$_v" ] && ORG_CFG_SERVER_PORT="$_v"
-    read -rp "  server.json — projectRoot (unified server) [$ORG_CFG_PROJECT_ROOT]: " _v
-    [ -n "$_v" ] && ORG_CFG_PROJECT_ROOT="$_v"
-    read -rp "  server.json — stateDir [$ORG_CFG_STATE_DIR]: " _v
-    [ -n "$_v" ] && ORG_CFG_STATE_DIR="$_v"
-    echo ""
-  fi
-
   export ORG_CFG_DISPLAY_NAME ORG_CFG_APP_SLUG ORG_CFG_OWNER ORG_CFG_VERSION
   export ORG_CFG_DEV_PORT ORG_CFG_DEV_URL ORG_CFG_STAGING_PORT ORG_CFG_STAGING_URL ORG_CFG_PROD_PORT ORG_CFG_PROD_URL
   export ORG_CFG_DEPLOY_PROJECT_ID ORG_CFG_SERVER_PORT ORG_CFG_PROJECT_ROOT ORG_CFG_STATE_DIR
@@ -361,7 +337,7 @@ mtx_org_collect_host_config() {
 
 # Org repos: same config surface as project-bridge (from template) + terraform/ vendored from sibling project-bridge.
 mtx_org_scaffold_deploy_config_surface() {
-  local repo_path="$1" repo_name="$2" _display_name="$3" workspace_root="$4" github_org="$5"
+  local repo_path="$1" repo_name="$2" workspace_root="$3"
   local tf_src gitignore app_base deploy_base server_base
 
   if ! command -v jq &>/dev/null; then
@@ -766,7 +742,8 @@ mtx_create_apply_metadata_and_github_publish() {
       git push -u origin main 2>/dev/null || git push origin main
     fi
   ); then
-    warn "GitHub create or push failed. Check gh auth (gh auth login), org permissions, branch main, and write access to $GITHUB_ORG/$REPO_NAME."
+    warn "GitHub create or push failed. The repo may exist empty on GitHub while the local push failed."
+    echoc dim "Common fixes: gh auth setup-git (so git push uses your gh token); gh auth refresh; for SAML orgs authorize SSO at github.com/settings/applications; confirm write access to $GITHUB_ORG/$REPO_NAME."
     exit 1
   fi
 
@@ -900,7 +877,15 @@ mtx_create_from_template_run() {
   fi
   if [ -z "$NEW_APP_NAME" ]; then
     if mtx_create_is_org_flow; then
-      read -rp "$(echo -e "${bold:-}Organization / product display name:${reset:-} ")" NEW_APP_NAME
+      if [ "${MTX_CREATE_NONINTERACTIVE:-}" = "1" ] || [ ! -t 0 ] || [ ! -t 1 ]; then
+        NEW_APP_NAME="${MTX_ORG_REPO_NAME:-}"
+        if [ -z "$NEW_APP_NAME" ]; then
+          warn "Non-interactive org create needs MTX_ORG_REPO_NAME or a repository basename on the command line."
+          exit 1
+        fi
+      else
+        read -rp "$(echo -e "${bold:-}New org repository name (org-* on disk and GitHub; org- prefix optional):${reset:-} ")" NEW_APP_NAME
+      fi
     else
       read -rp "$(echo -e "${bold:-}App display name (new payload repo):${reset:-} ")" NEW_APP_NAME
     fi
@@ -911,22 +896,20 @@ mtx_create_from_template_run() {
       exit 0
     fi
   else
-    echoc dim "Display name (from command line): $(color yellow "$NEW_APP_NAME")"
+    if mtx_create_is_org_flow; then
+      echoc dim "Org repository basename (from command line): $(color yellow "$NEW_APP_NAME")"
+    else
+      echoc dim "Display name (from command line): $(color yellow "$NEW_APP_NAME")"
+    fi
     echo ""
   fi
 
   if mtx_create_is_org_flow; then
-    local default_org_repo
-    default_org_repo=$(ensure_mtx_repo_prefix "$(slugify "$NEW_APP_NAME")" "org-")
-    if [ -t 0 ] && [ -t 1 ] && [ "${MTX_CREATE_NONINTERACTIVE:-}" != "1" ]; then
-      read -rp "$(echo -e "${bold:-}Repository name (org-* folder + GitHub repo) [${default_org_repo}]:${reset:-} ")" _org_repo_in
-      _org_repo_in="${_org_repo_in:-$default_org_repo}"
-      REPO_NAME=$(ensure_mtx_repo_prefix "$(slugify "${_org_repo_in#org-}")" "org-")
-    else
-      REPO_NAME="${MTX_ORG_REPO_NAME:-$default_org_repo}"
-      REPO_NAME=$(ensure_mtx_repo_prefix "$(slugify "${REPO_NAME#org-}")" "org-")
+    REPO_NAME=$(ensure_mtx_repo_prefix "$(slugify "${NEW_APP_NAME#org-}")" "org-")
+    if [ -n "${MTX_ORG_REPO_NAME:-}" ] && { [ "${MTX_CREATE_NONINTERACTIVE:-}" = "1" ] || [ ! -t 0 ] || [ ! -t 1 ]; }; then
+      REPO_NAME=$(ensure_mtx_repo_prefix "$(slugify "${MTX_ORG_REPO_NAME#org-}")" "org-")
     fi
-    mtx_org_collect_host_config "$REPO_NAME" "$NEW_APP_NAME" "$GITHUB_ORG"
+    mtx_org_collect_host_config "$REPO_NAME" "$GITHUB_ORG"
   else
     APP_SLUG=$(slugify "$NEW_APP_NAME")
     [ -z "$APP_SLUG" ] && APP_SLUG="app"
@@ -999,7 +982,7 @@ mtx_create_from_template_run() {
   fi
 
   if mtx_create_is_org_flow; then
-    mtx_org_scaffold_deploy_config_surface "$REPO_PATH" "$REPO_NAME" "$NEW_APP_NAME" "$WORKSPACE_ROOT" "$GITHUB_ORG" || {
+    mtx_org_scaffold_deploy_config_surface "$REPO_PATH" "$REPO_NAME" "$WORKSPACE_ROOT" || {
       warn "Org deploy config scaffold had warnings; check config/ and terraform/."
     }
     mtx_org_merge_host_into_package_json "$REPO_PATH" "$WORKSPACE_ROOT" || {

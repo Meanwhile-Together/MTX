@@ -115,6 +115,8 @@ if [ -n "${MASTER_JWT_SECRET:-}" ]; then
 fi
 [ -n "${MASTER_AUTH_ISSUER:-}" ] && set_env_var_in_file "MASTER_AUTH_ISSUER" "$MASTER_AUTH_ISSUER"
 [ -n "${MASTER_CORS_ORIGINS:-}" ] && set_env_var_in_file "MASTER_CORS_ORIGINS" "$MASTER_CORS_ORIGINS"
+[ -n "${MASTER_AUTH_PUBLIC_URL:-}" ] && set_env_var_in_file "MASTER_AUTH_PUBLIC_URL" "$MASTER_AUTH_PUBLIC_URL"
+[ -n "${VITE_MASTER_AUTH_URL:-}" ] && set_env_var_in_file "VITE_MASTER_AUTH_URL" "$VITE_MASTER_AUTH_URL"
 
 # After prepare:railway, config/server.json.railway may exist (path payloads vendored under ./payloads/).
 # Swap onto server.json only for railway up, then restore the dev file from backup.
@@ -1255,8 +1257,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && railway domain 2>/dev/null) || true
         fi
 
-        # mtx deploy asadmin: master auth env on the unified app service (same binary as local admin + payloads)
-        if [ -n "${RUN_AS_MASTER:-}" ] || [ -n "${MASTER_JWT_SECRET:-}" ] || [ -n "${MASTER_AUTH_ISSUER:-}" ] || [ -n "${MASTER_CORS_ORIGINS:-}" ]; then
+        # mtx deploy asadmin / child orgs with master trust: auth env on the unified app service (same binary as local admin + payloads)
+        if [ -n "${RUN_AS_MASTER:-}" ] || [ -n "${MASTER_JWT_SECRET:-}" ] || [ -n "${MASTER_AUTH_ISSUER:-}" ] || [ -n "${MASTER_CORS_ORIGINS:-}" ] || [ -n "${MASTER_AUTH_PUBLIC_URL:-}" ] || [ -n "${VITE_MASTER_AUTH_URL:-}" ]; then
             echo -e "${BLUE}🔐 Setting master auth variables on $APP_SERVICE_NAME_FOR_ENV...${NC}"
             export RAILWAY_TOKEN="$PROJECT_TOKEN"
             unset RAILWAY_API_TOKEN
@@ -1286,6 +1288,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             fi
             [ -n "${MASTER_AUTH_ISSUER:-}" ] && railway_set_var "MASTER_AUTH_ISSUER=$MASTER_AUTH_ISSUER" || true
             [ -n "${MASTER_CORS_ORIGINS:-}" ] && railway_set_var "MASTER_CORS_ORIGINS=$MASTER_CORS_ORIGINS" || true
+            [ -n "${MASTER_AUTH_PUBLIC_URL:-}" ] && railway_set_var "MASTER_AUTH_PUBLIC_URL=$MASTER_AUTH_PUBLIC_URL" || true
+            [ -n "${VITE_MASTER_AUTH_URL:-}" ] && railway_set_var "VITE_MASTER_AUTH_URL=$VITE_MASTER_AUTH_URL" || true
         fi
 
         echo ""

@@ -195,6 +195,14 @@ mtx_vendor_terraform_maybe_sync() {
   rev="$MTX_VENDOR_TF_REVENDOR"
 
   if declare -F mtx_vendor_is_pinned &>/dev/null && mtx_vendor_is_pinned "$root" terraform; then
+    synth=""
+    if declare -F mtx_vendor_console_log_pinned &>/dev/null; then
+      if src="$(mtx_resolve_bridge_terraform_src "$root" 2>/dev/null)"; then
+        br="$(dirname "$src")"
+        synth="$(git -C "$br" rev-parse HEAD 2>/dev/null || echo unknown)|$(mtx_hash_bridge_terraform "$src" 2>/dev/null || echo unknown)"
+      fi
+      mtx_vendor_console_log_pinned "$root" terraform "$synth"
+    fi
     mtx_vendor_warn_terraform_pin_metadata "$root"
     if [ "$rev" = 1 ]; then
       echo "ℹ️  terraform is listed in .mtx-vendor.pinned — skipping --revendor." >&2

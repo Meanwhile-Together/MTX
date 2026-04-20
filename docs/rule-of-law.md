@@ -1,8 +1,10 @@
 # Rule of law (MTX)
 
+**Deprecated mirror (curation):** the **canonical** ledger is **`project-bridge/docs/rule-of-law.md`** ([Meanwhile-Together/project-bridge on GitHub](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/rule-of-law.md)). Edit there; this MTX copy may **lag** until links are repointed or the file is removed.
+
 Single curated ledger for **facts**, **constraints**, **failure modes**, **intentional deprecations**, **horizon**, and **debt**. It complements normative specs (for example [MTX_COMMAND_SURFACE.md](MTX_COMMAND_SURFACE.md)); it does **not** replace git history.
 
-**How to add:** use the Cursor skill **`rol`** (slash **`/rol`**) or ask the agent to append here and re-sort. The skill lives in **`~/.cursor/skills/rol/`** (personal) so it works in **multi-root workspaces** where **`MTX/.cursor/skills/`** is not on Cursor’s skill path. One idea per bullet unless a tight table is clearer.
+**How to add:** use the Cursor skill **`rol`** (slash **`/rol`**) or ask the agent to append in **`project-bridge/docs/rule-of-law.md`**. The skill lives in **`~/.cursor/skills/rol/`** (personal) so it works in **multi-root workspaces** where **`MTX/.cursor/skills/`** is not on Cursor’s skill path. One idea per bullet unless a tight table is clearer.
 
 ---
 
@@ -83,6 +85,7 @@ Single curated ledger for **facts**, **constraints**, **failure modes**, **inten
 - **2026-04-18 —** **`mtx` dispatch model (includes killing `MTX_ROOT`):** converge on a **single self-contained** wrapper entry that **re-invokes** the **install-directory** script via **`$0`** (or equivalent) with **`"$@"`**, preserving the **original working directory**. **Remove** the pattern where child scripts **require** an **`MTX_ROOT`** export to find **`lib/`**, **`create/`**, **`includes/`** — those paths should be derived **inside** the wrapper (or a single internal helper) from **the install path**, not from the operator’s environment. **No** operator-facing **`export MTX_ROOT`**, **`source lib/…`**, or **`bash …/create/…`** “because it’s faster.” Until then, **`MTX_ROOT`** is **tech debt**, not design intent.
 - **2026-04-18 —** **Retire `template-basic`:** publish or rename the GitHub starter to **`template-org`**, migrate any remaining docs/CI/workspace assumptions, then **remove** **`template-basic`** from normative lists (for example **`includes/workspace-repos.sh`**) and from operator playbooks so only **`template-org`** / **`template-payload`** remain as named defaults.
 - **Horizon — project-bridge deploy:** remove remaining **“deploy from project-bridge repo root as the product”** assumptions in docs and comments; **project-bridge** remains the **framework** source; **only org hosts** are first-class deploy roots (**soon**; track in project-bridge [CURRENT_ARCHITECTURE.md](https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/CURRENT_ARCHITECTURE.md)).
+- **2026-04-19 —** **Nested orgs + multi-app tenancy (subset launchers):** **horizon** — org root stays the **primary launcher/homescreen** wired to the full app set, **and** the **same homescreen experience** must be **assemblable** for **nested subsets** of apps (teams, bundles, lanes) without hand-forking UIs. **Depends on** **MTX** (scaffold/assemble/register contracts), **project-bridge** internal pipelines, and explicit **registers** (membership, grouping, inheritance); not designed or shipped end-to-end.
 
 ---
 
@@ -96,6 +99,7 @@ Single curated ledger for **facts**, **constraints**, **failure modes**, **inten
 - **template-basic removal:** grep org-wide for **`template-basic`** / “default template” wording; switch to **`template-org`** (org) or **`template-payload`** (app); archive or delete the legacy repo when nothing depends on the old name.
 - Promote **“commit + push MTX `main`, then run `mtx`”** (and how the **git-synced** install behaves) into [getting-started.md](getting-started.md) or install docs if not already explicit enough for new contributors.
 - Consider documenting **`mtx.sh`** “always reset to `origin/main` before run” behavior in a normative doc if it remains true — it surprises contributors.
+- **Nested orgs / subset launchers (§6 2026-04-19):** specify **registers** and **build/assemble pipelines** so launcher/homescreen is a **composable** product over app membership at **org root** and at **nested group** boundaries; coordinate **MTX** + **project-bridge** before treating any interim “flat `server.apps` only” shortcut as permanent.
 
 ---
 
@@ -105,7 +109,7 @@ Single curated ledger for **facts**, **constraints**, **failure modes**, **inten
 - **2026-04-18 —** **Canonical `mtx` loop:** land changes on **Meanwhile-Together/MTX `main`** (**commit + push**), then run **`mtx`** so the **auto-updating** install matches; do not assume **`PATH` `mtx`** reads your **unpushed** working copy.
 - Until **`template-org`** exists beside MTX (or on GitHub), **`ln -sf template-basic template-org`** next to MTX or **`MTX_ORG_TEMPLATE_REPO=template-basic`** — **`template-basic`** is **legacy**, not the long-term name ([MTX_SCAFFOLDING_MODEL.md](MTX_SCAFFOLDING_MODEL.md)).
 - After changing MTX scripts locally, **`mtx help`** may still show the old menu until the **installed** MTX clone is updated.
-- **`docs/rule-of-law.md`** is for **judgments and constraints**; procedural “how to add a script” stays in [getting-started.md](getting-started.md).
+- **`docs/rule-of-law.md`** (this path) is a **mirror** — curate in **`project-bridge/docs/rule-of-law.md`**; procedural “how to add a script” stays in [getting-started.md](getting-started.md).
 - **`mtx deploy terraform apply`** is the **same** apply engine as **`mtx deploy`** after environment selection — the nested form is for **discoverability and grouping**, not a second deploy pipeline ([MTX_DEPLOY_CONTRACT.md](MTX_DEPLOY_CONTRACT.md), [MTX_COMMAND_SURFACE.md](MTX_COMMAND_SURFACE.md)).
 - **Pre-deploy** runs only on the **org Railway bundle** path (**`prepare:railway`**); it is **not** run by **`mtx deploy`** alone unless the deploy path invoked **`mtx build`** that hit **`prepare:railway`**. Ship org hooks in **`scripts/org-pre-deploy.sh`** when you need org-specific steps **after** payload assembly.
 - **Deploy root:** run **`mtx deploy`** from an **`org-*`** host unless you are in an explicit **migration** window; do not document **“clone project-bridge alone as production”** as normal or eventual ([§1](#1-facts-what-is-true-today), [§6](#6-forthcomings-and-future-reference)).
