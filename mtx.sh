@@ -592,10 +592,13 @@ case "$1" in
                 debug "Running $script"
                 git -C "$scriptDir" reset --hard origin/main
                 chmod +x "$script"
-                args=""
-                if [ $cmdEndIndex -le ${#SCRIPT_ARGS[@]} ]; then
+                # Remaining argv for the sourced script only. When empty, we must still clear
+                # positional parameters: `source file` with no args leaves the caller's $@ intact,
+                # so e.g. `mtx create org` would wrongly pass "create org" into create/org.sh.
+                subcmd_args=()
+                if [ "$cmdEndIndex" -le "${#SCRIPT_ARGS[@]}" ]; then
                     for a in "${SCRIPT_ARGS[@]:cmdEndIndex-1}"; do
-                        args="$args $a"
+                        subcmd_args+=("$a")
                     done
                 fi
 
@@ -664,15 +667,20 @@ exec $installedName $script_words \"\$@\"
                         source "$pre" || { r=$?; exit $r; }
                     done
                 fi
-                [ $verbose -ge 2 ] && echo "$args"
+                [ "$verbose" -ge 2 ] && {
+                    echo "script sub-args (${#subcmd_args[@]}):"
+                    printf ' %q' "${subcmd_args[@]}"
+                    echo
+                }
                 export MTX_SKIP_UPDATE=1
                 export MTX_VERBOSE=$verbose
-                if [ $verbose -eq 4 ]; then
-                    ( set -x; source "$scriptDir/$script" $args )
+                set -- "${subcmd_args[@]}"
+                if [ "$verbose" -eq 4 ]; then
+                    ( set -x; source "$scriptDir/$script" )
                     exit $?
                 fi
                 # Script/precond stdout always shown (echo, echoc, etc.). Only mtx_run subprocesses are quiet at default.
-                source "$scriptDir/$script" $args
+                source "$scriptDir/$script"
             else
                 if [ ! -z "$hoist_target" ]; then
                     error "Error: Script $script not found"

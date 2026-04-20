@@ -8,13 +8,15 @@
 # (avoids migrating the wrong app when `mtx create payload` is run from inside another repo). Override with
 # MTX_CREATE_ALLOW_STANDALONE_MIGRATE=1. Each successful apply writes `.mtx-from-template` for tooling.
 # Optional CLI name: mtx_create_from_template_run "$@" — if any args are given, they are joined with
-# spaces (trimmed): payload flow uses that as the app display name; org flow uses it as the org repo basename (org- added).
-# Otherwise the script prompts interactively (org: one repo-name prompt; payload: display name).
+# spaces (trimmed): payload flow uses that as the app display name; org flow uses it as a plain-English
+# organization title (slugified to org-* for the repo; leading org- stripped first so it is never doubled).
+# Otherwise the script prompts interactively (org: plain-English name; payload: display name).
 # Org (org-*): host config (app.json / server.json placeholders, URLs, owner) is filled from the org repo id and
 # MTX_GITHUB_ORG — no TTY prompts for those fields. Override any field with MTX_ORG_DISPLAY_NAME, MTX_ORG_APP_SLUG,
 # MTX_ORG_OWNER, MTX_ORG_VERSION, MTX_ORG_DEV_PORT, MTX_ORG_DEV_URL, MTX_ORG_STAGING_PORT, MTX_ORG_STAGING_URL,
 # MTX_ORG_PROD_PORT, MTX_ORG_PROD_URL, MTX_ORG_DEPLOY_PROJECT_ID, MTX_ORG_SERVER_PORT, MTX_ORG_PROJECT_ROOT,
-# MTX_ORG_STATE_DIR. Non-interactive org create: set MTX_ORG_REPO_NAME or pass basename on the command line.
+# MTX_ORG_STATE_DIR. Non-interactive org create: set MTX_ORG_REPO_NAME (plain English or slug; optional org-
+# prefix, never doubled) or pass the same on the command line; optional MTX_ORG_DISPLAY_NAME overrides app.json name.
 # Secrets stay in backend.example.json / .env — not prompted.
 # Default clone sources: template-payload (`mtx create payload`), template-basic for org (`mtx create org` via create/org.sh until template-org exists on GitHub). Override with MTX_PAYLOAD_TEMPLATE_REPO / MTX_ORG_TEMPLATE_REPO. MTX_TEMPLATE_SOURCE_REPO is documented for pointing `mtx create payload` at a custom template-* snapshot.
 # With gh: new repos use `gh repo create org/repo --source=. --remote=origin --push`; existing repos get origin + git push.
@@ -169,7 +171,20 @@ EOF
 }
 
 slugify() {
-  echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*\|-*$//g'
+  echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\{2,\}/-/g' | sed 's/^-*\|-*$//g'
+}
+
+# Strip leading org- (case-insensitive), repeatedly, so org-org-hello → hello (repo becomes org-hello).
+mtx_strip_leading_org_prefix() {
+  local s="$1" lower
+  while [ -n "$s" ]; do
+    lower=$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]')
+    case "$lower" in
+      org-*) s="${s:4}" ;;
+      *) break ;;
+    esac
+  done
+  printf '%s' "$s"
 }
 
 # Set MTX_CREATE_VARIANT to org|payload from create/*.sh entrypoints; avoids mixing flows if prefix alone is ambiguous.
@@ -880,11 +895,14 @@ mtx_create_from_template_run() {
       if [ "${MTX_CREATE_NONINTERACTIVE:-}" = "1" ] || [ ! -t 0 ] || [ ! -t 1 ]; then
         NEW_APP_NAME="${MTX_ORG_REPO_NAME:-}"
         if [ -z "$NEW_APP_NAME" ]; then
-          warn "Non-interactive org create needs MTX_ORG_REPO_NAME or a repository basename on the command line."
+          warn "Non-interactive org create needs MTX_ORG_REPO_NAME or a plain-English / slug name on the command line."
           exit 1
         fi
       else
-        read -rp "$(echo -e "${bold:-}New org repository name (org-* on disk and GitHub; org- prefix optional):${reset:-} ")" NEW_APP_NAME
+        echo ""
+        echoc dim "GitHub and folder name will be org- plus a slug from your title (e.g. \"Hello World!\" → org-hello-world)."
+        echoc dim "If you already type org- at the start, it is stripped once so it is never doubled."
+        read -rp "$(echo -e "${bold:-}Organization name (plain English, e.g. Hello World!):${reset:-} ")" NEW_APP_NAME
       fi
     else
       read -rp "$(echo -e "${bold:-}App display name (new payload repo):${reset:-} ")" NEW_APP_NAME
@@ -897,7 +915,7 @@ mtx_create_from_template_run() {
     fi
   else
     if mtx_create_is_org_flow; then
-      echoc dim "Org repository basename (from command line): $(color yellow "$NEW_APP_NAME")"
+      echoc dim "Organization title (from command line): $(color yellow "$NEW_APP_NAME")"
     else
       echoc dim "Display name (from command line): $(color yellow "$NEW_APP_NAME")"
     fi
@@ -905,10 +923,14 @@ mtx_create_from_template_run() {
   fi
 
   if mtx_create_is_org_flow; then
-    REPO_NAME=$(ensure_mtx_repo_prefix "$(slugify "${NEW_APP_NAME#org-}")" "org-")
-    if [ -n "${MTX_ORG_REPO_NAME:-}" ] && { [ "${MTX_CREATE_NONINTERACTIVE:-}" = "1" ] || [ ! -t 0 ] || [ ! -t 1 ]; }; then
-      REPO_NAME=$(ensure_mtx_repo_prefix "$(slugify "${MTX_ORG_REPO_NAME#org-}")" "org-")
+    local org_slug_base
+    org_slug_base=$(slugify "$(mtx_strip_leading_org_prefix "$NEW_APP_NAME")")
+    if [ -z "$org_slug_base" ]; then
+      warn "After slugifying the name, the repo slug was empty. Use letters or numbers in the organization title."
+      exit 1
     fi
+    REPO_NAME=$(ensure_mtx_repo_prefix "$org_slug_base" "org-")
+    export MTX_ORG_DISPLAY_NAME="${MTX_ORG_DISPLAY_NAME:-$(mtx_strip_leading_org_prefix "$NEW_APP_NAME")}"
     mtx_org_collect_host_config "$REPO_NAME" "$GITHUB_ORG"
   else
     APP_SLUG=$(slugify "$NEW_APP_NAME")

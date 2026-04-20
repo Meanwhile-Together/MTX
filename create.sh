@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Normative: mtx create <payload|org|template> … — see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_COMMAND_SURFACE.md.
-# Optional name: `mtx create org My Org` / `mtx create payload foo` — args are the display name (joined if multiple words).
+# Optional name: `mtx create org Hello World!` / `mtx create payload foo` — args are plain English (joined if multiple words); org flow slugifies to org-* (org- prefix optional, never doubled).
 # `mtx create template` → snapshot cwd payload into template-* (run from payload root; see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_SCAFFOLDING_MODEL.md).
 # Legacy: `mtx create` with no kind keyword still runs the payload flow (prefer `mtx create payload`).
 desc="Create payload-*, org-*, or template-* repos (mtx create <type>)"
