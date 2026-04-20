@@ -5,8 +5,9 @@ desc="Deploy as master admin (RUN_AS_MASTER); persists is-master env to .env and
 nobanner=1
 set -e
 
-# Always use MTX scripts (this script lives in MTX/deploy/)
-MTX_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Always use MTX scripts (this script lives in MTX/deploy/). Use BASH_SOURCE so mtx wrapper
+# sourcing works ($0 is often /usr/bin/mtx, which would wrongly resolve MTX_ROOT to /usr).
+MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 # shellcheck source=../includes/prepare-env.sh
 source "$MTX_ROOT/includes/prepare-env.sh"
 

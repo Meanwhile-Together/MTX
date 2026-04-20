@@ -21,8 +21,8 @@ if [ -z "$PROJECT_ROOT" ]; then
 fi
 [ -z "$PROJECT_ROOT" ] && PROJECT_ROOT="$(pwd)"
 
-# MTX repo root (this script lives in MTX/deploy/)
-MTX_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# MTX repo root (this script lives in MTX/deploy/). BASH_SOURCE: correct when mtx sources this ($0 may be /usr/bin/mtx).
+MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 # shellcheck source=../includes/prepare-env.sh
 source "$MTX_ROOT/includes/prepare-env.sh"
 ENV_FILE="$PROJECT_ROOT/.env"
