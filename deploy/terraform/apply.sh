@@ -69,6 +69,9 @@ source "$MTX_PREPARE_FILE"
 set +a
 mtx_sanitize_railway_token_env_from_dotenv
 
+# Workspace-root MASTER_JWT_SECRET (.env.master or workspace .env) overrides org .env for pass-down to Railway.
+mtx_workspace_overlay_master_jwt_secret || true
+
 # Clear an env var from .env and current shell (for invalid/stale service IDs on 404 etc.)
 clear_env_var_in_file() {
     local key="$1"

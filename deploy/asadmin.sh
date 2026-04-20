@@ -7,6 +7,8 @@ set -e
 
 # Always use MTX scripts (this script lives in MTX/deploy/)
 MTX_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=../includes/prepare-env.sh
+source "$MTX_ROOT/includes/prepare-env.sh"
 
 # Switch that signals to the server this is the main master (mounts /auth; apply.sh persists to .env and sets on Railway)
 export RUN_AS_MASTER=true
@@ -25,6 +27,9 @@ if [ -z "$PROJECT_ROOT" ]; then
   done
 fi
 [ -z "$PROJECT_ROOT" ] && PROJECT_ROOT="$(pwd)"
+
+mtx_require_prepare_env "$PROJECT_ROOT" || exit 1
+
 ENV_FILE="$PROJECT_ROOT/.env"
 if [ -f "$ENV_FILE" ]; then
   set -a
@@ -33,21 +38,13 @@ if [ -f "$ENV_FILE" ]; then
   set +a
 fi
 
-# MASTER_JWT_SECRET is required for master backend (auth at /auth). Prompt if missing.
+# Every asadmin deploy rotates workspace-root MASTER_JWT_SECRET (apply.sh overlays it after org .env).
+mtx_workspace_rotate_master_jwt_secret_for_asadmin || exit 1
+
 if [ -z "${MASTER_JWT_SECRET:-}" ] || [ "$MASTER_JWT_SECRET" = "null" ]; then
-  echo "Deploy as admin (master) requires MASTER_JWT_SECRET for backend /auth."
-  if [ -f "$ENV_FILE" ] && grep -q "^MASTER_JWT_SECRET=" "$ENV_FILE" 2>/dev/null; then
-    MASTER_JWT_SECRET=$(grep "^MASTER_JWT_SECRET=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
-  fi
-  if [ -z "$MASTER_JWT_SECRET" ]; then
-    echo "Enter MASTER_JWT_SECRET (will be saved to .env and set on Railway backend):"
-    read -rs MASTER_JWT_SECRET
-    echo ""
-    [ -z "$MASTER_JWT_SECRET" ] && echo "MASTER_JWT_SECRET is required for asadmin deploy." >&2 && exit 1
-    export MASTER_JWT_SECRET
-  else
-    export MASTER_JWT_SECRET
-  fi
+  echo "Deploy as admin (master) requires MASTER_JWT_SECRET for backend /auth." >&2
+  echo "  Rotation failed; check openssl / permissions on ${MTX_WORKSPACE_ROOT:-<workspace>}/.env.master." >&2
+  exit 1
 fi
 
 # Optional: pass through for CORS / issuer if set

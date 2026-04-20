@@ -33,6 +33,64 @@ mtx_trim_inline() {
   printf '%s' "$v"
 }
 
+# Read workspace-root master JWT for non-asadmin deploys (never creates or rotates here).
+# Reads $MTX_WORKSPACE_ROOT/.env.master first, then MASTER_JWT_SECRET= from $MTX_WORKSPACE_ROOT/.env.
+# Call after org .env so workspace values override per-org drift.
+mtx_workspace_overlay_master_jwt_secret() {
+  local root="${MTX_WORKSPACE_ROOT:-}"
+  [ -n "$root" ] || return 0
+  local val="" mf uw
+  mf="$root/.env.master"
+  uw="$root/.env"
+  if [ -f "$mf" ] && grep -qE '^[[:space:]]*MASTER_JWT_SECRET=' "$mf" 2>/dev/null; then
+    val="$(grep -E '^[[:space:]]*MASTER_JWT_SECRET=' "$mf" | head -1 | sed 's/^[^=]*=//')"
+    val="$(mtx_trim_inline "$val")"
+  fi
+  if [ -z "$val" ] && [ -f "$uw" ] && grep -qE '^[[:space:]]*MASTER_JWT_SECRET=' "$uw" 2>/dev/null; then
+    val="$(grep -E '^[[:space:]]*MASTER_JWT_SECRET=' "$uw" | head -1 | sed 's/^[^=]*=//')"
+    val="$(mtx_trim_inline "$val")"
+  fi
+  if [ -n "$val" ] && [ "$val" != "null" ]; then
+    export MASTER_JWT_SECRET="$val"
+  fi
+  return 0
+}
+
+# mtx deploy asadmin only: always write a new MASTER_JWT_SECRET to .env.master (rotate every run).
+# mtx deploy (non-asadmin) never calls this — missing secret stays missing until the next asadmin deploy.
+mtx_workspace_rotate_master_jwt_secret_for_asadmin() {
+  case "${RUN_AS_MASTER:-}" in true|1|yes) ;;
+  *) return 0 ;;
+  esac
+  local root="${MTX_WORKSPACE_ROOT:-}"
+  [ -n "$root" ] || return 1
+  local gen mf tmp
+  mf="$root/.env.master"
+  if command -v openssl >/dev/null 2>&1; then
+    gen="$(openssl rand -base64 48 | tr -d '\n\r')"
+  else
+    gen="$(tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 64)"
+  fi
+  [ -n "$gen" ] || {
+    echo "❌ Could not generate MASTER_JWT_SECRET (install openssl or ensure /dev/urandom is readable)." >&2
+    return 1
+  }
+  umask 077
+  tmp="$(mktemp "${TMPDIR:-/tmp}/mtx-master-jwt.XXXXXX")"
+  if [ -f "$mf" ]; then
+    # grep exits 1 on "no lines" for some inputs; never fail the deploy under set -e
+    grep -vE '^[[:space:]]*MASTER_JWT_SECRET=' "$mf" >"$tmp" 2>/dev/null || true
+  else
+    : >"$tmp"
+  fi
+  printf 'MASTER_JWT_SECRET=%s\n' "$gen" >>"$tmp"
+  mv "$tmp" "$mf"
+  chmod 600 "$mf" 2>/dev/null || true
+  export MASTER_JWT_SECRET="$gen"
+  echo "[INFO] Rotated MASTER_JWT_SECRET for asadmin deploy; wrote $mf (workspace root). mtx deploy (non-asadmin) only reads this file and never auto-generates a missing secret." >&2
+  return 0
+}
+
 # Load and validate workspace-level prepare file.
 # Exports MTX_WORKSPACE_ROOT and MTX_PREPARE_FILE.
 mtx_require_prepare_env() {
