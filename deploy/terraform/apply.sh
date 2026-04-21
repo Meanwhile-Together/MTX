@@ -9,21 +9,31 @@ MTX_ROOT="$(cd "$APPLY_SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=../includes/prepare-env.sh
 source "$MTX_ROOT/includes/prepare-env.sh"
 
-# Resolve project root (directory containing config/app.json) so .env is always loaded from the right place
+# Resolve project root (directory containing config/org.json or legacy config/app.json) so .env is
+# always loaded from the right place. Per rule-of-law §1 2026-04-20 Config triad, org identity lives
+# in config/org.json; config/app.json is retired on orgs but tolerated as a fallback.
 PROJECT_ROOT=""
-if [ -f "config/app.json" ]; then
-  PROJECT_ROOT="$(pwd)"
-fi
-if [ -z "$PROJECT_ROOT" ] && [ -f "../config/app.json" ]; then
-  PROJECT_ROOT="$(cd .. && pwd)"
-fi
-if [ -z "$PROJECT_ROOT" ]; then
-  for d in . .. ../project-bridge; do
-    [ -f "${d}/config/app.json" ] && PROJECT_ROOT="$(cd "$d" && pwd)" && break
-  done
-fi
+for root_candidate in . .. ../project-bridge; do
+  if [ -f "${root_candidate}/config/org.json" ] || [ -f "${root_candidate}/config/app.json" ]; then
+    PROJECT_ROOT="$(cd "$root_candidate" && pwd)"
+    break
+  fi
+done
 [ -z "$PROJECT_ROOT" ] && PROJECT_ROOT="$(pwd)"
 cd "$PROJECT_ROOT" || exit 1
+
+# Identity source: prefer config/org.json (.org.*), fall back to config/app.json (.app.*).
+# Exposes ORG_IDENTITY_FILE + ORG_IDENTITY_KEY for jq paths below.
+if [ -f "$PROJECT_ROOT/config/org.json" ]; then
+  ORG_IDENTITY_FILE="$PROJECT_ROOT/config/org.json"
+  ORG_IDENTITY_KEY="org"
+elif [ -f "$PROJECT_ROOT/config/app.json" ]; then
+  ORG_IDENTITY_FILE="$PROJECT_ROOT/config/app.json"
+  ORG_IDENTITY_KEY="app"
+else
+  ORG_IDENTITY_FILE=""
+  ORG_IDENTITY_KEY=""
+fi
 
 SCRIPT_DIR="$PROJECT_ROOT/terraform"
 ENV_FILE="$PROJECT_ROOT/.env"
@@ -216,11 +226,16 @@ else
     RAILWAY_PROJECT_ID_FOR_RUN="${RAILWAY_PROJECT_ID:-}"
 fi
 
-# Get app name and slug (slug used for Railway service name)
-APP_NAME=$(jq -r '.app.name' "$PROJECT_ROOT/config/app.json" 2>/dev/null || echo "")
-APP_SLUG=$(jq -r '.app.slug // .app.name // "app"' "$PROJECT_ROOT/config/app.json" 2>/dev/null | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*//;s/-*$//')
+# Get app name and slug (slug used for Railway service name). Reads org.json first, then legacy app.json.
+if [ -n "$ORG_IDENTITY_FILE" ]; then
+    APP_NAME=$(jq -r ".${ORG_IDENTITY_KEY}.name // empty" "$ORG_IDENTITY_FILE" 2>/dev/null || echo "")
+    APP_SLUG=$(jq -r ".${ORG_IDENTITY_KEY}.slug // .${ORG_IDENTITY_KEY}.name // \"app\"" "$ORG_IDENTITY_FILE" 2>/dev/null | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*//;s/-*$//')
+else
+    APP_NAME=""
+    APP_SLUG=""
+fi
 if [ -z "$APP_NAME" ]; then
-    echo "⚠️  app.name not found in config/app.json, using default"
+    echo "⚠️  name not found in config/org.json or config/app.json, using default"
     APP_NAME="My Application"
 fi
 [ -z "$APP_SLUG" ] && APP_SLUG="app"
@@ -237,7 +252,11 @@ TF_VARS=(
 # Terraform provider needs ACCOUNT token to create services (project tokens get "serviceCreate Not Authorized").
 # Project tokens are used only for deploy (railway up) later.
 if [ "$HAS_RAILWAY" = "true" ]; then
-    APP_OWNER=$(jq -r '.app.owner // ""' "$PROJECT_ROOT/config/app.json" 2>/dev/null || echo "")
+    if [ -n "$ORG_IDENTITY_FILE" ]; then
+        APP_OWNER=$(jq -r ".${ORG_IDENTITY_KEY}.owner // \"\"" "$ORG_IDENTITY_FILE" 2>/dev/null || echo "")
+    else
+        APP_OWNER=""
+    fi
     RAILWAY_TOKEN_VALUE=""
     if [ -n "${RAILWAY_TOKEN:-}" ]; then
         RAILWAY_TOKEN_VALUE="$RAILWAY_TOKEN"

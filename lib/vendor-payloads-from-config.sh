@@ -74,6 +74,79 @@ mtx_vendor_relpath() {
   perl -e 'use File::Spec; print File::Spec->abs2rel($ARGV[0], $ARGV[1]), "\n"' "$from" "$base"
 }
 
+# Rewrite relative monorepo paths inside a vendored payload. The source lives next to
+# `project-bridge/` (so it uses `../project-bridge/...`), but once rsync'd into
+# $ROOT/payloads/<slug>/ those relpaths escape the org tree. Compute the correct relpath
+# from the new dest to each known sibling monorepo dir and update package.json / tsconfig.json
+# / vite.config.*. Without this, npm install creates broken file:../project-bridge symlinks
+# and vite fails with "Cannot find base config file ../project-bridge/tsconfig.json".
+mtx_vendor_rewrite_monorepo_paths() {
+  local dest="$1" src="$2" org_root="$3"
+  [ -d "$dest" ] || return 0
+  [ -d "$src" ] || return 0
+  [ -n "$org_root" ] || return 0
+
+  local src_parent new_rel
+  src_parent="$(cd "$src" && cd .. && pwd)"
+  new_rel="$(mtx_vendor_relpath "$src_parent" "$dest")"
+  [ -n "$new_rel" ] || return 0
+  # Guard: only rewrite when the relpath actually changed (out-of-repo vend, dest nested).
+  case "$new_rel" in ".."|"..") ;; "../"*) ;; *) return 0 ;; esac
+  [ "$new_rel" != ".." ] || return 0
+
+  # We're rewriting token "../<sibling>" → "$new_rel/<sibling>" inside the payload.
+  # `..` is the token emitted by source payloads that live as siblings of the monorepo.
+  export MTX_NEW_REL="$new_rel"
+
+  local pkg="$dest/package.json"
+  if [ -f "$pkg" ]; then
+    local tmp
+    tmp="$(mktemp)"
+    # Only touch `file:..` deps (the pattern npm uses for local file links).
+    perl -pe 's{"file:\.\./}{"file:$ENV{MTX_NEW_REL}/}g' <"$pkg" >"$tmp" || { rm -f "$tmp"; unset MTX_NEW_REL; return 0; }
+    if ! cmp -s "$pkg" "$tmp"; then
+      mv -f "$tmp" "$pkg"
+      echo "[vendor-payloads] rewrote monorepo file: paths in $(basename "$dest")/package.json (→ $new_rel/)"
+    else
+      rm -f "$tmp"
+    fi
+    # Drop stale package-lock so npm re-resolves with new file: targets (old lock pins the
+    # broken "../project-bridge/..." resolution and causes npm to recreate broken symlinks).
+    [ -f "$dest/package-lock.json" ] && rm -f "$dest/package-lock.json"
+  fi
+
+  local tsc="$dest/tsconfig.json"
+  if [ -f "$tsc" ]; then
+    local tmp
+    tmp="$(mktemp)"
+    perl -pe 's{"\.\./project-bridge}{"$ENV{MTX_NEW_REL}/project-bridge}g' <"$tsc" >"$tmp" || { rm -f "$tmp"; unset MTX_NEW_REL; return 0; }
+    if ! cmp -s "$tsc" "$tmp"; then
+      mv -f "$tmp" "$tsc"
+      echo "[vendor-payloads] rewrote ../project-bridge in $(basename "$dest")/tsconfig.json"
+    else
+      rm -f "$tmp"
+    fi
+  fi
+
+  local vc
+  for vc in "$dest/vite.config.ts" "$dest/vite.config.mts" "$dest/vite.config.js" "$dest/vite.config.mjs"; do
+    [ -f "$vc" ] || continue
+    local tmp
+    tmp="$(mktemp)"
+    perl -pe "s{(['\"])\\.\\./project-bridge}{\$1\$ENV{MTX_NEW_REL}/project-bridge}g" <"$vc" >"$tmp" || { rm -f "$tmp"; continue; }
+    if ! cmp -s "$vc" "$tmp"; then
+      mv -f "$tmp" "$vc"
+      echo "[vendor-payloads] rewrote ../project-bridge in $(basename "$dest")/$(basename "$vc")"
+    else
+      rm -f "$tmp"
+    fi
+  done
+
+  unset MTX_NEW_REL
+
+  return 0
+}
+
 # Resolve rel (relative to projectRoot) to an absolute directory path.
 mtx_vendor_resolve_path() {
   local projectRoot="$1" rel="$2"
@@ -174,10 +247,23 @@ OUT="$(mktemp)"
 trap 'rm -f "${WORK:-}" "${OUT:-}"' EXIT
 
 # Ensure admin entry (same object shape as Node implementation).
+# Detect an existing admin by: id|slug|name == "admin" (case-insensitive) OR id|name
+# contains "admin" OR source.path resolves to a dir named "payload-admin" / "admin".
+# Without the broader check, orgs that list admin as id="payload-admin" (slug null) get a
+# duplicate synthesized entry, which the unified server flags as "Duplicate API prefix /api".
 jq --arg k "$APP_KEY" '
+  def norm: if . == null then "" else (tostring | ascii_downcase) end;
+  def _basename(p): (p | norm | sub("/+$"; "") | split("/") | last // "");
+  def is_admin:
+    ((.id | norm) == "admin")
+    or ((.slug | norm) == "admin")
+    or ((.name | norm) == "admin")
+    or ((.id | norm) | test("(^|[-_/])(admin|payload-admin)($|[-_/])"))
+    or ((.name | norm) | test("(^|[-_/])(admin|payload-admin)($|[-_/])"))
+    or (_basename(.source.path // "") | IN("admin", "payload-admin"));
   . as $r |
   ($r[$k]) as $arr |
-  if ($arr | any(((.id // "") | ascii_downcase) == "admin" or ((.slug // "") | ascii_downcase) == "admin")) then $r
+  if ($arr | any(is_admin)) then $r
   else
     $r | .[$k] = ([{
       "id": "admin",
@@ -260,6 +346,11 @@ for ((i = 0; i < n; i++)); do
 
   mkdir -p "$(dirname "$dest")"
   rsync -a --delete --exclude node_modules --exclude .git "$resolved/" "$dest/"
+  # Rewrite relative monorepo paths (package.json file:, tsconfig extends, vite resolve)
+  # so that the vendored tree under $ROOT/payloads/$slug/ resolves to the monorepo again.
+  # The source repo lives beside project-bridge/, so it ships with "../project-bridge/..."
+  # paths — those escape the org tree after rsync. See mtx_vendor_rewrite_monorepo_paths.
+  mtx_vendor_rewrite_monorepo_paths "$dest" "$resolved" "$ROOT" || true
   mtx_vendor_normalize_payload_dir "$dest" || true
 
   rel_out="./payloads/$slug"
