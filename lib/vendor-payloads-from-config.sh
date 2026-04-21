@@ -13,6 +13,9 @@ set -euo pipefail
 BANNER_WIDTH=78
 
 ROOT="$(cd "${1:-.}" && pwd)"
+# Monorepo parent: sibling of $ROOT that contains project-bridge/. Used when rewriting
+# `../project-bridge/...` inside in-repo payloads whose configs still assume sibling layout.
+org_parent="$(cd "$ROOT/.." && pwd)"
 CONFIG_DIR="$ROOT/config"
 SERVER_JSON="$CONFIG_DIR/server.json"
 RAILWAY_JSON="$CONFIG_DIR/server.json.railway"
@@ -80,15 +83,25 @@ mtx_vendor_relpath() {
 # from the new dest to each known sibling monorepo dir and update package.json / tsconfig.json
 # / vite.config.*. Without this, npm install creates broken file:../project-bridge symlinks
 # and vite fails with "Cannot find base config file ../project-bridge/tsconfig.json".
+#
+# Also applies to in-repo payloads that were committed alongside a sibling-layout template
+# (e.g. org-project-bridge/payloads/admin/ inherited `../project-bridge/...` from a time when
+# the payload lived as a sibling of project-bridge). The generic rule: whatever depth the
+# payload ends up at under the org root, rewrite `../project-bridge` to the relpath from
+# the payload dir to the monorepo parent (`$org_root/..`).
 mtx_vendor_rewrite_monorepo_paths() {
-  local dest="$1" src="$2" org_root="$3"
+  local dest="$1" src="$2" org_root="$3" override_new_rel="${4:-}"
   [ -d "$dest" ] || return 0
-  [ -d "$src" ] || return 0
   [ -n "$org_root" ] || return 0
 
   local src_parent new_rel
-  src_parent="$(cd "$src" && cd .. && pwd)"
-  new_rel="$(mtx_vendor_relpath "$src_parent" "$dest")"
+  if [ -n "$override_new_rel" ]; then
+    new_rel="$override_new_rel"
+  else
+    [ -d "$src" ] || return 0
+    src_parent="$(cd "$src" && cd .. && pwd)"
+    new_rel="$(mtx_vendor_relpath "$src_parent" "$dest")"
+  fi
   [ -n "$new_rel" ] || return 0
   # Guard: only rewrite when the relpath actually changed (out-of-repo vend, dest nested).
   case "$new_rel" in ".."|"..") ;; "../"*) ;; *) return 0 ;; esac
@@ -349,6 +362,18 @@ for ((i = 0; i < n; i++)); do
   esac
   if [ "$in_repo" = true ]; then
     echo "[vendor-payloads] build in-repo payload $build_dir"
+    # Committed in-repo payloads (e.g. org-project-bridge/payloads/admin) were often copied
+    # from a sibling-layout template and still carry `../project-bridge/...` in their configs.
+    # From `$ROOT/payloads/<slug>/` that resolves to `$ROOT/payloads/project-bridge/` which
+    # doesn't exist, so npm install creates broken file: symlinks, tsconfig extends fails,
+    # and (worst of all, because vite doesn't abort on it) Tailwind silently emits a stub
+    # ~8 KB CSS with none of the engine/ui classes → invisible text, blank main pane.
+    # Rewrite to `$(relpath $ROOT/.. $build_dir)/project-bridge` where `$ROOT/..` is the
+    # monorepo root that actually contains `project-bridge/`.
+    in_repo_rel="$(mtx_vendor_relpath "$org_parent" "$build_dir" 2>/dev/null || true)"
+    if [ -n "$in_repo_rel" ]; then
+      mtx_vendor_rewrite_monorepo_paths "$build_dir" "" "$ROOT" "$in_repo_rel" || true
+    fi
     if mtx_vendor_run_build_or_banner "$build_dir" "in-repo \"$entry_id\""; then
       mtx_vendor_normalize_payload_dir "$build_dir" || true
     else
