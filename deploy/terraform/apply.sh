@@ -1324,6 +1324,15 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             [ -n "${MASTER_CORS_ORIGINS:-}" ] && railway_set_var "MASTER_CORS_ORIGINS=$MASTER_CORS_ORIGINS" || true
             [ -n "${MASTER_AUTH_PUBLIC_URL:-}" ] && railway_set_var "MASTER_AUTH_PUBLIC_URL=$MASTER_AUTH_PUBLIC_URL" || true
             [ -n "${VITE_MASTER_AUTH_URL:-}" ] && railway_set_var "VITE_MASTER_AUTH_URL=$VITE_MASTER_AUTH_URL" || true
+
+            # railway_set_var used --skip-deploys above, so the running container still has the env
+            # from before this block. Without a follow-up redeploy, /auth (master) is only mounted on
+            # the next unrelated push. Trigger one redeploy now (cheap — same image; Railway just
+            # restarts with the new env) so MASTER_JWT_SECRET / RUN_AS_MASTER take effect immediately.
+            echo -e "${BLUE}🔁 Redeploying $APP_SERVICE_NAME_FOR_ENV to apply master auth env...${NC}"
+            (railway redeploy --service "$SERVICE_ID" --environment "$ENVIRONMENT" --yes >/dev/null 2>&1 \
+              && echo -e "${GREEN}✅ Redeployed $APP_SERVICE_NAME_FOR_ENV with master auth env${NC}") \
+              || echo -e "${YELLOW}⚠️  Could not trigger redeploy; /auth may need one more deploy to mount${NC}"
         fi
 
         echo ""
