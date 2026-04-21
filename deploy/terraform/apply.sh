@@ -1329,8 +1329,14 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             # from before this block. Without a follow-up redeploy, /auth (master) is only mounted on
             # the next unrelated push. Trigger one redeploy now (cheap — same image; Railway just
             # restarts with the new env) so MASTER_JWT_SECRET / RUN_AS_MASTER take effect immediately.
+            #
+            # `railway redeploy` does NOT accept --environment (unlike most other subcommands); it
+            # operates on the currently-linked environment of the project root. We rely on `railway
+            # link` / `railway environment` having set that to $ENVIRONMENT earlier in this deploy.
+            # Passing --environment here silently fails the subshell and skips the redeploy, which
+            # re-creates the first-deploy /auth-returns-HTML failure class — see rule-of-law.
             echo -e "${BLUE}🔁 Redeploying $APP_SERVICE_NAME_FOR_ENV to apply master auth env...${NC}"
-            (railway redeploy --service "$SERVICE_ID" --environment "$ENVIRONMENT" --yes >/dev/null 2>&1 \
+            (railway redeploy --service "$APP_SERVICE_NAME_FOR_ENV" --yes >/dev/null 2>&1 \
               && echo -e "${GREEN}✅ Redeployed $APP_SERVICE_NAME_FOR_ENV with master auth env${NC}") \
               || echo -e "${YELLOW}⚠️  Could not trigger redeploy; /auth may need one more deploy to mount${NC}"
         fi
