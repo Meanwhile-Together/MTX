@@ -142,6 +142,27 @@ mtx_vendor_rewrite_monorepo_paths() {
     fi
   done
 
+  # Tailwind/PostCSS configs embed content globs that reference sibling monorepo dirs
+  # (e.g. `'../project-bridge/engine/**/*.{ts,tsx}'`). Without this rewrite, Tailwind JIT
+  # sees an empty content set for engine/ui, silently strips every class used only there
+  # (bg-bg-primary, text-text-primary, the whole Layout/Auth/Sidebar ensemble), and ships
+  # an ~8 KB CSS file instead of ~22 KB. Symptom: perfectly-laid-out React tree with
+  # invisible/washed-out text and a blank main pane. Keep this in sync with the vite/tsconfig
+  # rewrites above.
+  local cfg
+  for cfg in "$dest/tailwind.config.js" "$dest/tailwind.config.mjs" "$dest/tailwind.config.cjs" "$dest/tailwind.config.ts" "$dest/postcss.config.js" "$dest/postcss.config.mjs" "$dest/postcss.config.cjs"; do
+    [ -f "$cfg" ] || continue
+    local tmp
+    tmp="$(mktemp)"
+    perl -pe "s{(['\"])\\.\\./project-bridge}{\$1\$ENV{MTX_NEW_REL}/project-bridge}g" <"$cfg" >"$tmp" || { rm -f "$tmp"; continue; }
+    if ! cmp -s "$cfg" "$tmp"; then
+      mv -f "$tmp" "$cfg"
+      echo "[vendor-payloads] rewrote ../project-bridge in $(basename "$dest")/$(basename "$cfg")"
+    else
+      rm -f "$tmp"
+    fi
+  done
+
   unset MTX_NEW_REL
 
   return 0
