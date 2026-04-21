@@ -19,7 +19,6 @@ MTX_WORKSPACE_REPOS=(
   payload-aigotchi
   payload-ai-receipt-scanner
   payload-asset-protection-log
-  payload-asset-protection-log-1
   payload-breakwatch-ai
   payload-business-plan-prototyper
   payload-client-portal
