@@ -18,7 +18,7 @@
 # MTX_ORG_STATE_DIR. Non-interactive org create: set MTX_ORG_REPO_NAME (plain English or slug; optional org-
 # prefix, never doubled) or pass the same on the command line; optional MTX_ORG_DISPLAY_NAME overrides app.json name.
 # Secrets stay in backend.example.json / .env — not prompted.
-# Default clone sources: template-payload (`mtx create payload`), template-basic for org (`mtx create org` via create/org.sh until template-org exists on GitHub). Override with MTX_PAYLOAD_TEMPLATE_REPO / MTX_ORG_TEMPLATE_REPO. MTX_TEMPLATE_SOURCE_REPO is documented for pointing `mtx create payload` at a custom template-* snapshot.
+# Default clone sources: template-payload (`mtx create payload`), template-org (`mtx create org`, replacing the legacy template-basic on 2026-04-20 — rule-of-law §1 Config triad). Override with MTX_PAYLOAD_TEMPLATE_REPO / MTX_ORG_TEMPLATE_REPO. MTX_TEMPLATE_SOURCE_REPO is documented for pointing `mtx create payload` at a custom template-* snapshot.
 # With gh: new repos use `gh repo create org/repo --source=. --remote=origin --push`; existing repos get origin + git push.
 
 : "${MTX_ROOT:?Set MTX_ROOT to the MTX repository root before sourcing lib/create-from-template.sh}"
@@ -244,9 +244,10 @@ mtx_create_ensure_template_available() {
     echoc dim "Template source: $local_path"
     return 0
   fi
+  # (Org-shape refusal for payload flow happens after this returns — see mtx_create_payload_refuse_org_shaped_template.)
 
   echoc yellow "No local template at: $local_path"
-  echoc dim "Expected a sibling of MTX: $ws/$repo (clone the template repo there, or symlink template-org → template-basic during migration), or set MTX_WORKSPACE_ROOT."
+  echoc dim "Expected a sibling of MTX: $ws/$repo (clone the template repo there; for orgs the default is 'template-org' — legacy 'template-basic' still works via MTX_ORG_TEMPLATE_REPO=template-basic), or set MTX_WORKSPACE_ROOT."
   if ! command -v git &>/dev/null; then
     warn "git is required to fetch template from $url"
     exit 1
@@ -266,6 +267,87 @@ mtx_create_ensure_template_available() {
     fi
   fi
   echoc dim "Remote template OK: $url"
+}
+
+# Refuse an org-shaped template when the caller is `mtx create payload`.
+# Root cause: historical misuse of `template-basic` / `template-org` (org-shaped) as MTX_PAYLOAD_TEMPLATE_REPO
+# produced 25+ org-shaped `payload-*` repos with `payloads/`, `prepare:railway`, unified-server wiring
+# (rule-of-law §1 2026-04-18 bullet). Detect the org markers up front and exit before scaffolding.
+# Markers we refuse on (any one is enough):
+#   - config/            (host has config/, payload does not)
+#   - payloads/          (org ships payloads/, payload is itself a single app)
+#   - terraform/         (deploy root only)
+#   - package.json with scripts.prepare:railway (host deploy wiring)
+# This tripwire intentionally does NOT run for `mtx create org` (org templates MUST have these).
+# Stamp identity into a freshly-created payload's config/app.json (rule-of-law §1 2026-04-20
+# — config triad: payload identity lives in the payload's own config/app.json).
+# If the template did not ship config/app.json, scaffold a minimal one.
+mtx_payload_stamp_identity() {
+  local repo_path="$1" repo_name="$2" app_slug="$3" app_display_name="$4"
+  if ! command -v jq &>/dev/null; then
+    warn "jq is required to stamp payload identity into config/app.json (install jq)."
+    return 1
+  fi
+  mkdir -p "$repo_path/config"
+  local app_json="$repo_path/config/app.json"
+  if [ ! -f "$app_json" ]; then
+    warn "Template did not ship config/app.json; scaffolding a minimal one."
+    cat > "$app_json" <<'JSON'
+{
+  "app": { "name": "Payload", "slug": "payload", "version": "1.0.0" },
+  "ai": { "inferenceMode": "local", "enableLogging": false },
+  "chatbots": [],
+  "development": { "port": 3001, "url": "http://localhost" },
+  "staging":     { "port": 3001, "url": "https://staging.example.com" },
+  "production":  { "port": 3001, "url": "https://api.example.com" }
+}
+JSON
+  fi
+  local ver
+  ver=$(jq -r '.version // "1.0.0"' "$repo_path/package.json" 2>/dev/null || echo "1.0.0")
+  [ -z "$ver" ] && ver="1.0.0"
+  jq \
+    --arg name "$app_display_name" \
+    --arg slug "$app_slug" \
+    --arg ver "$ver" \
+    '
+    .app.name = $name
+    | .app.slug = $slug
+    | .app.version = $ver
+    ' "$app_json" > "${app_json}.tmp" && mv "${app_json}.tmp" "$app_json"
+  echoc dim "Stamped payload identity in $app_json (name=$app_display_name, slug=$app_slug, version=$ver)."
+  return 0
+}
+
+mtx_create_payload_refuse_org_shaped_template() {
+  [ "${MTX_CREATE_VARIANT:-}" = "payload" ] || return 0
+  local tpl_path="$1" tpl_repo="$2"
+  [ -d "$tpl_path" ] || return 0
+  local -a offenders=()
+  # Config triad (rule-of-law §1 2026-04-20): a payload MAY ship config/app.json (its own identity)
+  # but MUST NOT ship org-only config files. Flag specific offenders, not the config/ dir itself.
+  [ -f "$tpl_path/config/org.json" ] && offenders+=("config/org.json")
+  [ -f "$tpl_path/config/server.json" ] && offenders+=("config/server.json")
+  [ -f "$tpl_path/config/server.json.example" ] && offenders+=("config/server.json.example")
+  [ -f "$tpl_path/config/backend.json" ] && offenders+=("config/backend.json")
+  [ -f "$tpl_path/config/backend.example.json" ] && offenders+=("config/backend.example.json")
+  [ -f "$tpl_path/config/deploy.json" ] && offenders+=("config/deploy.json")
+  [ -f "$tpl_path/config/deploy.example.json" ] && offenders+=("config/deploy.example.json")
+  [ -f "$tpl_path/config/admin-grants.json" ] && offenders+=("config/admin-grants.json")
+  [ -f "$tpl_path/config/admin-grants.example.json" ] && offenders+=("config/admin-grants.example.json")
+  [ -d "$tpl_path/payloads" ] && offenders+=("payloads/")
+  [ -d "$tpl_path/terraform" ] && offenders+=("terraform/")
+  if [ -f "$tpl_path/package.json" ] && command -v jq &>/dev/null; then
+    if jq -e '.scripts["prepare:railway"] // empty' "$tpl_path/package.json" &>/dev/null; then
+      offenders+=("package.json scripts.\"prepare:railway\"")
+    fi
+  fi
+  [ "${#offenders[@]}" -eq 0 ] && return 0
+  error "Refusing to scaffold a payload from org-shaped template '$tpl_repo' (found: ${offenders[*]})."
+  echoc dim "Payload templates are single-app SPAs (vite.config at root, staticDir: dist). A payload MAY have config/app.json (its own identity) but NOT server.json/org.json/backend.json/deploy.json, payloads/, terraform/, or prepare:railway — if you meant to scaffold an org, run: mtx create org"
+  echoc dim "To scaffold a payload, set MTX_PAYLOAD_TEMPLATE_REPO to a real payload template (default: template-payload), or snapshot an existing payload with: mtx create template"
+  echoc dim "See project-bridge/docs/rule-of-law.md §1 2026-04-18 (Org-shaped payload-*) and §1 2026-04-20 (config triad)."
+  exit 1
 }
 
 mtx_create_ensure_github_org_reachable() {
@@ -362,13 +444,20 @@ mtx_org_scaffold_deploy_config_surface() {
 
   mkdir -p "$repo_path/config"
   workspace_root="$(cd "$workspace_root" && pwd -P)"
-  app_base="$repo_path/config/app.json"
-  if [ ! -f "$app_base" ] && [ -f "$workspace_root/project-bridge/config/app.json" ]; then
-    echoc dim "Using project-bridge config/app.json as base (template had no app.json)."
-    cp -a "$workspace_root/project-bridge/config/app.json" "$app_base"
+
+  # Config triad (rule-of-law §1 2026-04-20): org identity lives in config/org.json.
+  # If the template still ships legacy config/app.json, rename it in-place to config/org.json
+  # (converting top-level "app" key → "org"), then stamp the new org's identity.
+  local org_base="$repo_path/config/org.json"
+  local legacy_app_base="$repo_path/config/app.json"
+  if [ ! -f "$org_base" ] && [ -f "$legacy_app_base" ]; then
+    warn "Template ${MTX_TEMPLATE_REPO:-<unknown>} ships legacy config/app.json (expected config/org.json). Converting in place."
+    jq 'if .app then . + {org: .app} | del(.app) else . end' "$legacy_app_base" > "$org_base" \
+      && rm -f "$legacy_app_base"
   fi
-  if [ ! -f "$app_base" ]; then
-    warn "No config/app.json in template and no project-bridge sibling; cannot scaffold org host config."
+  if [ ! -f "$org_base" ]; then
+    error "Template ${MTX_TEMPLATE_REPO:-<unknown>} has no config/org.json. Org templates must ship a neutral org.json (org.{name,slug,owner,version}, env blocks, ai, chatbots)."
+    echoc dim "Fix: add config/org.json to the org template (${MTX_ORG_TEMPLATE_REPO:-template-org}; legacy alias: template-basic). Reference: project-bridge/config/org.json.example."
     return 1
   fi
 
@@ -384,36 +473,33 @@ mtx_org_scaffold_deploy_config_surface() {
     --argjson prp "${ORG_CFG_PROD_PORT:-3001}" \
     --arg pru "$ORG_CFG_PROD_URL" \
     '
-    .app.name = $name
-    | .app.slug = $slug
-    | .app.owner = $owner
-    | .app.version = $ver
+    .org.name = $name
+    | .org.slug = $slug
+    | .org.owner = $owner
+    | .org.version = $ver
     | .development.port = $devp
     | .development.url = $devu
     | .staging.port = $stp
     | .staging.url = $stu
     | .production.port = $prp
     | .production.url = $pru
-    ' "$app_base" > "${app_base}.tmp" && mv "${app_base}.tmp" "$app_base"
+    ' "$org_base" > "${org_base}.tmp" && mv "${org_base}.tmp" "$org_base"
 
   deploy_base="$repo_path/config/deploy.json"
-  if [ ! -f "$deploy_base" ] && [ -f "$workspace_root/project-bridge/config/deploy.json" ]; then
-    cp -a "$workspace_root/project-bridge/config/deploy.json" "$deploy_base"
-  fi
+  # Templates own their config/. No bridge fallback (see rule-of-law §1/§5/§6).
+  # deploy.json is optional — the org can fill it in later once it has a Railway project.
   if [ -f "$deploy_base" ]; then
     jq --arg pid "$ORG_CFG_DEPLOY_PROJECT_ID" '.projectId = $pid' "$deploy_base" > "${deploy_base}.tmp" && mv "${deploy_base}.tmp" "$deploy_base"
+  else
+    echoc dim "Template has no config/deploy.json — skipped (operator can add one later to pin a Railway projectId)."
   fi
 
   server_base="$repo_path/config/server.json.example"
-  if [ ! -f "$server_base" ] && [ -f "$workspace_root/project-bridge/config/server.json.example" ]; then
-    cp -a "$workspace_root/project-bridge/config/server.json.example" "$server_base"
-  fi
+  # Templates own their config/ schema. No bridge fallback (see rule-of-law §1/§5/§6).
+  # Config triad (§1 2026-04-20): server.json is pure routing — no .app blocks in apps[];
+  # host mount lives at server.host; host identity is in config/org.json (written above).
   if [ -f "$server_base" ]; then
     jq \
-      --arg id "$repo_name" \
-      --arg pname "$ORG_CFG_DISPLAY_NAME" \
-      --arg pslug "$ORG_CFG_APP_SLUG" \
-      --arg ver "$ORG_CFG_VERSION" \
       --argjson sp "${ORG_CFG_SERVER_PORT:-3001}" \
       --arg proot "$ORG_CFG_PROJECT_ROOT" \
       --arg sdir "$ORG_CFG_STATE_DIR" \
@@ -421,16 +507,11 @@ mtx_org_scaffold_deploy_config_surface() {
       .server.port = $sp
       | .server.projectRoot = $proot
       | .server.stateDir = $sdir
-      | .apps[0].id = $id
-      | .apps[0].name = $pname
-      | .apps[0].slug = $pslug
-      | .apps[0].app.name = $pname
-      | .apps[0].app.slug = $pslug
-      | .apps[0].app.version = $ver
-      | .apps[0].source = { "path": "." }
       ' "$server_base" > "$repo_path/config/server.json"
   else
-    warn "No server.json.example in template; skipped config/server.json."
+    error "Template ${MTX_TEMPLATE_REPO:-<unknown>} has no config/server.json.example. Org templates must ship a neutral server.json.example with server.host set and apps[] as a pure payload registry."
+    echoc dim "Fix: add config/server.json.example to the org template. Reference shape: project-bridge/config/server.json.example."
+    return 1
   fi
 
   tf_src="$workspace_root/project-bridge/terraform"
@@ -883,6 +964,7 @@ mtx_create_from_template_run() {
   fi
 
   mtx_create_ensure_template_available "$LOCAL_TEMPLATE_PATH" "$TEMPLATE_URL" "$TEMPLATE_REPO" "$WORKSPACE_ROOT"
+  mtx_create_payload_refuse_org_shaped_template "$LOCAL_TEMPLATE_PATH" "$TEMPLATE_REPO"
 
   echoc cyan "Create new $(echo "$MTX_KIND_LABEL" | tr '[:upper:]' '[:lower:]') repo (${MTX_REPO_PREFIX}*)"
   echo ""
@@ -981,7 +1063,7 @@ mtx_create_from_template_run() {
       rm -rf "$REPO_PATH/.git"
     else
       if ! git clone --depth 1 "$TEMPLATE_URL" "$REPO_PATH"; then
-        warn "Template clone failed. Check local template '$LOCAL_TEMPLATE_PATH' or remote '$TEMPLATE_URL' (org default: template-basic unless MTX_ORG_TEMPLATE_REPO is set; payload default: template-payload — see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_SCAFFOLDING_MODEL.md)."
+        warn "Template clone failed. Check local template '$LOCAL_TEMPLATE_PATH' or remote '$TEMPLATE_URL' (org default: template-org (legacy alias template-basic still accepted via MTX_ORG_TEMPLATE_REPO=template-basic); payload default: template-payload — see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_SCAFFOLDING_MODEL.md)."
         exit 1
       fi
     fi
@@ -1009,6 +1091,10 @@ mtx_create_from_template_run() {
     }
     mtx_org_merge_host_into_package_json "$REPO_PATH" "$WORKSPACE_ROOT" || {
       warn "Could not wire package.json to project-bridge (jq or scripts/org-build-server.sh missing)."
+    }
+  elif [ "${MTX_CREATE_VARIANT:-}" = "payload" ]; then
+    mtx_payload_stamp_identity "$REPO_PATH" "$REPO_NAME" "$APP_SLUG" "$NEW_APP_NAME" || {
+      warn "Could not stamp payload identity into config/app.json; operator should verify."
     }
   fi
 

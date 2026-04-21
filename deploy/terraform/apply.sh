@@ -877,16 +877,24 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             fi
 
             DB_REF="\${{${DB_SVC_NAME}.DATABASE_URL}}"
+            DB_PUBLIC_REF="\${{${DB_SVC_NAME}.DATABASE_PUBLIC_URL}}"
             export RAILWAY_TOKEN="$TOKEN"
             unset RAILWAY_API_TOKEN
             (cd "$PROJECT_ROOT" && railway variable set "DATABASE_URL=$DB_REF" --service "$APP_SVC_ID" --environment "$ENV_NAME" --skip-deploys >/dev/null 2>&1) || {
                 echo -e "${RED}❌ Failed to set DATABASE_URL on app service (${APP_SVC_ID}) for ${ENV_NAME}.${NC}"
                 return 1
             }
+            # DATABASE_PUBLIC_URL is wired as a fallback for Railway private-network DNS flaps (*.railway.internal EAI_AGAIN).
+            # If the Postgres service doesn't expose a public URL this silently no-ops on Railway's side.
+            (cd "$PROJECT_ROOT" && railway variable set "DATABASE_PUBLIC_URL=$DB_PUBLIC_REF" --service "$APP_SVC_ID" --environment "$ENV_NAME" --skip-deploys >/dev/null 2>&1) || \
+                echo -e "${YELLOW}⚠️  Could not set DATABASE_PUBLIC_URL on app service (${APP_SVC_ID}) for ${ENV_NAME}; continuing.${NC}"
             (cd "$PROJECT_ROOT" && railway variable set "DATABASE_PROVIDER=postgresql" --service "$APP_SVC_ID" --environment "$ENV_NAME" --skip-deploys >/dev/null 2>&1) || {
                 echo -e "${RED}❌ Failed to set DATABASE_PROVIDER=postgresql on app service (${APP_SVC_ID}) for ${ENV_NAME}.${NC}"
                 return 1
             }
+            # Force IPv6-first DNS resolution so Node's dns.lookup() doesn't return EAI_AGAIN on *.railway.internal AAAA-only hosts.
+            (cd "$PROJECT_ROOT" && railway variable set 'NODE_OPTIONS=--dns-result-order=ipv6first' --service "$APP_SVC_ID" --environment "$ENV_NAME" --skip-deploys >/dev/null 2>&1) || \
+                echo -e "${YELLOW}⚠️  Could not set NODE_OPTIONS on app service (${APP_SVC_ID}) for ${ENV_NAME}; continuing.${NC}"
 
             APP_VARS=$(cd "$PROJECT_ROOT" && railway variable list --service "$APP_SVC_ID" --environment "$ENV_NAME" --json 2>/dev/null || echo "{}")
             DB_URL_VAL=$(echo "$APP_VARS" | jq -r '.DATABASE_URL // empty' 2>/dev/null)
@@ -1270,8 +1278,12 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             (cd "$PROJECT_ROOT" && railway link --project "$PROJECT_ID" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1) || true
             railway_set_var() {
                 local kv="$1"
-                # Prefer explicit service/environment targeting, then fallback to linked context.
-                railway variable set "$kv" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
+                # Prefer explicit service/environment targeting with --skip-deploys so we do not trigger a redeploy
+                # per variable (this block sets up to 10+ vars; without --skip-deploys Railway rolls the service
+                # that many times, which amplifies transient DNS flakiness on the initial post-deploy request).
+                # Fallback paths also use --skip-deploys where supported by the CLI.
+                railway variable set "$kv" --service "$SERVICE_ID" --environment "$ENVIRONMENT" --skip-deploys >/dev/null 2>&1 \
+                  || railway variable set "$kv" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
                   || railway variables set "$kv" >/dev/null 2>&1
             }
             if [ -n "${RUN_AS_MASTER:-}" ]; then

@@ -24,7 +24,6 @@ MTX_WORKSPACE_REPOS=(
   payload-business-plan-prototyper
   payload-client-portal
   payload-connectsphere
-  payload-copy-of-upc-price-scanner
   payload-drivewise-smart-fuel-and-efficiency-tracker
   payload-fringeboard
   payload-gemini-pricing-master
@@ -44,7 +43,7 @@ MTX_WORKSPACE_REPOS=(
   payload-shadow-grid
   payload-sonic-aura-music-player-prototype
   payload-upc-price-scanner
-  template-basic
+  template-org
   template-payload
   client-a
 )

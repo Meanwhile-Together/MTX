@@ -43,6 +43,85 @@ hoist_one() {
     --exclude .git \
     "$inner/" "$stage/"
 
+  # Config triad (rule-of-law §1 2026-04-20): every payload ships its own config/app.json as
+  # identity. When hoisting a sub-app that didn't have one (the common legacy case — identity was
+  # declared in the outer org's server.json.apps[N].app), scaffold one here from whatever
+  # derivable data we have. §5 forbids regressing to the 2026-04-19 hoist that blanket-deleted
+  # config/ without preserving this file.
+  #
+  # metadata.json retirement (rule-of-law §1 2026-04-20): AI Studio-imported payloads carry a
+  # metadata.json { name, description, requestFramePermissions, majorCapabilities } at the staged
+  # root. We fold `name` / `description` / `requestFramePermissions` into the scaffolded
+  # config/app.json.app block (majorCapabilities is discarded — dead boilerplate) and delete
+  # metadata.json before the hoist completes so the resulting repo matches template-payload shape.
+  local meta_name="" meta_desc="" meta_perms_json="[]"
+  if command -v jq &>/dev/null && [[ -f "$stage/metadata.json" ]]; then
+    meta_name=$(jq -r '.name // empty' "$stage/metadata.json" 2>/dev/null || true)
+    meta_desc=$(jq -r '.description // empty' "$stage/metadata.json" 2>/dev/null || true)
+    meta_perms_json=$(jq -c '.requestFramePermissions // []' "$stage/metadata.json" 2>/dev/null || echo '[]')
+  fi
+
+  if [[ ! -f "$stage/config/app.json" ]]; then
+    mkdir -p "$stage/config"
+    local derived_name derived_ver esc_desc
+    derived_name="$meta_name"
+    if [[ -z "${derived_name:-}" ]]; then
+      # Title-case the slug: "aigotchi" → "Aigotchi"; "ai-alarm-clock" → "Ai Alarm Clock".
+      derived_name=$(printf '%s' "$slug" | sed -E 's/-+/ /g' | awk '{
+        for (i=1; i<=NF; i++) $i = toupper(substr($i,1,1)) tolower(substr($i,2));
+        print
+      }')
+    fi
+    derived_ver="1.0.0"
+    if command -v jq &>/dev/null && [[ -f "$stage/package.json" ]]; then
+      local pv
+      pv=$(jq -r '.version // empty' "$stage/package.json" 2>/dev/null || true)
+      [[ -n "$pv" ]] && derived_ver="$pv"
+    fi
+    # Escape description for safe JSON embedding (quotes, backslashes, etc.).
+    # Use `jq -n --arg` so we don't pick up stray newlines from here-strings.
+    if command -v jq &>/dev/null; then
+      esc_desc=$(jq -n --arg s "${meta_desc}" '$s')
+    else
+      esc_desc="\"${meta_desc//\"/\\\"}\""
+    fi
+    cat > "$stage/config/app.json" <<JSON
+{
+  "app": {
+    "name": "$derived_name",
+    "slug": "$slug",
+    "version": "$derived_ver",
+    "description": ${esc_desc},
+    "requestFramePermissions": ${meta_perms_json}
+  },
+  "ai": { "inferenceMode": "local", "enableLogging": false },
+  "chatbots": [],
+  "development": { "port": 3001, "url": "http://localhost" },
+  "staging":     { "port": 3001, "url": "https://staging.example.com" },
+  "production":  { "port": 3001, "url": "https://api.example.com" }
+}
+JSON
+    echo "[hoist] $base: scaffolded config/app.json (name=$derived_name, slug=$slug, version=$derived_ver, desc=${meta_desc:+yes}, perms=${meta_perms_json})"
+  elif [[ -n "$meta_name$meta_desc" || "$meta_perms_json" != "[]" ]] && command -v jq &>/dev/null; then
+    # app.json already existed but metadata.json carried fields — fold any missing ones in.
+    jq --arg name "$meta_name" \
+       --arg desc "$meta_desc" \
+       --argjson perms "$meta_perms_json" '
+      .app = (.app // {})
+      | (if (.app.name // "") == "" and $name != "" then .app.name = $name else . end)
+      | (if (.app.description // "") == "" and $desc != "" then .app.description = $desc else . end)
+      | (if ((.app.requestFramePermissions // []) | length) == 0 and ($perms | length) > 0
+         then .app.requestFramePermissions = $perms else . end)
+    ' "$stage/config/app.json" >"$stage/config/app.json.tmp" && mv "$stage/config/app.json.tmp" "$stage/config/app.json"
+    echo "[hoist] $base: merged metadata.json fields into existing config/app.json"
+  fi
+
+  # metadata.json has been absorbed (or was empty) — strip it so the hoisted repo has no
+  # retired-format leftovers.
+  if [[ -f "$stage/metadata.json" ]]; then
+    rm -f "$stage/metadata.json"
+  fi
+
   cd "$REPO"
   shopt -s dotglob nullglob
   local p b

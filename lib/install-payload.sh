@@ -69,21 +69,268 @@ find_project_root() {
   return 1
 }
 
+# Classify cwd: is it a single-app payload repo? (flat_payload_app context)
+# Rules (any sufficient):
+#   - directory basename is payload-*
+#   - package.json .name is @meanwhile-together/payload-*
+#   - file signature: config/app.json + index.html + vite.config.* + NO config/server.json
+#     (fallback for legacy AI-Studio-shaped trees: metadata.json + index.html + vite.config.*)
+# Template repos (template-*) are refused earlier by `mtx create payload` (c7a) — here we
+# just decline to redirect from them, so the operator gets the normal "no project root" error.
+#
+# Rule-of-law §1 2026-04-20 (metadata.json retirement): payload identity now lives in
+# config/app.json; metadata.json is legacy AI Studio boilerplate that the hoist script
+# strips. We accept either signature so pre-hoist payloads still get redirected instead
+# of silently treating project-bridge as the host.
+mtx_install_cwd_is_payload_root() {
+  local d="$1"
+  local base name
+  base="$(basename "$d")"
+  case "$base" in
+    payload-*) return 0 ;;
+    template-*) return 1 ;;
+  esac
+  if [ -f "$d/package.json" ] && command -v node >/dev/null 2>&1; then
+    name=$(cd "$d" && node -p "require('./package.json').name" 2>/dev/null || true)
+    case "$name" in
+      @meanwhile-together/payload-*) return 0 ;;
+    esac
+  fi
+  # File-signature fallback (tree says "payload" even if name doesn't).
+  if [ -f "$d/index.html" ] && [ ! -f "$d/config/server.json" ] && [ ! -f "$d/server.json" ]; then
+    if ls "$d"/vite.config.* >/dev/null 2>&1; then
+      # New shape (post-2026-04-20): payload identity lives in config/app.json.
+      if [ -f "$d/config/app.json" ]; then return 0; fi
+      # Legacy shape (pre-hoist AI Studio import): metadata.json at repo root.
+      if [ -f "$d/metadata.json" ]; then return 0; fi
+    fi
+  fi
+  return 1
+}
+
+# Derive the payload's canonical id (e.g. "payload-client-portal") from a payload repo dir.
+mtx_install_derive_payload_id() {
+  local d="$1"
+  local base name id
+  base="$(basename "$d")"
+  case "$base" in
+    payload-*) echo "$base"; return 0 ;;
+  esac
+  if [ -f "$d/package.json" ] && command -v node >/dev/null 2>&1; then
+    name=$(cd "$d" && node -p "require('./package.json').name" 2>/dev/null || true)
+    case "$name" in
+      @meanwhile-together/payload-*) id="${name#@meanwhile-together/}"; echo "$id"; return 0 ;;
+    esac
+  fi
+  return 1
+}
+
+# List sibling org-* dirs under a workspace root (each with a package.json).
+mtx_install_list_org_siblings() {
+  local ws="$1"
+  local d
+  [ -d "$ws" ] || return 0
+  for d in "$ws"/org-*; do
+    [ -d "$d" ] || continue
+    [ -f "$d/package.json" ] || continue
+    echo "$d"
+  done
+}
+
+# Check whether a given org already has a given payload registered in config/server.json.
+# Match rules: id, slug, source.path (../<repo> | ./payloads/<slug>), source.package
+# (@meanwhile-together/<repo>), source.git.url containing <repo>. Requires jq.
+# Returns 0 if already registered, 1 if not, 2 on parse error / missing config.
+mtx_install_org_has_payload() {
+  local org_path="$1" payload_id="$2"
+  local cfg payload_slug
+  cfg="$org_path/config/server.json"
+  [ -f "$cfg" ] || cfg="$org_path/server.json"
+  [ -f "$cfg" ] || return 2
+  command -v jq >/dev/null 2>&1 || return 2
+  payload_slug="${payload_id#payload-}"
+  jq -e \
+    --arg id   "$payload_id" \
+    --arg slug "$payload_slug" \
+    --arg repo "$payload_id" \
+    '
+    def arr: (.apps // .payloads // []);
+    def paths: [
+      ("../" + $repo),
+      ("../" + $repo + "/"),
+      ("./payloads/" + $slug),
+      ("./payloads/" + $slug + "/"),
+      ("payloads/" + $slug),
+      ("payloads/" + $slug + "/")
+    ];
+    [arr[]?
+      | select(
+          (.id    == $id) or (.id    == $repo) or
+          (.slug  == $slug) or
+          ((.source // {}) | (
+            ((.path   // "") as $p | (paths | any(. == $p)))
+            or ((.package // "") == ("@meanwhile-together/" + $repo))
+            or ((.git // {} | .url // "") | test($repo; "i"))
+          ))
+        )
+    ] | length > 0
+    ' "$cfg" >/dev/null 2>&1
+}
+
+# If cwd is a payload root, flip `mtx payload install` into a redirect:
+#   1. Derive payload id.
+#   2. Find eligible target orgs (siblings that don't already have this payload).
+#   3. Prompt (interactive) or honor MTX_TARGET_ORG / --target-org (non-interactive).
+#   4. Export PROJECT_ROOT / CONFIG_PATH / REDIRECTED_FROM_PAYLOAD so the rest of the main
+#      flow installs into the chosen org instead of walking up from cwd.
+# Does NOT re-exec mtx (avoids the MTX_ROOT / sourcing tech debt called out in ROL §1 / §6).
+# See project-bridge/docs/rule-of-law.md §1 2026-04-20 bullet.
+mtx_install_resolve_target_host() {
+  local cwd="$1" target_override="${2:-}"
+  local workspace_root payload_id payload_path
+  local -a candidates eligible
+
+  mtx_install_cwd_is_payload_root "$cwd" || return 0
+
+  payload_id="$(mtx_install_derive_payload_id "$cwd" 2>/dev/null || true)"
+  if [ -z "$payload_id" ]; then
+    warn "cwd looks like a payload but the payload id could not be derived (check directory name or package.json .name)."
+    return 0
+  fi
+  payload_path="$cwd"
+  workspace_root="$(cd "$cwd/.." && pwd -P)"
+
+  echoc cyan "Detected payload repo: $(basename "$payload_path") — flipping to redirect mode."
+  echoc dim "Payload id:     $payload_id"
+  echoc dim "Workspace root: $workspace_root"
+
+  if ! command -v jq >/dev/null 2>&1; then
+    error "jq is required to scan org-* hosts for existing $payload_id registrations. Install jq and retry, or run from an org root directly."
+    exit 2
+  fi
+
+  # Gather candidate org-* siblings and bucket them by install state.
+  local -a all=() already=() unreadable=()
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    all+=("$d")
+  done < <(mtx_install_list_org_siblings "$workspace_root")
+
+  if [ "${#all[@]}" -eq 0 ]; then
+    error "No org-* hosts found alongside $(basename "$payload_path") in $workspace_root."
+    echoc dim "Scaffold one with: mtx create org    (then: cd org-<slug> && mtx payload install $payload_id)"
+    exit 2
+  fi
+
+  local d rc
+  for d in "${all[@]}"; do
+    # `|| rc=$?` keeps this compatible with `set -e` in mtx_install_payload_main.
+    rc=0
+    mtx_install_org_has_payload "$d" "$payload_id" || rc=$?
+    case $rc in
+      0) already+=("$(basename "$d")") ;;
+      1) eligible+=("$d") ;;
+      *) unreadable+=("$(basename "$d")") ;;
+    esac
+  done
+
+  # If operator pre-picked a target, honor it (even if already-installed — they know).
+  if [ -n "$target_override" ]; then
+    local match=""
+    for d in "${all[@]}"; do
+      if [ "$(basename "$d")" = "$target_override" ] || [ "$(basename "$d")" = "org-$target_override" ]; then
+        match="$d"; break
+      fi
+    done
+    if [ -z "$match" ]; then
+      error "--target-org '$target_override' not found under $workspace_root."
+      echoc dim "Available org-* siblings: $(printf '%s ' "${all[@]##*/}")"
+      exit 2
+    fi
+    PROJECT_ROOT="$match"
+    REDIRECTED_FROM_PAYLOAD=1
+    REDIRECTED_PAYLOAD_ID="$payload_id"
+    REDIRECTED_PAYLOAD_CWD="$payload_path"
+    WORKSPACE_ROOT="$workspace_root"
+    echoc dim "Target host (override): $(basename "$PROJECT_ROOT")"
+    return 0
+  fi
+
+  if [ "${#eligible[@]}" -eq 0 ]; then
+    echoc yellow "All $(printf '%d' "${#all[@]}") org-* host(s) already register $payload_id — nothing to do."
+    if [ "${#already[@]}" -gt 0 ]; then
+      echoc dim "  already installed: $(printf '%s ' "${already[@]}")"
+    fi
+    if [ "${#unreadable[@]}" -gt 0 ]; then
+      echoc dim "  skipped (no readable server config): $(printf '%s ' "${unreadable[@]}")"
+    fi
+    exit 0
+  fi
+
+  # Interactive prompt. Standing disclaimer prints ABOVE the list so absence has a reason.
+  local selection=""
+  if [ -t 0 ] && [ -t 1 ] && [ "${MTX_CREATE_NONINTERACTIVE:-}" != "1" ]; then
+    echo ""
+    echoc bold "Install $payload_id into which org?"
+    echoc dim  "(orgs already registering $payload_id are hidden — if yours isn't listed, it's already installed there)"
+    local i=1
+    for d in "${eligible[@]}"; do
+      printf "  %2d) %s\n" "$i" "$(basename "$d")"
+      i=$((i+1))
+    done
+    if [ "${#already[@]}" -gt 0 ]; then
+      echoc dim "  (already installed: $(printf '%s ' "${already[@]}"))"
+    fi
+    if [ "${#unreadable[@]}" -gt 0 ]; then
+      echoc dim "  (skipped, no readable config: $(printf '%s ' "${unreadable[@]}"))"
+    fi
+    echo ""
+    read -rp "Choice [1]: " selection
+    selection="${selection:-1}"
+    if ! [[ "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt "${#eligible[@]}" ]; then
+      error "Invalid selection: $selection"
+      exit 2
+    fi
+  else
+    error "Running non-interactively from a payload repo with no --target-org / MTX_TARGET_ORG set."
+    echoc dim "Eligible orgs (missing $payload_id):"
+    for d in "${eligible[@]}"; do echoc dim "  - $(basename "$d")"; done
+    echoc dim "Re-run with: MTX_TARGET_ORG=<org-name> mtx payload install $payload_id"
+    exit 2
+  fi
+
+  PROJECT_ROOT="${eligible[$((selection-1))]}"
+  REDIRECTED_FROM_PAYLOAD=1
+  REDIRECTED_PAYLOAD_ID="$payload_id"
+  REDIRECTED_PAYLOAD_CWD="$payload_path"
+  WORKSPACE_ROOT="$workspace_root"
+  echoc cyan "Target host: $(basename "$PROJECT_ROOT")"
+  return 0
+}
+
 show_help() {
   cat <<'EOF'
 Usage:
-  mtx payload install <payload-id>
+  mtx payload install [<payload-id>] [--target-org <org-name>]
 
-Installs a payload package/source into the current host repo, then updates
-config/server.json (or server.json) with an idempotent apps[] entry.
+Installs a payload package/source into a host repo's config/server.json (idempotent apps[] entry).
 
-Project root is detected from cwd: project-bridge-style (package.json + config/…),
-or an org payload repo (directory name org-* or package name @meanwhile-together/org-*).
+Where it runs from determines behavior:
+  * Inside an org-* host (or project-bridge dev tree):
+      Walks up from cwd, finds the host's config/server.json, registers the payload.
+  * Inside a payload-* repo:
+      Flips direction. Detects the payload id from cwd, scans sibling org-* hosts, filters out
+      orgs that already register this payload (id / slug / source.path / source.package /
+      source.git.url match), and prompts for a target. If your org isn't in the list, the
+      payload is already registered there. With --target-org <name> or MTX_TARGET_ORG=<name>,
+      the prompt is skipped. Source defaults to path=../<payload-id> in this mode.
+      See project-bridge/docs/rule-of-law.md §1 2026-04-20.
 
-<payload-id> is the app entry id (e.g. payload-client-portal). Default npm package is
-@meanwhile-together/<payload-id> unless you override.
+<payload-id> is the app entry id (e.g. payload-client-portal); optional in redirect mode
+(auto-filled from cwd). Default npm package is @meanwhile-together/<payload-id>.
 
-Run from org or project-bridge host root.
+Environment:
+  MTX_TARGET_ORG        Pre-select target org for redirect mode (skips interactive prompt).
 EOF
 }
 
@@ -92,7 +339,48 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   exit 0
 fi
 
-PAYLOAD_ID="${1:-}"
+# Parse args: [payload-id] [--target-org <name>] (order-flexible).
+PAYLOAD_ID=""
+TARGET_ORG="${MTX_TARGET_ORG:-}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --target-org)
+      shift
+      TARGET_ORG="${1:-}"
+      [ -n "$TARGET_ORG" ] || { error "--target-org requires a value."; exit 1; }
+      ;;
+    --target-org=*)
+      TARGET_ORG="${1#--target-org=}"
+      [ -n "$TARGET_ORG" ] || { error "--target-org= requires a value."; exit 1; }
+      ;;
+    --*)
+      error "Unknown flag: $1"; exit 1
+      ;;
+    *)
+      if [ -z "$PAYLOAD_ID" ]; then
+        PAYLOAD_ID="$1"
+      else
+        error "Unexpected positional argument: $1"; exit 1
+      fi
+      ;;
+  esac
+  shift
+done
+
+# If cwd is a payload repo, flip direction (pick target org, set PROJECT_ROOT).
+# See rule-of-law §1 2026-04-20 bullet. Does not re-exec mtx.
+REDIRECTED_FROM_PAYLOAD=0
+REDIRECTED_PAYLOAD_ID=""
+REDIRECTED_PAYLOAD_CWD=""
+WORKSPACE_ROOT=""
+mtx_install_resolve_target_host "$(pwd)" "$TARGET_ORG"
+
+# Auto-fill payload id from the redirect if the operator didn't pass one.
+if [ "$REDIRECTED_FROM_PAYLOAD" = "1" ] && [ -z "$PAYLOAD_ID" ]; then
+  PAYLOAD_ID="$REDIRECTED_PAYLOAD_ID"
+  echoc dim "Payload id (from cwd): $PAYLOAD_ID"
+fi
+
 if [ -z "$PAYLOAD_ID" ]; then
   error "Missing payload id."
   echo ""
@@ -100,7 +388,10 @@ if [ -z "$PAYLOAD_ID" ]; then
   exit 1
 fi
 
-PROJECT_ROOT="$(find_project_root || true)"
+# When redirected, the host is already picked; otherwise walk up from cwd as usual.
+if [ -z "${PROJECT_ROOT:-}" ]; then
+  PROJECT_ROOT="$(find_project_root || true)"
+fi
 if [ -z "$PROJECT_ROOT" ]; then
   error "Could not find a project root from current directory."
   warn "Expected package.json plus config/server.json (or server.json) in current directory or a parent."
@@ -165,6 +456,34 @@ if [[ "$PAYLOAD_ID" == @*/* ]]; then
   DEFAULT_PACKAGE="$PAYLOAD_ID"
 fi
 
+# Config triad (rule-of-law §1 2026-04-20): pre-fill name/slug from the payload's own config/app.json
+# when we can see the payload source on disk (redirect-from-payload case, or a sibling path). Identity
+# is the payload's property — the org's server.json entry only carries routing.
+mtx_install_prefill_from_payload_app() {
+  local payload_root=""
+  if [ "${REDIRECTED_FROM_PAYLOAD:-0}" = "1" ] && [ -n "${REDIRECTED_PAYLOAD_CWD:-}" ]; then
+    payload_root="$REDIRECTED_PAYLOAD_CWD"
+  else
+    local sibling="$WORKSPACE_ROOT/$PAYLOAD_ID"
+    [ -d "$sibling" ] && payload_root="$sibling"
+  fi
+  [ -n "$payload_root" ] || return 0
+  local app_json="$payload_root/config/app.json"
+  if [ ! -f "$app_json" ]; then
+    warn "Payload $PAYLOAD_ID has no config/app.json — identity will default from the repo name."
+    echoc dim "Consider adding $app_json with {\"app\":{\"name\":\"…\",\"slug\":\"…\",\"version\":\"1.0.0\"}} so orgs mount it with accurate identity."
+    return 0
+  fi
+  command -v jq >/dev/null 2>&1 || return 0
+  local pn ps
+  pn=$(jq -r '.app.name // empty' "$app_json" 2>/dev/null || true)
+  ps=$(jq -r '.app.slug // empty' "$app_json" 2>/dev/null || true)
+  if [ -n "${pn:-}" ] && [ "$pn" != "null" ]; then DEFAULT_NAME="$pn"; fi
+  if [ -n "${ps:-}" ] && [ "$ps" != "null" ]; then PAYLOAD_SLUG="$ps"; fi
+  echoc dim "Prefilled from $app_json: name=\"$DEFAULT_NAME\", slug=\"$PAYLOAD_SLUG\"."
+}
+mtx_install_prefill_from_payload_app
+
 echo ""
 echoc cyan "Install payload into project"
 echoc dim "Project root: $PROJECT_ROOT"
@@ -179,13 +498,22 @@ read -rp "$(echo -e "${bold:-}Slug:${reset:-} [${PAYLOAD_SLUG}] ")" INPUT_SLUG
 INPUT_SLUG="$(slugify "$(trim "${INPUT_SLUG:-$PAYLOAD_SLUG}")")"
 [ -n "$INPUT_SLUG" ] || INPUT_SLUG="$PAYLOAD_SLUG"
 
+# When redirected from a payload, defaults shift: the payload lives as a sibling repo, so
+# source.path = ../<payload-id> is the canonical reference (see rule-of-law §1 2026-04-20).
+DEFAULT_SRC_CHOICE="1"
+DEFAULT_SIBLING_PATH=""
+if [ "${REDIRECTED_FROM_PAYLOAD:-0}" = "1" ]; then
+  DEFAULT_SRC_CHOICE="2"
+  DEFAULT_SIBLING_PATH="../$PAYLOAD_ID"
+fi
+
 echo ""
 echo "Payload source type:"
 echo "  1) package (npm install)"
 echo "  2) path"
 echo "  3) git"
-read -rp "Choice [1]: " SRC_CHOICE
-SRC_CHOICE="${SRC_CHOICE:-1}"
+read -rp "Choice [${DEFAULT_SRC_CHOICE}]: " SRC_CHOICE
+SRC_CHOICE="${SRC_CHOICE:-$DEFAULT_SRC_CHOICE}"
 
 SOURCE_KIND="package"
 SOURCE_VALUE=""
@@ -199,8 +527,13 @@ case "$SRC_CHOICE" in
     ;;
   2|path)
     SOURCE_KIND="path"
-    read -rp "Path (relative to project root, or absolute): " SOURCE_VALUE
-    SOURCE_VALUE="$(trim "$SOURCE_VALUE")"
+    if [ -n "$DEFAULT_SIBLING_PATH" ]; then
+      read -rp "Path (relative to project root, or absolute) [${DEFAULT_SIBLING_PATH}]: " SOURCE_VALUE
+      SOURCE_VALUE="$(trim "${SOURCE_VALUE:-$DEFAULT_SIBLING_PATH}")"
+    else
+      read -rp "Path (relative to project root, or absolute): " SOURCE_VALUE
+      SOURCE_VALUE="$(trim "$SOURCE_VALUE")"
+    fi
     [ -n "$SOURCE_VALUE" ] || { error "Path source requires a value."; exit 1; }
     ;;
   3|git)
