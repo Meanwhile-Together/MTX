@@ -31,8 +31,6 @@ MTX_WORKSPACE_REPOS=(
   payload-idle-harvest
   payload-in-memory-semantic-search-with-embeddings
   payload-justlost
-  payload-justlost-1
-  payload-justlost-stable
   payload-litmus
   payload-live-upc-scanner
   payload-mtx-e2e-alpha-1775730733
@@ -41,6 +39,7 @@ MTX_WORKSPACE_REPOS=(
   payload-scan-tracker
   payload-shadow-grid
   payload-sonic-aura-music-player-prototype
+  payload-theempty
   payload-upc-price-scanner
   template-org
   template-payload
