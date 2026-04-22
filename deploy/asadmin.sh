@@ -11,23 +11,59 @@ MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 # shellcheck source=../includes/prepare-env.sh
 source "$MTX_ROOT/includes/prepare-env.sh"
 
-# Switch that signals to the server this is the main master (mounts /auth; apply.sh persists to .env and sets on Railway)
-export RUN_AS_MASTER=true
-
-# Resolve project root to load .env for MASTER_JWT_SECRET (., .., or sibling dirs with config/app.json)
+# Resolve project root first (., .., or sibling dirs with config/app.json or config/org.json)
 PROJECT_ROOT=""
-if [ -f "config/app.json" ]; then
+if [ -f "config/app.json" ] || [ -f "config/org.json" ]; then
   PROJECT_ROOT="$(pwd)"
 fi
-if [ -z "$PROJECT_ROOT" ] && [ -f "../config/app.json" ]; then
+if [ -z "$PROJECT_ROOT" ] && { [ -f "../config/app.json" ] || [ -f "../config/org.json" ]; }; then
   PROJECT_ROOT="$(cd .. && pwd)"
 fi
 if [ -z "$PROJECT_ROOT" ]; then
   for d in . ..; do
-    [ -f "${d}/config/app.json" ] && PROJECT_ROOT="$(cd "$d" && pwd)" && break
+    { [ -f "${d}/config/app.json" ] || [ -f "${d}/config/org.json" ]; } && PROJECT_ROOT="$(cd "$d" && pwd)" && break
   done
 fi
 [ -z "$PROJECT_ROOT" ] && PROJECT_ROOT="$(pwd)"
+
+# GUARDRAIL: asadmin is only valid against a project/org that declares itself as the master.
+# Without this, a stray `mtx deploy asadmin` from any tenant org silently plants
+# RUN_AS_MASTER=true into that org's .env (apply.sh:122-125), which then re-propagates on
+# every subsequent `mtx deploy` (apply.sh:1290+) — producing a two-master split-brain on Railway.
+# See project-bridge/docs/rule-of-law.md ("Master promotion is declarative, not incidental").
+#
+# Escape hatch for first-time master-promote (e.g. a brand-new workspace where no org has been
+# promoted yet): MTX_ASADMIN_FORCE=1 mtx deploy asadmin.
+mtx_org_declares_master() {
+  local root="$1" f
+  for f in "$root/config/org.json" "$root/config/app.json"; do
+    [ -f "$f" ] || continue
+    # jq-free: grep inside a single-line match for "master": true in the "org" block or top level.
+    if grep -qE '"master"[[:space:]]*:[[:space:]]*true' "$f"; then
+      return 0
+    fi
+  done
+  return 1
+}
+if [ "${MTX_ASADMIN_FORCE:-}" != "1" ] && ! mtx_org_declares_master "$PROJECT_ROOT"; then
+  echo "❌ Refusing to run 'mtx deploy asadmin' from $PROJECT_ROOT" >&2
+  echo "   This project does not declare itself as master (expected \"master\": true inside the org block of config/org.json)." >&2
+  echo "   Running asadmin from a tenant org plants RUN_AS_MASTER=true into its .env and will re-propagate on every subsequent 'mtx deploy'," >&2
+  echo "   creating a two-master split-brain on Railway." >&2
+  echo "" >&2
+  echo "   If you genuinely mean to promote this project to master, either:" >&2
+  echo "     1. Add  \"master\": true  inside the \"org\" block of $PROJECT_ROOT/config/org.json, OR" >&2
+  echo "     2. Re-run with MTX_ASADMIN_FORCE=1 (also adds the declaration)." >&2
+  exit 1
+fi
+
+# Explicit intent sentinel. apply.sh uses this (not the presence of RUN_AS_MASTER in env) to gate
+# master-env persistence to .env and propagation to the Railway service. Prevents a polluted .env
+# from an earlier wrong-directory asadmin run from re-asserting master-ness on future deploys.
+export MTX_ASADMIN=1
+
+# Switch that signals to the server this is the main master (mounts /auth; apply.sh persists to .env and sets on Railway)
+export RUN_AS_MASTER=true
 
 mtx_require_prepare_env "$PROJECT_ROOT" || exit 1
 

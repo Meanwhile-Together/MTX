@@ -119,9 +119,18 @@ set_env_var_in_file() {
     fi
 }
 
-# Persist is-master switch and secret when set (for deploy asadmin; server reads RUN_AS_MASTER to run as main master)
-if [ -n "${RUN_AS_MASTER:-}" ]; then
+# Persist is-master switch only when the caller is *explicitly* asadmin (MTX_ASADMIN=1 sentinel
+# set by MTX/deploy/asadmin.sh). Without this gate, any `mtx deploy` from an org whose .env
+# accidentally contains RUN_AS_MASTER=true would re-persist and re-propagate master-ness —
+# see apply.sh:1290+ block and rule-of-law "Master promotion is declarative, not incidental".
+if [ "${MTX_ASADMIN:-}" = "1" ] && [ -n "${RUN_AS_MASTER:-}" ]; then
     set_env_var_in_file "RUN_AS_MASTER" "true"
+elif [ -z "${MTX_ASADMIN:-}" ] && [ -n "${RUN_AS_MASTER:-}" ]; then
+    # Defensive: scrub inherited RUN_AS_MASTER from the deploy shell so the master-auth block
+    # at apply.sh:1290+ cannot re-set it on the Railway service. The authoritative way to
+    # restore master-ness is `mtx deploy asadmin` (guarded by org.master: true).
+    echo -e "${YELLOW}⚠️  Ignoring RUN_AS_MASTER in environment for this deploy — MTX_ASADMIN sentinel not set (run 'mtx deploy asadmin' for a master deploy).${NC}"
+    unset RUN_AS_MASTER
 fi
 if [ -n "${MASTER_JWT_SECRET:-}" ]; then
     set_env_var_in_file "MASTER_JWT_SECRET" "$MASTER_JWT_SECRET"
@@ -1305,9 +1314,20 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                   || railway variable set "$kv" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
                   || railway variables set "$kv" >/dev/null 2>&1
             }
-            if [ -n "${RUN_AS_MASTER:-}" ]; then
+            if [ "${MTX_ASADMIN:-}" = "1" ] && [ -n "${RUN_AS_MASTER:-}" ]; then
                 RUN_AS_MASTER_VAL="true"
                 (railway_set_var "RUN_AS_MASTER=$RUN_AS_MASTER_VAL" && echo -e "${GREEN}✅ RUN_AS_MASTER=$RUN_AS_MASTER_VAL on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RUN_AS_MASTER via CLI${NC}"
+            else
+                # Not an asadmin deploy → actively remove RUN_AS_MASTER from the Railway service
+                # so a previously-poisoned tenant self-heals on its next plain `mtx deploy`.
+                # Idempotent (harmless if the var isn't set). Uses --skip-deploys to avoid an
+                # extra restart; the terminal redeploy at the end of this block still rolls the
+                # container once with the corrected env.
+                (railway variables delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" --yes --skip-deploys >/dev/null 2>&1 \
+                  || railway variable delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" --yes --skip-deploys >/dev/null 2>&1 \
+                  || railway variables delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" --yes >/dev/null 2>&1 \
+                  || railway variable delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" --yes >/dev/null 2>&1 \
+                  || true)
             fi
             # Master admin addon reads Railway env vars at runtime to list services/logs/apps.
             # Persist project-scoped token + project id on the deployed service.
