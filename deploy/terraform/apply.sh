@@ -1320,14 +1320,18 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             else
                 # Not an asadmin deploy → actively remove RUN_AS_MASTER from the Railway service
                 # so a previously-poisoned tenant self-heals on its next plain `mtx deploy`.
-                # Idempotent (harmless if the var isn't set). Uses --skip-deploys to avoid an
-                # extra restart; the terminal redeploy at the end of this block still rolls the
-                # container once with the corrected env.
-                (railway variables delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" --yes --skip-deploys >/dev/null 2>&1 \
-                  || railway variable delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" --yes --skip-deploys >/dev/null 2>&1 \
-                  || railway variables delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" --yes >/dev/null 2>&1 \
-                  || railway variable delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" --yes >/dev/null 2>&1 \
-                  || true)
+                # Idempotent (harmless if the var isn't set).
+                #
+                # CLI form (Railway v3.x, confirmed 2026-04-22):
+                #   railway variable delete --service <s> --environment <e> <KEY>
+                # 'variable delete' does NOT accept --yes or --skip-deploys. On older CLIs the
+                # plural form 'variables delete' existed — kept as a fallback. Any successful path
+                # prints a success line so the deploy log shows the scrub happened.
+                if railway variable delete RUN_AS_MASTER --service "$APP_SERVICE_NAME_FOR_ENV" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
+                  || railway variable delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
+                  || railway variables delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1; then
+                    echo -e "${YELLOW}🧹 Scrubbed stale RUN_AS_MASTER from $APP_SERVICE_NAME_FOR_ENV (plain 'mtx deploy' does not assert master).${NC}"
+                fi
             fi
             # Master admin addon reads Railway env vars at runtime to list services/logs/apps.
             # Persist project-scoped token + project id on the deployed service.
