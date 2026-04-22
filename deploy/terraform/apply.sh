@@ -1315,10 +1315,47 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             [ -n "${PROJECT_TOKEN:-}" ] && (railway_set_var "RAILWAY_TOKEN=$PROJECT_TOKEN" && echo -e "${GREEN}✅ RAILWAY_TOKEN set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RAILWAY_TOKEN via CLI${NC}"
             [ -n "${PROJECT_ID:-}" ] && (railway_set_var "RAILWAY_PROJECT_ID=$PROJECT_ID" && echo -e "${GREEN}✅ RAILWAY_PROJECT_ID set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RAILWAY_PROJECT_ID via CLI${NC}"
             [ -n "${MASTER_JWT_SECRET:-}" ] && (railway_set_var "MASTER_JWT_SECRET=$MASTER_JWT_SECRET" && echo -e "${GREEN}✅ MASTER_JWT_SECRET set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set MASTER_JWT_SECRET via CLI${NC}"
-            # Keep legacy/server auth paths happy: if running as master and JWT_SECRET is unset,
-            # mirror MASTER_JWT_SECRET into JWT_SECRET on the same service.
-            if [ -n "${RUN_AS_MASTER:-}" ] && [ -n "${MASTER_JWT_SECRET:-}" ] && [ -z "${JWT_SECRET:-}" ]; then
-                (railway_set_var "JWT_SECRET=$MASTER_JWT_SECRET" && echo -e "${GREEN}✅ JWT_SECRET mirrored from MASTER_JWT_SECRET on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set JWT_SECRET via CLI${NC}"
+            # JWT_SECRET policy under the asmaster architecture (rule-of-law §1 2026-04-21):
+            #   • Master (RUN_AS_MASTER=true): admin lane and master-hosted apps both use master-issued
+            #     tokens, so JWT_SECRET is mirrored from MASTER_JWT_SECRET. verifyMasterAuthToken on the
+            #     admin mount also uses MASTER_JWT_SECRET; the mirror just keeps any legacy code path
+            #     using getAuthService() aligned.
+            #   • Tenant (no RUN_AS_MASTER, but MASTER_JWT_SECRET set via workspace overlay): tenant
+            #     app payloads sign/verify with a tenant-local JWT_SECRET that is INTENTIONALLY distinct
+            #     from MASTER_JWT_SECRET, so a compromised tenant cannot forge master-valid admin tokens
+            #     and vice versa. If JWT_SECRET is missing we generate a random one here, persist it to
+            #     PROJECT_ROOT/.env (so future deploys reuse it — rotating it on every deploy would
+            #     invalidate every active tenant-app session), and set it on the Railway service.
+            if [ -n "${MASTER_JWT_SECRET:-}" ] && [ -z "${JWT_SECRET:-}" ]; then
+                if [ -n "${RUN_AS_MASTER:-}" ]; then
+                    (railway_set_var "JWT_SECRET=$MASTER_JWT_SECRET" && echo -e "${GREEN}✅ JWT_SECRET mirrored from MASTER_JWT_SECRET on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set JWT_SECRET via CLI${NC}"
+                    export JWT_SECRET="$MASTER_JWT_SECRET"
+                else
+                    NEW_JWT_SECRET=""
+                    if command -v openssl >/dev/null 2>&1; then
+                        NEW_JWT_SECRET="$(openssl rand -base64 48 | tr -d '\n\r')"
+                    elif [ -r /dev/urandom ]; then
+                        NEW_JWT_SECRET="$(tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 64)"
+                    fi
+                    if [ -n "$NEW_JWT_SECRET" ]; then
+                        (railway_set_var "JWT_SECRET=$NEW_JWT_SECRET" && echo -e "${GREEN}✅ Generated tenant JWT_SECRET on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set JWT_SECRET via CLI${NC}"
+                        # Persist to PROJECT_ROOT/.env only when no JWT_SECRET= line is already present
+                        # (treat any existing line — even empty — as authoritative to avoid fighting an operator edit).
+                        if [ -f "$PROJECT_ROOT/.env" ]; then
+                            if ! grep -qE '^[[:space:]]*JWT_SECRET=' "$PROJECT_ROOT/.env" 2>/dev/null; then
+                                echo "JWT_SECRET=$NEW_JWT_SECRET" >> "$PROJECT_ROOT/.env"
+                                echo -e "${GREEN}✅ Persisted tenant JWT_SECRET to $PROJECT_ROOT/.env${NC}"
+                            fi
+                        else
+                            echo "JWT_SECRET=$NEW_JWT_SECRET" >> "$PROJECT_ROOT/.env"
+                            chmod 600 "$PROJECT_ROOT/.env" 2>/dev/null || true
+                            echo -e "${GREEN}✅ Persisted tenant JWT_SECRET to $PROJECT_ROOT/.env${NC}"
+                        fi
+                        export JWT_SECRET="$NEW_JWT_SECRET"
+                    else
+                        echo -e "${YELLOW}⚠️  Could not generate tenant JWT_SECRET (install openssl or ensure /dev/urandom is readable).${NC}"
+                    fi
+                fi
             fi
             [ -n "${MASTER_AUTH_ISSUER:-}" ] && railway_set_var "MASTER_AUTH_ISSUER=$MASTER_AUTH_ISSUER" || true
             [ -n "${MASTER_CORS_ORIGINS:-}" ] && railway_set_var "MASTER_CORS_ORIGINS=$MASTER_CORS_ORIGINS" || true
