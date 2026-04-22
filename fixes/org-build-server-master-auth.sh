@@ -1,19 +1,25 @@
 #!/usr/bin/env bash
 # mtx fixes org-build-server-master-auth — bring an org-*'s scripts/org-build-server.sh to
-# master-auth parity with template-basic: source .env so build-time VITE_MASTER_AUTH_URL
-# is baked into payload-admin, derive VITE_MASTER_AUTH_URL from MASTER_AUTH_PUBLIC_URL
-# when only the latter is set, and always run npm run build:backend (payload-admin) after
-# build:client. Idempotent: already-patched files are recognised by a sentinel comment
-# and left untouched.
+# master-auth parity: source .env so build-time VITE_MASTER_AUTH_URL is baked into payload-
+# admin, derive VITE_MASTER_AUTH_URL from MASTER_AUTH_PUBLIC_URL when only the latter is
+# set, and always run npm run build:backend (payload-admin) after build:client. Idempotent:
+# already-patched files are recognised by sentinel comments and upgraded in place.
 #
-# Why this fix exists (rule-of-law §1 2026-04-21 org-build-server parity):
-#   payload-admin's SPA reads VITE_MASTER_AUTH_URL (or MASTER_AUTH_URL) at BUILD TIME and
-#   defaults to same-origin `/auth`. When an org's org-build-server.sh predates the master-
-#   auth fan-out contract, it never sources .env and gates the admin rebuild on a "slug" :
-#   "admin" grep that does not match payload-admin entries (id: "payload-admin", no slug).
-#   Result: the tenant admin bundle ships with authBasePath=/auth and admin login hits the
-#   tenant's local auth instead of the asmaster `/auth`, surfacing as "invalid username or
-#   password" even with valid master credentials.
+# Version history:
+#   v1 — add .env source + VITE_MASTER_AUTH_URL derive + unconditional build:backend.
+#   v2 — (RETIRED) also fanned out the admin API (VITE_MASTER_ADMIN_URL) to master.
+#   v3 — strips the v2 VITE_MASTER_ADMIN_URL block. Admin API is same-origin on every host
+#        (each org has its own config/server.json apps[], its own Railway project, its own
+#        cross-app DB); only /auth fans out to master.
+#
+# Why this fix exists (rule-of-law §1 2026-04-21 Asmaster architecture):
+#   payload-admin's SPA reads VITE_MASTER_AUTH_URL at BUILD TIME and defaults to same-origin
+#   `/auth`. When an org's org-build-server.sh predates the master-auth fan-out contract,
+#   it never sources .env and gates the admin rebuild on a "slug" : "admin" grep that does
+#   not match payload-admin entries (id: "payload-admin", no slug). Result: the tenant
+#   admin bundle ships with authBasePath=/auth and admin login hits the tenant's local
+#   auth instead of asmaster `/auth`, surfacing as "invalid username or password" even
+#   with valid master credentials.
 #
 # Usage:
 #   mtx fixes org-build-server-master-auth                 # patch cwd if it's an org-*; else all workspace siblings
@@ -82,10 +88,14 @@ text = pathlib.Path(path).read_text()
 original = text
 
 SENTINEL = "# MTX-FIX: org-build-server-master-auth v1"
+SENTINEL_V2 = "# MTX-FIX: org-build-server-master-auth v2 (admin-api fan-out)"
+SENTINEL_V3 = "# MTX-FIX: org-build-server-master-auth v3 (strip admin-api fan-out; auth-only)"
 
-# Self-skip if a prior run already stamped the sentinel.
-if SENTINEL in text:
-    print(f"  [=] already patched (sentinel present): {path}")
+# v3 is the canonical shape. If v3 is stamped, nothing to do.
+# If v2 is stamped but v3 is not, we must STRIP the VITE_MASTER_ADMIN_URL block
+# (admin API is same-origin on every host — only /auth fans out to master).
+if SENTINEL_V3 in text:
+    print(f"  [=] already patched (v3 sentinel present): {path}")
     sys.exit(0)
 
 changes = []
@@ -95,6 +105,7 @@ env_block = (
     f'\n{SENTINEL} — source .env so build-time VITE_MASTER_AUTH_URL is baked into payload-admin.\n'
     '# payload-admin reads VITE_MASTER_AUTH_URL at BUILD TIME. If the org only has\n'
     '# MASTER_AUTH_PUBLIC_URL (the origin), derive VITE_MASTER_AUTH_URL from it by appending /auth.\n'
+    '# Only /auth fans out to master — the admin API is same-origin on every host.\n'
     'ENV_FILE="$ROOT/.env"\n'
     'if [ -f "$ENV_FILE" ]; then\n'
     '  set -a\n'
@@ -106,6 +117,7 @@ env_block = (
     '  base="${MASTER_AUTH_PUBLIC_URL%/}"\n'
     '  export VITE_MASTER_AUTH_URL="${base}/auth"\n'
     'fi\n'
+    f'{SENTINEL_V3}\n'
     '\n'
     '# Prisma client must be generated for PostgreSQL on hosted builds: Railway often omits\n'
     '# DATABASE_URL during Docker build, which previously made db:generate default to sqlite\n'
@@ -128,12 +140,79 @@ insert_at = m_root.end()
 # Don't duplicate if the raw strings are already present in some form.
 already_has_env_source = bool(re.search(r'^\s*source "\$ENV_FILE"', text, re.MULTILINE))
 already_has_vite_derive = "VITE_MASTER_AUTH_URL" in text
-if not (already_has_env_source and already_has_vite_derive):
+
+# --- v2 strip: remove the VITE_MASTER_ADMIN_URL block if it's present from a prior v2 run.
+#      Admin API is same-origin on every host; the admin SPA resolves its base from
+#      window.location (rule-of-law §5 "No admin-API fan-out to master").
+#      Three things to strip independently — they may or may not be contiguous in files
+#      the v2 patcher produced:
+#        (a) the v2 sentinel line                               (`# MTX-FIX: ... v2 ...`)
+#        (b) the 1-3 comment lines immediately preceding the if (start with "# Admin API fan-out" etc.)
+#        (c) the `if [ -z "${VITE_MASTER_ADMIN_URL:-}" ]; then … fi` block itself
+stripped_any = False
+
+# (c) strip the if-block first (anchors the other two).
+admin_if_re = re.compile(
+    r'^if \[ -z "\$\{VITE_MASTER_ADMIN_URL:-\}" \]; then\n'
+    r'(?:^[ \t][^\n]*\n)+?'
+    r'^fi\n',
+    re.MULTILINE,
+)
+m_if = admin_if_re.search(text)
+if m_if:
+    start = m_if.start()
+    # (b) walk backward and also eat any contiguous `# …` comment lines (and blank lines between them)
+    # that look like the v2 explanation block, up to but not including the preceding VITE_MASTER_AUTH_URL
+    # fi-line or the env-derive block.
+    preceding = text[:start]
+    lines = preceding.splitlines(keepends=True)
+    eat_from = len(lines)
+    for i in range(len(lines) - 1, -1, -1):
+        line = lines[i]
+        stripped_line = line.lstrip()
+        if stripped_line.startswith('#') and 'MTX-FIX' not in stripped_line:
+            eat_from = i
+            continue
+        if line.strip() == '':
+            # only eat blank lines if they're sandwiched between comments we're already eating
+            eat_from = i
+            continue
+        break
+    if eat_from < len(lines):
+        start = sum(len(l) for l in lines[:eat_from])
+    text = text[:start] + text[m_if.end():]
+    stripped_any = True
+
+# (a) remove the v2 sentinel line(s), and any now-orphaned trailing blank line that
+# follows the sentinel (so we don't leave double-blank gaps).
+v2_sentinel_re = re.compile(
+    r'^# MTX-FIX: org-build-server-master-auth v2[^\n]*\n(?:\n)?',
+    re.MULTILINE,
+)
+if v2_sentinel_re.search(text):
+    text = v2_sentinel_re.sub('', text)
+    stripped_any = True
+
+if stripped_any:
+    changes.append("v3 strip: remove VITE_MASTER_ADMIN_URL block + v2 sentinel")
+
+# If v1 was already stamped (with or without v2), promote to v3 by appending the v3 sentinel.
+if SENTINEL in text and SENTINEL_V3 not in text:
+    # Put v3 sentinel right after the v1 block's closing `fi` of the VITE_MASTER_AUTH_URL derivation.
+    m_auth_fi = re.search(
+        r'(if \[ -z "\$\{VITE_MASTER_AUTH_URL:-\}" \][\s\S]*?\nfi\n)',
+        text,
+    )
+    if m_auth_fi:
+        ins = m_auth_fi.end()
+        text = text[:ins] + f'{SENTINEL_V3}\n' + text[ins:]
+        changes.append("v3 stamp")
+elif not (already_has_env_source and already_has_vite_derive):
     text = text[:insert_at] + env_block + text[insert_at:]
-    changes.append("env + VITE_MASTER_AUTH_URL + DB_PROVIDER")
-else:
-    # Legacy script already has the pieces but no sentinel — stamp sentinel only.
-    text = text[:insert_at] + f"\n{SENTINEL}\n" + text[insert_at:]
+    changes.append("env + VITE_MASTER_AUTH_URL + DB_PROVIDER (v3)")
+elif SENTINEL not in text:
+    # Legacy script already has the pieces but no sentinel — stamp v1+v3 only.
+    text = text[:insert_at] + f"\n{SENTINEL}\n{SENTINEL_V3}\n" + text[insert_at:]
     changes.append("sentinel-only (env + VITE already present)")
 
 # --- 2) Replace stale `need_admin=false ... fi` grep-gated admin build block. ---

@@ -226,6 +226,66 @@ mtx_vendor_run_build() {
   return 0
 }
 
+# Reap stale sibling compile outputs under a sibling project-bridge BEFORE any
+# payload bundler (vite/rollup) runs against it. Payloads import from
+# @meanwhile-together/shared via the root tsconfig `paths` → `shared/src/*.ts`;
+# bundlers do exact-extension lookup first, so a stale `shared/src/foo.js` next
+# to `foo.ts` wins silently and the payload build surfaces with "export X not
+# found" or a snapshot of last-build exports. See project-bridge/docs/rule-of-law.md
+# §1 2026-04-22 "Stale sibling .js shadow trap".
+#
+# Runs once per vendor pass, before the per-payload build loop. Uses the
+# project-bridge reaper script when available (authoritative target list); falls
+# back to an inline sweep when vendoring against a pinned/cached project-bridge
+# that lacks the script. Never fails the vendor pass — debris removal is fire-
+# and-forget; the payload build that follows surfaces any remaining issue.
+mtx_vendor_reap_project_bridge_stale() {
+  local projectRoot="$1"
+  [ -n "$projectRoot" ] || return 0
+  local pb=""
+  local cand
+  for cand in \
+    "$projectRoot/../project-bridge" \
+    "$projectRoot/vendor/project-bridge" \
+    "${PROJECT_BRIDGE_ROOT:-}"
+  do
+    [ -n "$cand" ] || continue
+    if [ -f "$cand/package.json" ] && [ -d "$cand/shared/src" ]; then
+      pb="$(cd "$cand" && pwd)"
+      break
+    fi
+  done
+  [ -n "$pb" ] || return 0
+
+  if [ -x "$pb/scripts/reap-stale-compiled.sh" ]; then
+    PB_ROOT="$pb" bash "$pb/scripts/reap-stale-compiled.sh" || true
+    return 0
+  fi
+
+  # Fallback: inline sweep (keep in sync with scripts/reap-stale-compiled.sh).
+  local found=0 rel dir
+  for rel in shared/src shared/types shared/config engine/src ui/src demo/src admin/src; do
+    dir="$pb/$rel"
+    [ -d "$dir" ] || continue
+    local hits
+    hits="$(find "$dir" \
+      \( -name '*.js' -o -name '*.js.map' -o -name '*.d.ts.map' \
+         -o \( -name '*.d.ts' ! -name '*-env.d.ts' \) \) \
+      -type f 2>/dev/null | wc -l | tr -d ' ')"
+    [ "$hits" -gt 0 ] 2>/dev/null || continue
+    find "$dir" \
+      \( -name '*.js' -o -name '*.js.map' -o -name '*.d.ts.map' \
+         -o \( -name '*.d.ts' ! -name '*-env.d.ts' \) \) \
+      -type f -delete 2>/dev/null || true
+    echo "[vendor-payloads] reaped $hits stale compile output(s) under project-bridge/$rel/" >&2
+    found=$((found + hits))
+  done
+  if [ "$found" -gt 0 ]; then
+    echo "[vendor-payloads] removed $found stale sibling .js/.d.ts/.map file(s) under $pb" >&2
+  fi
+  return 0
+}
+
 # Returns 0 on success, 1 on failure (after banner + sleep).
 mtx_vendor_run_build_or_banner() {
   local dir="$1" label="$2"
@@ -321,6 +381,12 @@ else
 fi
 
 cp -f "$WORK" "$OUT"
+
+# One-shot: clear any stale sibling .js/.d.ts/.map debris under the sibling
+# project-bridge before the per-payload bundlers resolve its sources. Silent
+# when the tree is clean; loud (to stderr, never fails the vendor pass) when
+# it finds debris. See mtx_vendor_reap_project_bridge_stale comment.
+mtx_vendor_reap_project_bridge_stale "$projectRoot"
 
 rewrote=false
 vendor_build_failures=0
