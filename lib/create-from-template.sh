@@ -18,7 +18,7 @@
 # MTX_ORG_STATE_DIR. Non-interactive org create: set MTX_ORG_REPO_NAME (plain English or slug; optional org-
 # prefix, never doubled) or pass the same on the command line; optional MTX_ORG_DISPLAY_NAME overrides app.json name.
 # Secrets stay in backend.example.json / .env — not prompted.
-# Default clone sources: template-payload (`mtx create payload`), template-org (`mtx create org`, replacing the legacy template-basic on 2026-04-20 — rule-of-law §1 Config triad). Override with MTX_PAYLOAD_TEMPLATE_REPO / MTX_ORG_TEMPLATE_REPO. MTX_TEMPLATE_SOURCE_REPO is documented for pointing `mtx create payload` at a custom template-* snapshot.
+# Default clone sources: template-payload (`mtx create payload`), template-org (`mtx create org`). Override with MTX_PAYLOAD_TEMPLATE_REPO / MTX_ORG_TEMPLATE_REPO. MTX_TEMPLATE_SOURCE_REPO is documented for pointing `mtx create payload` at a custom template-* snapshot.
 # With gh: new repos use `gh repo create org/repo --source=. --remote=origin --push`; existing repos get origin + git push.
 
 : "${MTX_ROOT:?Set MTX_ROOT to the MTX repository root before sourcing lib/create-from-template.sh}"
@@ -247,7 +247,7 @@ mtx_create_ensure_template_available() {
   # (Org-shape refusal for payload flow happens after this returns — see mtx_create_payload_refuse_org_shaped_template.)
 
   echoc yellow "No local template at: $local_path"
-  echoc dim "Expected a sibling of MTX: $ws/$repo (clone the template repo there; for orgs the default is 'template-org' — legacy 'template-basic' still works via MTX_ORG_TEMPLATE_REPO=template-basic), or set MTX_WORKSPACE_ROOT."
+  echoc dim "Expected a sibling of MTX: $ws/$repo (clone the template repo there; for orgs the default is template-org), or set MTX_WORKSPACE_ROOT."
   if ! command -v git &>/dev/null; then
     warn "git is required to fetch template from $url"
     exit 1
@@ -270,7 +270,7 @@ mtx_create_ensure_template_available() {
 }
 
 # Refuse an org-shaped template when the caller is `mtx create payload`.
-# Root cause: historical misuse of `template-basic` / `template-org` (org-shaped) as MTX_PAYLOAD_TEMPLATE_REPO
+# Root cause: historical misuse of org-host templates (`template-org` shape) as MTX_PAYLOAD_TEMPLATE_REPO
 # produced 25+ org-shaped `payload-*` repos with `payloads/`, `prepare:railway`, unified-server wiring
 # (rule-of-law §1 2026-04-18 bullet). Detect the org markers up front and exit before scaffolding.
 # Markers we refuse on (any one is enough):
@@ -457,7 +457,7 @@ mtx_org_scaffold_deploy_config_surface() {
   fi
   if [ ! -f "$org_base" ]; then
     error "Template ${MTX_TEMPLATE_REPO:-<unknown>} has no config/org.json. Org templates must ship a neutral org.json (org.{name,slug,owner,version}, env blocks, ai, chatbots)."
-    echoc dim "Fix: add config/org.json to the org template (${MTX_ORG_TEMPLATE_REPO:-template-org}; legacy alias: template-basic). Reference: project-bridge/config/org.json.example."
+    echoc dim "Fix: add config/org.json to the org template (${MTX_ORG_TEMPLATE_REPO:-template-org}). Reference: project-bridge/config/org.json.example."
     return 1
   fi
 
@@ -956,6 +956,11 @@ mtx_create_from_template_run() {
   TEMPLATE_URL="https://github.com/${GITHUB_ORG}/${TEMPLATE_REPO}.git"
   LOCAL_TEMPLATE_PATH="$WORKSPACE_ROOT/$TEMPLATE_REPO"
 
+  if mtx_create_is_org_flow && [ "$TEMPLATE_REPO" = "template-basic" ]; then
+    error "template-basic is removed — do not use MTX_ORG_TEMPLATE_REPO=template-basic. Use template-org (default) or unset MTX_ORG_TEMPLATE_REPO."
+    exit 1
+  fi
+
   mtx_create_classify_run_context "$CREATE_CWD" "$WORKSPACE_ROOT" "$MTX_ROOT"
 
   if ! command -v git &>/dev/null; then
@@ -1063,7 +1068,7 @@ mtx_create_from_template_run() {
       rm -rf "$REPO_PATH/.git"
     else
       if ! git clone --depth 1 "$TEMPLATE_URL" "$REPO_PATH"; then
-        warn "Template clone failed. Check local template '$LOCAL_TEMPLATE_PATH' or remote '$TEMPLATE_URL' (org default: template-org (legacy alias template-basic still accepted via MTX_ORG_TEMPLATE_REPO=template-basic); payload default: template-payload — see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_SCAFFOLDING_MODEL.md)."
+        warn "Template clone failed. Check local template '$LOCAL_TEMPLATE_PATH' or remote '$TEMPLATE_URL' (org default: template-org; payload default: template-payload — see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_SCAFFOLDING_MODEL.md)."
         exit 1
       fi
     fi

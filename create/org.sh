@@ -8,10 +8,7 @@ set -e
 MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export MTX_CREATE_VARIANT=org
 export MTX_REPO_PREFIX="org-"
-# Canonical org-host scaffold is `template-org` (rule-of-law §1 2026-04-20). The legacy
-# `template-basic` name is still accepted via MTX_ORG_TEMPLATE_REPO=template-basic for
-# operators who haven't migrated their local clone yet, but new scaffolds should land on
-# template-org. See https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_SCAFFOLDING_MODEL.md.
+# Canonical org-host scaffold is `template-org` (rule-of-law §1). `template-basic` is not supported.
 export MTX_TEMPLATE_REPO="${MTX_ORG_TEMPLATE_REPO:-template-org}"
 export MTX_KIND_LABEL="Organization"
 export MTX_CREATE_CMD="mtx create org"

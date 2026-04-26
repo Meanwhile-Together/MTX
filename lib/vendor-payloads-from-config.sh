@@ -573,7 +573,7 @@ for ((i = 0; i < n; i++)); do
   # stale dev files (written before this allowlist existed) get purged on the
   # next vend — without it, rsync treats excludes as "not in view" on both sides
   # and pre-existing debris survives. Defense in depth with
-  # template-basic/.railwayignore's `payloads/*/` rules covers in-repo payloads
+  # template-org/.railwayignore's `payloads/*/` rules covers in-repo payloads
   # the vendor never rsyncs (those dirs are git-tracked; we can't prune them on
   # disk — the upload filter does).
   rsync -a --delete --delete-excluded \

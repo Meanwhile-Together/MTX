@@ -3,8 +3,8 @@
 # terraform/destroy.sh to read identity from config/org.json (canonical) with a legacy fallback to
 # config/app.json. Idempotent: files that already define ORG_IDENTITY_FILE are left untouched.
 #
-# Why this fix exists (rule-of-law §1 2026-04-20 Config triad, §7 template-basic removal (b)):
-#   The template-basic terraform scaffold used `config/app.json.app.{name,slug,owner}` as the
+# Why this fix exists (rule-of-law §1 2026-04-20 Config triad, org terraform identity):
+#   Older org terraform scaffolds used `config/app.json.app.{name,slug,owner}` as the
 #   deploy-time identity. When orgs migrated to `config/org.json.org.*` (Config triad), the
 #   vendored terraform scripts kept reading the now-missing `config/app.json`, which would
 #   break `mtx deploy` on next run. This fix backports the org.json-first resolver.
@@ -91,7 +91,7 @@ if kind == "apply":
         text = text.replace(old_comment, new_comment, 1)
         changes.append("project-root comment")
 
-    # The exact project-root if-chain installed by template-basic.
+    # The exact project-root if-chain from legacy org terraform scaffolds.
     old_block = (
         'if [ -f "config/app.json" ]; then\n'
         '  PROJECT_ROOT="$(pwd)"\n'
