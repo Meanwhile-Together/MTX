@@ -485,9 +485,9 @@ echo ""
 echo -e "${BLUE}🚀 Running terraform apply...${NC}"
 echo ""
 
-# Bottom-line “train” spinner during infra + build (stops before token prompts; MTX_DEPLOY_SPINNER=0 to disable)
+# One-line status during terraform (cleared before "Deploying code" so logs do not blend). MTX_DEPLOY_SPINNER=0 to disable.
 trap 'mtx_deploy_spinner_stop' EXIT
-mtx_deploy_spinner_start "$ENVIRONMENT"
+mtx_deploy_spinner_start "$ENVIRONMENT" "$APP_NAME"
 
 # Change to terraform directory
 cd "$SCRIPT_DIR"
@@ -646,6 +646,8 @@ fi
 
 # If Railway was deployed successfully, automatically deploy code
 if [ "$HAS_RAILWAY" = "true" ]; then
+    # Finish terraform status line before any section headers (avoids text glued to the spinner line)
+    mtx_deploy_spinner_stop
     echo ""
     echo -e "${BLUE}🚀 Deploying code to Railway...${NC}"
     echo "=========================================="
@@ -979,6 +981,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             local -a DB_MATCHES
 
             echo -e "${BLUE}🗄️  Ensuring central database service (${DB_SVC_NAME})...${NC}"
+            mtx_deploy_spinner_start "database" "${APP_NAME:-$APP_SLUG}"
+            trap 'mtx_deploy_spinner_stop' RETURN
 
             SERVICES_QUERY='{"query":"query($projectId: String!) { project(id: $projectId) { services { edges { node { id name } } } } }", "variables": {"projectId": "'"$PROJ_ID"'"}}'
             SERVICES_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
@@ -1266,7 +1270,6 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         fi
 
         # Step 3b: enforce shared DB policy and wire DATABASE_URL onto the deploy target service.
-        mtx_deploy_spinner_start "database"
         if ! ensure_central_database_for_env "$PROJECT_TOKEN" "$PROJECT_ID" "$ENVIRONMENT" "$SERVICE_ID" "$RAILWAY_TOKEN_VALUE"; then
             echo -e "${RED}❌ Central database wiring failed; aborting deployment.${NC}"
             exit 1
@@ -1285,8 +1288,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         }
         trap 'mtx_deploy_spinner_stop; mtx_railway_restore_deploy_server_json_cleanup' EXIT
         
-        # Resume while Railway CLI uploads (quiet at default -v; no spinner during read below)
-        mtx_deploy_spinner_start "railway-up"
+        # Status line while Railway CLI uploads (no spinner during read below)
+        mtx_deploy_spinner_start "railway-up" "$APP_NAME"
         
         # Run Railway CLI and capture output - retry with new token if validation fails
         RAILWAY_DEPLOY_OUTPUT=""  # Initialize global output variable
@@ -1344,7 +1347,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     TOKEN_RETRY_COUNT=$((TOKEN_RETRY_COUNT + 1))
                     echo ""
                     echo -e "${CYAN}Retrying deployment with new token...${NC}"
-                    mtx_deploy_spinner_start "railway-up"
+                    mtx_deploy_spinner_start "railway-up" "$APP_NAME"
                 elif echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "404|Failed to upload code"; then
                     # Service/environment ID invalid – invalidate so setup can re-discover (same as token invalidation)
                     clear_env_var_in_file "RAILWAY_APP_SERVICE_ID"
