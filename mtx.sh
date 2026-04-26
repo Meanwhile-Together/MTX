@@ -616,6 +616,14 @@ case "$1" in
             if [ -n "${MTX_INTERNAL_SELF_UPDATE:-}" ]; then
                 unset MTX_INTERNAL_SELF_UPDATE
                 info "Restarting $(c yellow "$installedName") so this run uses the updated script..."
+                # We cd to $scriptDir above; re-exec inherits cwd, so a fresh run would set
+                # execDir=$(pwd) to /etc/mtx and break deploy/cwd-based commands. Restore the
+                # invoker's working directory (captured at startup) before replacing the process.
+                if [ -d "$execDir" ]; then
+                    cd "$execDir" || true
+                else
+                    cd "$HOME" 2>/dev/null || cd / 2>/dev/null || true
+                fi
                 exec env MTX_SKIP_UPDATE=1 MTX_VERBOSE="$verbose" \
                     "$binDir/$installedName" "${mtx_invocation_args[@]}" || {
                     error "Failed to re-exec $installedName after self-update."
