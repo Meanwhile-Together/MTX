@@ -8,6 +8,25 @@ APPLY_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 MTX_ROOT="$(cd "$APPLY_SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=../includes/prepare-env.sh
 source "$MTX_ROOT/includes/prepare-env.sh"
+# shellcheck source=../../includes/mtx-run.sh
+[ -f "$MTX_ROOT/includes/mtx-run.sh" ] && source "$MTX_ROOT/includes/mtx-run.sh"
+# mtx deploy exports MTX_VERBOSE; direct `bash apply.sh` leaves it unset — pass subprocess output through
+if [ -z "${MTX_VERBOSE+x}" ]; then
+  mtx_run() { "$@"; }
+fi
+declare -F mtx_run &>/dev/null || mtx_run() { "$@"; }
+
+# Run a command with combined stdout+stderr; duplicate to a log file; hide from tty at MTX_VERBOSE<=1
+mtx_tf_tee() {
+  local logf="$1"
+  shift
+  if [ "${MTX_VERBOSE:-1}" -le 1 ]; then
+    "$@" 2>&1 | tee "$logf" >/dev/null
+  else
+    "$@" 2>&1 | tee "$logf"
+  fi
+  return "${PIPESTATUS[0]}"
+}
 
 # Resolve project root (directory containing config/org.json or legacy config/app.json) so .env is
 # always loaded from the right place. Per rule-of-law §1 2026-04-20 Config triad, org identity lives
@@ -448,7 +467,12 @@ if [ -f "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" ]; then
   [ -n "${MTX_VENDOR_TERRAFORM_MODE:-}" ] && VTF_MODE="$MTX_VENDOR_TERRAFORM_MODE"
   VTF_EXTRA=()
   [ "${MTX_VENDOR_REVENDOR:-}" = 1 ] && VTF_EXTRA+=(--revendor)
-  bash "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" --sync-mode="$VTF_MODE" "${VTF_EXTRA[@]}" "$PROJECT_ROOT"
+  # prompt mode is interactive; auto/non-tty: quiet vendor noise at default -v (mtx_run)
+  if [ "$VTF_MODE" = "auto" ]; then
+    mtx_run bash "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" --sync-mode="$VTF_MODE" "${VTF_EXTRA[@]}" "$PROJECT_ROOT"
+  else
+    bash "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" --sync-mode="$VTF_MODE" "${VTF_EXTRA[@]}" "$PROJECT_ROOT"
+  fi
 fi
 
 echo ""
@@ -460,7 +484,7 @@ cd "$SCRIPT_DIR"
 
 # Ensure backend and providers are initialized (idempotent; no-op if already inited)
 TF_INIT_LOG="/tmp/tf-init-$$.log"
-if ! terraform init -reconfigure -input=false 2>&1 | tee "$TF_INIT_LOG"; then
+if ! mtx_tf_tee "$TF_INIT_LOG" terraform init -reconfigure -input=false; then
     echo ""
     echo -e "${RED}❌ terraform init failed${NC}"
     if [ -f "$TF_INIT_LOG" ] && mtx_output_looks_like_network_problem "$(cat "$TF_INIT_LOG")"; then
@@ -538,8 +562,8 @@ fi
 # Using -auto-approve since we're in a script and user has already confirmed via setup.sh
 set +e  # Don't exit on error, we'll check exit code
 TF_APPLY_LOG="/tmp/tf-apply-$$.log"
-terraform apply -auto-approve "${TF_VARS[@]}" 2>&1 | tee "$TF_APPLY_LOG"
-TERRAFORM_EXIT=${PIPESTATUS[0]}
+mtx_tf_tee "$TF_APPLY_LOG" terraform apply -auto-approve "${TF_VARS[@]}"
+TERRAFORM_EXIT=$?
 set -e  # Re-enable exit on error
 
 # If apply failed with "already exists" (service created outside Terraform), discover and re-apply with existing IDs
@@ -553,15 +577,29 @@ if [ $TERRAFORM_EXIT -ne 0 ] && grep -q "already exists in this project" "$TF_AP
     discover_railway_services
     [ -n "$EXISTING_APP_ID" ] && [ "$EXISTING_APP_ID" != "null" ] && TF_VARS+=(-var="railway_service_id=$EXISTING_APP_ID") && terraform state rm 'module.railway_app[0].railway_service.app[0]' 2>/dev/null || true
     echo ""
-    terraform apply -auto-approve "${TF_VARS[@]}"
-    TERRAFORM_EXIT=$?
+    if [ "${MTX_VERBOSE:-1}" -le 1 ]; then
+      if mtx_run terraform apply -auto-approve "${TF_VARS[@]}"; then
+        TERRAFORM_EXIT=0
+      else
+        TERRAFORM_EXIT=$?
+      fi
+    else
+      terraform apply -auto-approve "${TF_VARS[@]}"
+      TERRAFORM_EXIT=$?
+    fi
 fi
 # If apply failed due to backend not initialized, run init and retry once (idempotent recovery)
 if [ $TERRAFORM_EXIT -ne 0 ] && [ -f "$TF_APPLY_LOG" ] && grep -q "Backend initialization required\|please run \"terraform init\"" "$TF_APPLY_LOG" 2>/dev/null; then
     echo ""
     echo -e "${CYAN}🔄 Backend not initialized; running terraform init and retrying apply...${NC}"
-    if terraform init -reconfigure -input=false && terraform apply -auto-approve "${TF_VARS[@]}"; then
+    if [ "${MTX_VERBOSE:-1}" -le 1 ]; then
+      if mtx_run terraform init -reconfigure -input=false && mtx_run terraform apply -auto-approve "${TF_VARS[@]}"; then
         TERRAFORM_EXIT=0
+      fi
+    else
+      if terraform init -reconfigure -input=false && terraform apply -auto-approve "${TF_VARS[@]}"; then
+        TERRAFORM_EXIT=0
+      fi
     fi
 fi
 rm -f "$TF_APPLY_LOG"
@@ -586,7 +624,7 @@ fi
 
 # Record project-bridge/terraform fingerprint so mtx build can re-vendor when canon drifts.
 if [ -f "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" ]; then
-  bash "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" --write-digest "$PROJECT_ROOT" || true
+  mtx_run bash "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" --write-digest "$PROJECT_ROOT" || true
 fi
 
 # Output was already shown in real-time above, no need to echo again
@@ -733,9 +771,17 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             # --no-gitignore: include prepared targets/server/dist + npm-packs (see template .gitignore / .railwayignore)
             local UP_OPTS="--project $PROJ_ID --service $SVC_ID --environment $ENV_NAME --no-gitignore"
             [ -n "$VERBOSE" ] && UP_OPTS="$UP_OPTS --verbose"
-            # Use tee to both display output in real-time and capture it
-            local OUTPUT=$(railway up $UP_OPTS 2>&1 | tee /dev/stderr)
-            local EXIT_CODE=${PIPESTATUS[0]}
+            # At default -v, hide railway up noise; still capture for parsing (no tee to tty)
+            local OUTPUT EXIT_CODE
+            if [ "${MTX_VERBOSE:-1}" -le 1 ]; then
+                set +e
+                OUTPUT=$(railway up $UP_OPTS 2>&1)
+                EXIT_CODE=$?
+                set -e
+            else
+                OUTPUT=$(railway up $UP_OPTS 2>&1 | tee /dev/stderr)
+                EXIT_CODE=${PIPESTATUS[0]}
+            fi
             
             # Store output in global variable for caller to check
             RAILWAY_DEPLOY_OUTPUT="$OUTPUT"
@@ -800,8 +846,15 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 echo ""
                 
                 # Deploy to selected service with project + environment (explicit so token doesn't pick)
-                OUTPUT=$(railway up --project "$PROJ_ID" --service "$SELECTED_SERVICE_ID" --environment "$ENV_NAME" --no-gitignore 2>&1 | tee /dev/stderr)
-                EXIT_CODE=${PIPESTATUS[0]}
+                if [ "${MTX_VERBOSE:-1}" -le 1 ]; then
+                    set +e
+                    OUTPUT=$(railway up --project "$PROJ_ID" --service "$SELECTED_SERVICE_ID" --environment "$ENV_NAME" --no-gitignore 2>&1)
+                    EXIT_CODE=$?
+                    set -e
+                else
+                    OUTPUT=$(railway up --project "$PROJ_ID" --service "$SELECTED_SERVICE_ID" --environment "$ENV_NAME" --no-gitignore 2>&1 | tee /dev/stderr)
+                    EXIT_CODE=${PIPESTATUS[0]}
+                fi
                 
                 # Store output in global variable
                 RAILWAY_DEPLOY_OUTPUT="$OUTPUT"

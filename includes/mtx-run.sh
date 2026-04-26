@@ -6,7 +6,8 @@
 mtx_run() {
     local v=${MTX_VERBOSE:-1}
     if [ "$v" -le 1 ]; then
-        "$@" 1>/dev/null
+        # npm, terraform, and most CLIs log progress to stderr; quiet means both streams.
+        "$@" &>/dev/null
         return $?
     elif [ "$v" -eq 4 ]; then
         ( set -x; "$@" )

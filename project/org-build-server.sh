@@ -5,6 +5,15 @@
 # See project-bridge verify:org-identity (rule-of-law): framework placeholder org.json before overlay.
 set -euo pipefail
 
+# Respect MTX_VERBOSE (from mtx build / mtx deploy); quiet noisy npm at default -v. Direct bash: no-op wrapper.
+_MTX_BASE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+# shellcheck source=../includes/mtx-run.sh
+[ -f "$_MTX_BASE/includes/mtx-run.sh" ] && source "$_MTX_BASE/includes/mtx-run.sh"
+if [ -z "${MTX_VERBOSE+x}" ]; then
+  mtx_run() { "$@"; }
+fi
+declare -F mtx_run &>/dev/null || mtx_run() { "$@"; }
+
 if [ -n "${1:-}" ]; then
   ROOT="$(cd "$1" && pwd)"
 else
@@ -127,11 +136,11 @@ fi
 echo "==> Install dependencies + build packages, web client, and server (project-bridge)"
 (
   cd "$PB"
-  npm install
-  npm run build:packages
-  npm run build:client
-  npm run build:server
-  npm run build:backend
+  mtx_run npm install
+  mtx_run npm run build:packages
+  mtx_run npm run build:client
+  mtx_run npm run build:server
+  mtx_run npm run build:backend
 )
 
 echo "==> Mirror server + client dist into org repo (for deploy tarball)"

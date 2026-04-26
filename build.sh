@@ -15,8 +15,15 @@ set -e
 
 MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 export MTX_ROOT
+# shellcheck source=includes/mtx-run.sh
+[ -f "$MTX_ROOT/includes/mtx-run.sh" ] && source "$MTX_ROOT/includes/mtx-run.sh"
 # shellcheck source=includes/verify-pb-framework-identity.sh
 [ -f "$MTX_ROOT/includes/verify-pb-framework-identity.sh" ] && source "$MTX_ROOT/includes/verify-pb-framework-identity.sh"
+# mtx exports MTX_VERBOSE before sourcing; plain `bash build.sh` leaves it unset — pass subprocess output through
+if [ -z "${MTX_VERBOSE+x}" ]; then
+  mtx_run() { "$@"; }
+fi
+declare -F mtx_run &>/dev/null || mtx_run() { "$@"; }
 
 # Match deploy/terraform/apply.sh PROJECT_ROOT resolution
 PROJECT_ROOT=""
@@ -95,7 +102,7 @@ mtx_prime_org_project_bridge_if_needed() {
     exit 1
   fi
   echo "ℹ️  Org repo: priming project-bridge at $pb (npm install, db:generate)..." >&2
-  (cd "$pb" && npm install && npm run db:generate) || {
+  (cd "$pb" && mtx_run npm install && mtx_run npm run db:generate) || {
     echo "❌ project-bridge prime failed (npm install / db:generate)" >&2
     exit 1
   }
@@ -104,7 +111,7 @@ mtx_prime_org_project_bridge_if_needed() {
 ensure_npm_deps() {
   if [ ! -f "node_modules/.bin/prisma" ] && [ -f "package.json" ]; then
     echo "ℹ️  Dependencies missing, running npm install..." >&2
-    npm install || { echo "❌ npm install failed" >&2; exit 1; }
+    mtx_run npm install || { echo "❌ npm install failed" >&2; exit 1; }
   fi
 }
 
@@ -123,9 +130,9 @@ run_prepare_railway_bundle() {
       exit 1
     fi
     echo "==> mtx build: vendor path payloads from config/server.json (MTX lib)" >&2
-    bash "$MTX_ROOT/lib/vendor-payloads-from-config.sh" "$PROJECT_ROOT"
+    mtx_run bash "$MTX_ROOT/lib/vendor-payloads-from-config.sh" "$PROJECT_ROOT"
   fi
-  npm run prepare:railway || { echo "❌ prepare:railway failed" >&2; exit 1; }
+  mtx_run npm run prepare:railway || { echo "❌ prepare:railway failed" >&2; exit 1; }
   echo "✅ prepare:railway complete" >&2
   # After payload vendor/build: portable MTX pre-deploy (org hook + root-path HTML/Vite fixes). See includes/mtx-predeploy.sh + fixes/root-paths-lib.sh.
   if [ -f "$MTX_ROOT/includes/mtx-predeploy.sh" ]; then
@@ -155,7 +162,7 @@ run_server_build() {
   fi
   echo "🔨 Building app server (npm run build:server)..." >&2
   ensure_npm_deps
-  npm run build:server || { echo "❌ build:server failed" >&2; exit 1; }
+  mtx_run npm run build:server || { echo "❌ build:server failed" >&2; exit 1; }
   echo "✅ build:server complete" >&2
 }
 
@@ -166,7 +173,7 @@ run_backend_build() {
   fi
   echo "🔨 Building backend server (npm run build:backend-server)..." >&2
   ensure_npm_deps
-  npm run build:backend-server || { echo "❌ build:backend-server failed" >&2; exit 1; }
+  mtx_run npm run build:backend-server || { echo "❌ build:backend-server failed" >&2; exit 1; }
   echo "✅ build:backend-server complete" >&2
 }
 

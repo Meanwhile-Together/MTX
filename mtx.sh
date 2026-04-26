@@ -178,7 +178,7 @@ execDir="$(pwd)"
             mtx_run() {
                 local v=${MTX_VERBOSE:-1}
                 if [ "$v" -le 1 ]; then
-                    "$@" 1>/dev/null
+                    "$@" &>/dev/null
                     return $?
                 elif [ "$v" -eq 4 ]; then
                     ( set -x; "$@" )
