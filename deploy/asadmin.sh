@@ -88,7 +88,8 @@ fi
 [ -n "${MASTER_AUTH_ISSUER:-}" ] && export MASTER_AUTH_ISSUER
 [ -n "${MASTER_CORS_ORIGINS:-}" ] && export MASTER_CORS_ORIGINS
 
-# Same flow as deploy.sh: choose env, run terraform apply, then deploy urls
+# Same flow as deploy.sh: choose env, run terraform apply, then deploy urls (urls.sh writes
+# MASTER_AUTH_PUBLIC_URL into .mtx.prepare.env when MTX_ASADMIN=1 and org declares master).
 unset MTX_VENDOR_REVENDOR 2>/dev/null || true
 ENV=""
 MTX_VENDOR_REVENDOR=0

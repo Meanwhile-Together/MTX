@@ -20,6 +20,24 @@ mtx_prepare_file_path() {
   printf '%s/.mtx.prepare.env' "$root"
 }
 
+# Upsert KEY=value in $MTX_PREPARE_FILE (workspace .mtx.prepare.env). File must exist (run mtx prepare).
+# Used by deploy/urls.sh after asadmin when persisting discovered master origin; mirrors apply.sh set_prepare_key.
+mtx_prepare_env_set_key() {
+  local key="$1" value="$2" line pf
+  line="${key}=${value}"
+  pf="${MTX_PREPARE_FILE:-}"
+  if [ -z "$pf" ] || [ ! -f "$pf" ]; then
+    echo "❌ mtx_prepare_env_set_key: MTX_PREPARE_FILE missing or not found (run: mtx prepare)." >&2
+    return 1
+  fi
+  if grep -q "^${key}=" "$pf" 2>/dev/null; then
+    grep -v "^${key}=" "$pf" > "${pf}.tmp" && mv "${pf}.tmp" "$pf"
+  fi
+  echo "$line" >> "$pf"
+  chmod 600 "$pf" 2>/dev/null || true
+  return 0
+}
+
 mtx_trim_inline() {
   local v="${1:-}"
   v="${v//$'\r'/}"

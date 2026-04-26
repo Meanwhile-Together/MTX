@@ -6,17 +6,17 @@ desc="Ensure deploy URLs (Railway domains) and print app/backend URLs for an env
 nobanner=1
 set -e
 
-# Resolve project root (same logic as deploy/terraform/apply.sh)
+# Resolve project root (align with deploy/terraform/apply.sh: org.json or legacy app.json)
 PROJECT_ROOT=""
-if [ -f "config/app.json" ]; then
+if [ -f "config/org.json" ] || [ -f "config/app.json" ]; then
   PROJECT_ROOT="$(pwd)"
 fi
-if [ -z "$PROJECT_ROOT" ] && [ -f "../config/app.json" ]; then
+if [ -z "$PROJECT_ROOT" ] && { [ -f "../config/org.json" ] || [ -f "../config/app.json" ]; }; then
   PROJECT_ROOT="$(cd .. && pwd)"
 fi
 if [ -z "$PROJECT_ROOT" ]; then
   for d in . .. ../project-bridge; do
-    [ -f "${d}/config/app.json" ] && PROJECT_ROOT="$(cd "$d" && pwd)" && break
+    { [ -f "${d}/config/org.json" ] || [ -f "${d}/config/app.json" ]; } && PROJECT_ROOT="$(cd "$d" && pwd)" && break
   done
 fi
 [ -z "$PROJECT_ROOT" ] && PROJECT_ROOT="$(pwd)"
@@ -170,3 +170,33 @@ print_domain_line() {
 print_domain_line "App" "$SERVICE_ID" "$APP_DOMAIN"
 print_domain_line "Backend" "$BACKEND_SERVICE_ID" "$BACKEND_DOMAIN"
 echo ""
+
+# mtx deploy asadmin: persist the live app origin to workspace .mtx.prepare.env as MASTER_AUTH_PUBLIC_URL
+# so tenant org-build / mtx prepare fan-out stays aligned without manual URL copy (platform singleton).
+mtx_urls_org_declares_master() {
+  local root="$1" f
+  for f in "$root/config/org.json" "$root/config/app.json"; do
+    [ -f "$f" ] || continue
+    if grep -qE '"master"[[:space:]]*:[[:space:]]*true' "$f" 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+if [ "${MTX_ASADMIN:-}" = "1" ] && mtx_urls_org_declares_master "$PROJECT_ROOT"; then
+  _mtx_urls_host=""
+  if [ -n "$APP_DOMAIN" ] && [ "$APP_DOMAIN" != "null" ]; then
+    _mtx_urls_host="$(echo "$APP_DOMAIN" | tr -d '\n\r' | sed 's|^https\?://||' | sed 's|/.*||')"
+  fi
+  if [ -n "$_mtx_urls_host" ]; then
+    _mtx_url_origin="https://${_mtx_urls_host}"
+    if mtx_prepare_env_set_key "MASTER_AUTH_PUBLIC_URL" "$_mtx_url_origin"; then
+      echo -e "${GREEN}✅ Wrote MASTER_AUTH_PUBLIC_URL=${_mtx_url_origin} to ${MTX_PREPARE_FILE##*/} (asadmin + declarative master).${NC}"
+    else
+      echo -e "${YELLOW}⚠️  Could not update MASTER_AUTH_PUBLIC_URL in prepare file.${NC}" >&2
+    fi
+  else
+    echo -e "${YELLOW}⚠️  Asadmin: no Railway app domain resolved — left MASTER_AUTH_PUBLIC_URL in ${MTX_PREPARE_FILE##*/} unchanged.${NC}" >&2
+  fi
+  unset _mtx_urls_host _mtx_url_origin
+fi
