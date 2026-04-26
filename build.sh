@@ -25,6 +25,30 @@ if [ -z "${MTX_VERBOSE+x}" ]; then
 fi
 declare -F mtx_run &>/dev/null || mtx_run() { "$@"; }
 
+# One-line status while quiet `npm run prepare:railway` runs (otherwise mtx_run hides all output; long silence).
+# shellcheck source=includes/mtx-deploy-spinner.sh
+[ -f "$MTX_ROOT/includes/mtx-deploy-spinner.sh" ] && source "$MTX_ROOT/includes/mtx-deploy-spinner.sh" || {
+  mtx_deploy_spinner_start() { :; }
+  mtx_deploy_spinner_stop() { :; }
+}
+
+mtx_build_spinner_org_name() {
+  local f n
+  for f in "$PROJECT_ROOT/config/org.json" "$PROJECT_ROOT/config/app.json"; do
+    [ -f "$f" ] || continue
+    if command -v jq >/dev/null 2>&1; then
+      n=$(jq -r '(.org.name // .app.name) // empty' "$f" 2>/dev/null) || n=""
+      n="${n//$'\n'/ }"
+      n="${n//$'\r'/ }"
+      if [ -n "$n" ] && [ "$n" != "null" ]; then
+        printf '%s' "$n"
+        return 0
+      fi
+    fi
+  done
+  printf '%s' "$(basename "$PROJECT_ROOT")"
+}
+
 # Match deploy/terraform/apply.sh PROJECT_ROOT resolution
 PROJECT_ROOT=""
 if [ -f "config/app.json" ]; then
@@ -133,7 +157,21 @@ run_prepare_railway_bundle() {
     # Vendor script prints one TTY status line per payload (dots); npm inside it uses mtx_run for quiet.
     bash "$MTX_ROOT/lib/vendor-payloads-from-config.sh" "$PROJECT_ROOT"
   fi
-  mtx_run npm run prepare:railway || { echo "❌ prepare:railway failed" >&2; exit 1; }
+  # At MTX_VERBOSE<=1, mtx_run hides prepare:railway — show one-line status so the gap is not blank.
+  if [ "${MTX_VERBOSE:-1}" -le 1 ]; then
+    mtx_deploy_spinner_start "prepare" "$(mtx_build_spinner_org_name)"
+    set +e
+    mtx_run npm run prepare:railway
+    pr_ec=$?
+    set -e
+    mtx_deploy_spinner_stop
+    if [ $pr_ec -ne 0 ]; then
+      echo "❌ prepare:railway failed" >&2
+      exit 1
+    fi
+  else
+    mtx_run npm run prepare:railway || { echo "❌ prepare:railway failed" >&2; exit 1; }
+  fi
   echo "✅ prepare:railway complete" >&2
   # After payload vendor/build: portable MTX pre-deploy (org hook + root-path HTML/Vite fixes). See includes/mtx-predeploy.sh + fixes/root-paths-lib.sh.
   if [ -f "$MTX_ROOT/includes/mtx-predeploy.sh" ]; then
