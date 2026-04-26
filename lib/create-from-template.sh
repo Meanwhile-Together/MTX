@@ -837,6 +837,12 @@ mtx_create_apply_metadata_and_github_publish() {
       fi
       git push -u origin main 2>/dev/null || git push origin main
     fi
+    # Clone-from-local renames template remote to `upstream`; until `origin` exists, `main` may track
+    # `upstream/main`. Cursor/VS Code then shows "N commits to push" against the template and Push fails
+    # (wrong remote / read-only). Always track GitHub after a successful publish.
+    if git remote get-url origin >/dev/null 2>&1; then
+      git branch --set-upstream-to=origin/main main 2>/dev/null || true
+    fi
   ); then
     warn "GitHub create or push failed. The repo may exist empty on GitHub while the local push failed."
     echoc dim "Common fixes: gh auth setup-git (so git push uses your gh token); gh auth refresh; for SAML orgs authorize SSO at github.com/settings/applications; confirm write access to $GITHUB_ORG/$REPO_NAME."
