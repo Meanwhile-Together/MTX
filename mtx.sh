@@ -331,6 +331,7 @@ case "$1" in
         echo "   -vv      More detail (debug messages)"
         echo "   -vvv     Full output from scripts"
         echo "   -vvvv    Trace: print every command run"
+        echo "   (Same -v/-vv/... flags work after the command path, e.g. $installedName deploy asadmin -vv.)"
         echo "   --update Update nnw"
         echo "   --uninstall Uninstall nnw"
         echo "   --reinstall Reinstall nnw"
@@ -644,6 +645,23 @@ case "$1" in
                     *) SCRIPT_ARGS+=("$a") ;;
                 esac
             done
+
+            # Late mtx verbosity (e.g. `mtx deploy asadmin -vv`): the pre-command `while` loop stops
+            # at the first word that is not an mtx global flag (`deploy`), so trailing `-vv` never
+            # reached. Strip these from SCRIPT_ARGS and merge into `verbose` (max wins) so
+            # `terraform apply` and other subprocesses see MTX_VERBOSE>=2.
+            _mtx_scrubbed=()
+            for a in "${SCRIPT_ARGS[@]}"; do
+                case "$a" in
+                -vvvv) [ "$verbose" -lt 4 ] && verbose=4; debug "mtx verbosity -vvvv (after command)" ;;
+                -vvv) [ "$verbose" -lt 3 ] && verbose=3; debug "mtx verbosity -vvv (after command)" ;;
+                -vv) [ "$verbose" -lt 2 ] && verbose=2; debug "mtx verbosity -vv (after command)" ;;
+                -v) [ "$verbose" -lt 1 ] && verbose=1; debug "mtx verbosity -v (after command)" ;;
+                --verbose) [ "$verbose" -lt 3 ] && verbose=3; debug "mtx verbosity --verbose (after command)" ;;
+                *) _mtx_scrubbed+=("$a") ;;
+                esac
+            done
+            SCRIPT_ARGS=("${_mtx_scrubbed[@]}")
 
             cmdEndIndex=$(isolateScript "${SCRIPT_ARGS[@]}")
             debug "cmdEndIndex: $cmdEndIndex"
