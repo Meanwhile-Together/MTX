@@ -47,10 +47,15 @@ mtx_vendor_normalize_payload_dir() {
 # One-line “Vendoring 'slug' …” with growing dots on /dev/tty (visible even if stderr is muted).
 # MTX_VENDOR_PROGRESS=0 — plain one-line messages, no animation. MTX_VENDOR_DOT_SEC=1 — seconds between dots.
 mtx_vendor_progress_tty() {
-  if [ -w /dev/tty ] 2>/dev/null; then
-    echo /dev/tty
+  # `[ -w /dev/tty ]` can lie in some CI / IDE terminals; a real append probe is authoritative.
+  # Prefer tty for interactive visibility; fall back to stderr, then discard (background jobs may
+  # lose tty and bash would otherwise print "No such device or address" on open).
+  if { : >>/dev/tty; } 2>/dev/null; then
+    printf '%s\n' /dev/tty
+  elif { : >>/dev/stderr; } 2>/dev/null; then
+    printf '%s\n' /dev/stderr
   else
-    echo /dev/stderr
+    printf '%s\n' /dev/null
   fi
 }
 
@@ -72,6 +77,15 @@ mtx_vendor_vprog_begin() {
   mtx_vendor_vprog_stop
   MTX_VENDOR_VPROG_SLUG="$slug"
   MTX_VENDOR_VPROG_T="$(mtx_vendor_progress_tty)"
+  # Background dot progress runs in a subshell; /dev/tty may be unusable there even when the
+  # parent probe passed (agent/CI). Prefer stderr or discard for the animation worker only.
+  if [ "${MTX_VENDOR_PROGRESS:-1}" != "0" ] && [ "${MTX_VENDOR_VPROG_T:-}" = "/dev/tty" ]; then
+    if { : >>/dev/stderr; } 2>/dev/null; then
+      MTX_VENDOR_VPROG_T=/dev/stderr
+    else
+      MTX_VENDOR_VPROG_T=/dev/null
+    fi
+  fi
   if [ "${MTX_VENDOR_PROGRESS:-1}" = "0" ]; then
     MTX_VENDOR_VPROG_SLUG="$slug"
     MTX_VENDOR_VPROG_T="$(mtx_vendor_progress_tty)"

@@ -888,8 +888,12 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 EXIT_CODE=$?
                 set -e
             else
-                OUTPUT=$(railway up $UP_OPTS 2>&1 | tee /dev/stderr)
-                EXIT_CODE=${PIPESTATUS[0]}
+                # No `tee` here: some runners break `tee /dev/stderr` inside $(...) (ENODEV on open).
+                set +e
+                OUTPUT=$(railway up $UP_OPTS 2>&1)
+                EXIT_CODE=$?
+                set -e
+                printf '%s\n' "$OUTPUT"
             fi
             
             # Store output in global variable for caller to check
@@ -961,8 +965,11 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     EXIT_CODE=$?
                     set -e
                 else
-                    OUTPUT=$(railway up --project "$PROJ_ID" --service "$SELECTED_SERVICE_ID" --environment "$ENV_NAME" --no-gitignore 2>&1 | tee /dev/stderr)
-                    EXIT_CODE=${PIPESTATUS[0]}
+                    set +e
+                    OUTPUT=$(railway up --project "$PROJ_ID" --service "$SELECTED_SERVICE_ID" --environment "$ENV_NAME" --no-gitignore 2>&1)
+                    EXIT_CODE=$?
+                    set -e
+                    printf '%s\n' "$OUTPUT"
                 fi
                 
                 # Store output in global variable
