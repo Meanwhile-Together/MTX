@@ -481,6 +481,28 @@ if [ -f "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" ]; then
   fi
 fi
 
+# Org-json-only trees (no legacy config/app.json) need terraform that reads org.json / optional app.json
+# (project-bridge/terraform main.tf migration). Stale vendored main.tf still has data.local_file.app_config
+# → plan fails with "open ../config/app.json: no such file". If the operator skipped an earlier re-vendor
+# prompt, force a one-shot sync when bridge is available (same as MTX_VENDOR_REVENDOR=1).
+if [ -f "$PROJECT_ROOT/config/org.json" ] && [ ! -f "$PROJECT_ROOT/config/app.json" ] && [ -f "$PROJECT_ROOT/terraform/main.tf" ]; then
+  if grep -q 'data "local_file" "app_config"' "$PROJECT_ROOT/terraform/main.tf" 2>/dev/null; then
+    echo -e "${YELLOW}⚠️  This project uses config/org.json only, but terraform/main.tf still requires legacy config/app.json.${NC}"
+    echo "    Forcing re-vendor from project-bridge/terraform so Terraform matches the org triad." >&2
+    if [ -f "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" ]; then
+      bash "$MTX_ROOT/lib/vendor-terraform-from-bridge.sh" --sync-mode=auto --revendor "$PROJECT_ROOT" || true
+    fi
+    if grep -q 'data "local_file" "app_config"' "$PROJECT_ROOT/terraform/main.tf" 2>/dev/null; then
+      echo -e "${RED}❌ terraform/main.tf is still the legacy app.json-only version.${NC}" >&2
+      echo "   Fix: place project-bridge next to this repo (../project-bridge), set PROJECT_BRIDGE_ROOT, or run:" >&2
+      echo "     MTX_VENDOR_REVENDOR=1 mtx deploy …   (or mtx deploy --revendor …)" >&2
+      echo "   If terraform is listed in .mtx-vendor.pinned, temporarily unpin to allow the upgrade." >&2
+      exit 1
+    fi
+    echo -e "${GREEN}✅${NC} Terraform refreshed for org.json-only config."
+  fi
+fi
+
 echo ""
 echo -e "${BLUE}🚀 Running terraform apply...${NC}"
 echo ""
