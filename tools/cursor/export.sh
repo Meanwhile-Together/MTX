@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mtx cursor export — export Cursor agent chat transcripts as JSON.
+# mtx tools cursor export — export Cursor agent chat transcripts as JSON.
 #
 # Interactive by default: pick a project (or ALL projects), then "all" or
 # one specific conversation. Fully non-interactive flags are supported too.
@@ -13,14 +13,14 @@
 #     <project>/agent-transcripts/<uuid>/subagents/<sub-uuid>.jsonl
 #
 # Usage (interactive):
-#   mtx cursor export
+#   mtx tools cursor export
 #     → choose project (or ALL) → choose "all" or a single thread.
 #
 # Usage (non-interactive):
-#   mtx cursor export --all-projects                       -o out.json
-#   mtx cursor export --project-slug <slug> --all          -o out.json
-#   mtx cursor export --project-slug <slug> --thread <uid> -o out.json
-#   mtx cursor export --project-dir  <path> --all          -o out.json
+#   mtx tools cursor export --all-projects                       -o out.json
+#   mtx tools cursor export --project-slug <slug> --all          -o out.json
+#   mtx tools cursor export --project-slug <slug> --thread <uid> -o out.json
+#   mtx tools cursor export --project-dir  <path> --all          -o out.json
 #
 # Flags:
 #   -o, --output PATH       Output file (default ./chat-export.json).
@@ -49,7 +49,7 @@ declare -F warn    >/dev/null || warn()    { echo "[WARN] $*" >&2; }
 declare -F error   >/dev/null || error()   { echo "[ERR]  $*" >&2; }
 
 command -v python3 >/dev/null 2>&1 || {
-  error "python3 is required for mtx cursor export"
+  error "python3 is required for mtx tools cursor export"
   return 2 2>/dev/null || exit 2
 }
 
@@ -66,7 +66,7 @@ THREAD_UUID=""
 NONINTERACTIVE=0
 
 show_help() {
-  sed -n '/^# mtx cursor export/,/^desc=/p' "${BASH_SOURCE[0]}" \
+  sed -n '/^# mtx tools cursor export/,/^desc=/p' "${BASH_SOURCE[0]}" \
     | sed -e 's/^# \{0,1\}//' -e '/^desc=/d'
 }
 
@@ -203,7 +203,7 @@ else
   done
 
   echo
-  echoc cyan "=== mtx cursor export ==="
+  echoc cyan "=== mtx tools cursor export ==="
   echo "Cursor projects under $CURSOR_ROOT:"
   echo
   printf "  %3d) %-60s  %4s threads  (every project)\n" 0 "ALL projects (${#PROJ_ROWS[@]})" "$total_threads"

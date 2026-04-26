@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # MTX library: normalize root-absolute HTML asset URLs and Vite base for payloads under path prefixes.
-# Sourced by includes/mtx-predeploy.sh, fixes/root-paths.sh (CLI), and transitively vendor-payloads.
+# Sourced by includes/mtx-predeploy.sh, tools/fixes/root-paths.sh (CLI), and transitively vendor-payloads.
 # Portable (Linux / macOS / WSL): mktemp + mv — no Node.
 #
 # Public functions (stable names for callers):
