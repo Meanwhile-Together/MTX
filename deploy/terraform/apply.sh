@@ -223,6 +223,71 @@ mtx_railway_restore_server_config_after_upload() {
     echo -e "${CYAN}ℹ️  Restored config/server.json for local development.${NC}"
 }
 
+# Fail before `railway up` if path payloads under ./payloads/* are missing locally.
+#
+# • mtx deploy runs `railway up --no-gitignore`: the CLI bundle **includes .gitignore'd files**
+#   (e.g. vendored ./payloads/<slug>/). That is the whole point of gitignoring payloads locally
+#   while still shipping them from the operator machine.
+# • Railway **still applies .railwayignore** to that bundle — never list `payloads/` there or the
+#   upload will omit those trees and the container will boot without them.
+# • **GitHub / dashboard auto-deploy** rebuilds from a git clone: gitignored ./payloads/ is not
+#   in the repo. Use mtx deploy (CLI upload) for orgs with path payloads, or commit/n-pack payloads.
+mtx_verify_path_payload_trees_before_railway_upload() {
+    local root="${1:?}"
+    local cfg="$root/config/server.json"
+    [ -f "$cfg" ] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    local ign="$root/.railwayignore"
+    if [ -f "$ign" ]; then
+        local line
+        while IFS= read -r line || [ -n "${line:-}" ]; do
+            line="${line%%#*}"
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [ -n "$line" ] || continue
+            case "$line" in !*) continue ;; esac
+            case "$line" in
+            payloads|payloads/*|./payloads|./payloads/*)
+                echo -e "${RED}❌ $ign blacklists path payloads ($line).${NC}" >&2
+                echo "   Railway CLI applies .railwayignore even with --no-gitignore; mtx deploy cannot upload ./payloads/." >&2
+                echo "   Remove that line (use negation only if you know Railway’s semantics)." >&2
+                return 1
+                ;;
+            esac
+        done < "$ign"
+    fi
+
+    local miss=0 rel relc abs
+    while IFS= read -r rel; do
+        [ -n "$rel" ] && [ "$rel" != "null" ] || continue
+        case "$rel" in .|./) continue ;; esac
+        relc="${rel#./}"
+        case "$relc" in
+        payloads/*) ;;
+        *) continue ;;
+        esac
+        abs="$root/$relc"
+        if [ -d "$abs" ]; then
+            continue
+        fi
+        # Admin may ship only via npm pack (generate-railway-deploy-manifest) with no ./payloads/admin on disk.
+        if [ "$relc" = "payloads/admin" ] && [ -d "$root/node_modules/@meanwhile-together/admin" ]; then
+            echo -e "${CYAN}ℹ️  $relc/ absent — node_modules/@meanwhile-together/admin present (npm-pack admin). OK for upload.${NC}"
+            continue
+        fi
+        echo -e "${RED}❌ Path payload directory missing: $relc${NC}" >&2
+        echo "   Expected on disk before upload: $abs" >&2
+        echo "   Re-run mtx deploy so the compile step vendors path payloads, or fix config/server.json." >&2
+        miss=1
+    done < <(jq -r '.apps[]? | select(.source.path? != null) | .source.path' "$cfg" 2>/dev/null)
+
+    if [ "$miss" -ne 0 ]; then
+        return 1
+    fi
+    return 0
+}
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -1446,6 +1511,10 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             mtx_railway_restore_server_config_after_upload "$PROJECT_ROOT"
         }
         trap 'mtx_deploy_spinner_stop; mtx_railway_restore_deploy_server_json_cleanup' EXIT
+
+        if ! mtx_verify_path_payload_trees_before_railway_upload "$PROJECT_ROOT"; then
+            exit 1
+        fi
         
         # Status line while Railway CLI uploads (no spinner during read below)
         mtx_deploy_spinner_start "railway-up" "$APP_NAME"

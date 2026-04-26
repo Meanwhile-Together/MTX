@@ -439,10 +439,30 @@ jq --arg k "$APP_KEY" '
     or ((.id | norm) | test("(^|[-_/])(admin|payload-admin)($|[-_/])"))
     or ((.name | norm) | test("(^|[-_/])(admin|payload-admin)($|[-_/])"))
     or (_basename(.source.path // "") | IN("admin", "payload-admin"));
+  # Orgs ship a placeholder ./payloads/admin in server.json so the mux shape is obvious, but the
+  # real tree lives once in the workspace as ../payload-admin (sibling of the org repo). mtx deploy
+  # vendors from that single checkout — no per-org fork of admin to maintain.
+  def admin_path_placeholder(p):
+    if p == null then true
+    else
+      (p | tostring | sub("^\\s+|\\s+$"; "")) as $t
+      | ($t == "" or $t == "./payloads/admin" or $t == "payloads/admin"
+         or $t == "./payloads/admin/" or $t == "payloads/admin/"
+         or ($t | test("^\\.?/?payloads/admin/?$")))
+    end;
+  def normalize_admin_entry:
+    (. + {"pathPrefix": "/"}) as $e
+    | if ($e.source | type) != "object" then
+        $e | .source = {"path": "../payload-admin"}
+      elif admin_path_placeholder($e.source.path) then
+        $e | .source = ($e.source + {"path": "../payload-admin"})
+      else
+        $e
+      end;
   . as $r |
   ($r[$k]) as $arr |
   if ($arr | any(is_admin)) then
-    $r | .[$k] = ($arr | map(if is_admin then . + {"pathPrefix": "/"} else . end))
+    $r | .[$k] = ($arr | map(if is_admin then normalize_admin_entry else . end))
   else
     $r | .[$k] = ([{
       "id": "admin",
