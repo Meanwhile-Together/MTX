@@ -565,7 +565,7 @@ mtx_org_scaffold_deploy_config_surface() {
   if [ -f "$gitignore" ] && ! grep -qE '^\.env$|^\.env\.\*$' "$gitignore" 2>/dev/null; then
     {
       echo ""
-      echo "# Local secrets (Railway / JWT / DB URLs — mtx deploy reads .env)"
+      echo "# Per-org local secrets (tenant JWT, etc.) — not Railway/master singletons. Platform tokens: \`mtx prepare\` → <workspace>/.mtx.prepare.env"
       echo ".env"
       echo ".env.*"
       echo "!.env.example"
@@ -621,7 +621,7 @@ mtx_org_merge_host_into_package_json() {
     | .devDependencies = ((.devDependencies // {}) + {"@meanwhile-together/engine": "file:../project-bridge/engine"})
     | .scripts["prepare:railway"] = "bash scripts/prepare-railway-artifact.sh"
     | .scripts["dev"] = "bash scripts/org-dev-server.sh"
-    | .scripts["build:server"] = "bash scripts/org-build-server.sh"
+    | .scripts["build:server"] = "mtx build server"
     | .scripts["build:backend-server"] = "npm run build:server"
     | .scripts = ((.scripts // {}) | del(.preinstall))
     ' "$pkg" > "${pkg}.tmp" && mv "${pkg}.tmp" "$pkg"

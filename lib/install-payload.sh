@@ -26,6 +26,59 @@ slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*\|-*$//g'
 }
 
+# Tailwind ownership tripwire (rule-of-law §1 2026-04-24 "Tailwind is framework-owned"):
+# payloads must not ship their own tailwind.config.* / postcss.config.* / tailwindcss /
+# @tailwindcss/* deps. The framework's @meanwhile-together/ui package owns the version
+# pin, the @theme vocabulary, and the @tailwindcss/vite plugin. Drift in a payload would
+# either silently double-load Tailwind (two versions in one bundle) or shadow the
+# framework's tokens — both regressions we explicitly excluded by design. Refuse early
+# instead of letting the offending payload land in a host's apps[] entry.
+#
+# Returns 0 when the directory is clean; emits an error and returns 2 when it isn't.
+mtx_install_assert_no_payload_tailwind() {
+  local d="$1"
+  [ -d "$d" ] || return 0
+  local stale=()
+  for f in tailwind.config.js tailwind.config.ts tailwind.config.mjs tailwind.config.cjs \
+           postcss.config.js postcss.config.ts postcss.config.mjs postcss.config.cjs; do
+    [ -f "$d/$f" ] && stale+=("$f")
+  done
+  local pkg="$d/package.json"
+  local dep_hits=""
+  if [ -f "$pkg" ] && command -v node >/dev/null 2>&1; then
+    dep_hits=$(node -e '
+      const pkg = require(process.argv[1]);
+      const blocks = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
+      const hits = [];
+      for (const b of blocks) {
+        const obj = pkg[b];
+        if (!obj || typeof obj !== "object") continue;
+        for (const name of Object.keys(obj)) {
+          if (name === "tailwindcss" || name.startsWith("@tailwindcss/")) {
+            hits.push(b + ":" + name);
+          }
+        }
+      }
+      process.stdout.write(hits.join(" "));
+    ' "$pkg" 2>/dev/null || true)
+  fi
+  if [ "${#stale[@]}" -eq 0 ] && [ -z "$dep_hits" ]; then
+    return 0
+  fi
+  error "Tailwind ownership violation in $(basename "$d") — payloads must not ship their own Tailwind plumbing."
+  if [ "${#stale[@]}" -gt 0 ]; then
+    echoc dim "  Stale config file(s): $(printf '%s ' "${stale[@]}")"
+  fi
+  if [ -n "$dep_hits" ]; then
+    echoc dim "  Stale package.json deps: $dep_hits"
+  fi
+  echoc dim "  Fix: delete those files, drop those deps, and have src/styles.css (or src/index.css) read"
+  echoc dim "       @import \"@meanwhile-together/ui/styles/framework.css\";"
+  echoc dim "       Wire vite.config.ts via { mtFrameworkPlugins } from \"@meanwhile-together/ui/vite\"."
+  echoc dim "  See project-bridge/docs/rule-of-law.md §1 2026-04-24."
+  return 2
+}
+
 trim() {
   local v="$1"
   v="${v#"${v%%[![:space:]]*}"}"
@@ -375,6 +428,13 @@ REDIRECTED_PAYLOAD_CWD=""
 WORKSPACE_ROOT=""
 mtx_install_resolve_target_host "$(pwd)" "$TARGET_ORG"
 
+# Rule-of-law §1 2026-04-24: enforce framework-owned Tailwind on the redirected payload
+# source. We only have a disk path to inspect when redirecting (or when --target-org
+# pointed us at a payload sibling); the path-source check below covers the explicit case.
+if [ "${REDIRECTED_FROM_PAYLOAD:-0}" = "1" ] && [ -n "${REDIRECTED_PAYLOAD_CWD:-}" ]; then
+  mtx_install_assert_no_payload_tailwind "$REDIRECTED_PAYLOAD_CWD" || exit $?
+fi
+
 # Auto-fill payload id from the redirect if the operator didn't pass one.
 if [ "$REDIRECTED_FROM_PAYLOAD" = "1" ] && [ -z "$PAYLOAD_ID" ]; then
   PAYLOAD_ID="$REDIRECTED_PAYLOAD_ID"
@@ -575,6 +635,24 @@ if [ -n "$API_PREFIX" ] && [[ "$API_PREFIX" != /* ]]; then
   API_PREFIX="/$API_PREFIX"
 fi
 
+if [ "$SOURCE_KIND" = "path" ]; then
+  # Rule-of-law §1 2026-04-24: enforce framework-owned Tailwind on the path source the
+  # operator picked. Resolve relative to the host project root, the same way the host
+  # would later read this entry. We deliberately don't try to enforce on package sources
+  # (no on-disk tree to inspect at install time) — the source-of-truth payload repos are
+  # already gated by the redirect-mode check above.
+  _payload_src_dir=""
+  if [[ "$SOURCE_VALUE" == /* ]]; then
+    _payload_src_dir="$SOURCE_VALUE"
+  else
+    _payload_src_dir="$(cd "$PROJECT_ROOT" 2>/dev/null && cd "$SOURCE_VALUE" 2>/dev/null && pwd -P || true)"
+  fi
+  if [ -n "$_payload_src_dir" ] && [ -d "$_payload_src_dir" ]; then
+    mtx_install_assert_no_payload_tailwind "$_payload_src_dir" || exit $?
+  fi
+  unset _payload_src_dir
+fi
+
 if [ "$SOURCE_KIND" = "package" ]; then
   echo ""
   info "Installing package in $PROJECT_ROOT ..."
@@ -668,6 +746,21 @@ fs.writeFileSync(configPath, JSON.stringify(json, null, 2) + "\n");
 EOF
 
 success "Updated payload entry '$PAYLOAD_ID' in $(basename "$CONFIG_PATH")"
+
+# App Bridge type emitter — regenerate bridge/app/generated.d.ts so that newly-
+# installed payloads autocomplete on bridge.app.<slug>.* before the next client
+# build. Safe to skip silently when the emitter script isn't present (e.g.
+# freshly-cloned host pre-dating project-bridge's App Bridge chunk-9 wiring),
+# or when tsx isn't installed yet (payload install can precede npm install on
+# the very first bootstrap).
+if [ -f "$PROJECT_ROOT/shared/scripts/emit-app-bridge-types.ts" ]; then
+  if (cd "$PROJECT_ROOT" && npx --no-install tsx shared/scripts/emit-app-bridge-types.ts >/dev/null 2>&1); then
+    success "Regenerated engine/src/bridge/app/generated.d.ts (App Bridge typings)."
+  else
+    warn "App Bridge type emit skipped (tsx unavailable; run 'npm run emit:app-bridge-types' after deps install)."
+  fi
+fi
+
 echo ""
 echo "Next steps:"
 echo "  1) Build host/server:"

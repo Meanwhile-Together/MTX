@@ -181,8 +181,13 @@ subs = [
     ),
     (
         "❌ Could not resolve Railway workspace. Set RAILWAY_WORKSPACE_ID in .env or ensure config/app.json app.owner matches a Railway workspace name.",
+        "❌ Could not resolve Railway workspace. Set RAILWAY_WORKSPACE_ID in the workspace .mtx.prepare.env (run: mtx prepare) or ensure config/app.json app.owner matches a Railway workspace name.",
+        "workspace-resolve error app",
+    ),
+    (
         "❌ Could not resolve Railway workspace. Set RAILWAY_WORKSPACE_ID in .env or ensure config/org.json org.owner (or legacy config/app.json app.owner) matches a Railway workspace name.",
-        "workspace-resolve error",
+        "❌ Could not resolve Railway workspace. Set RAILWAY_WORKSPACE_ID in the workspace .mtx.prepare.env (run: mtx prepare) or ensure config/org.json org.owner (or legacy config/app.json app.owner) matches a Railway workspace name.",
+        "workspace-resolve error org",
     ),
     (
         "✅${NC} Using existing project (config/app.json owner):",
@@ -192,8 +197,13 @@ subs = [
     # Header-comment line mentioning just config/app.json.
     (
         "# Reads config/app.json and config/deploy.json; loads .env from project root.",
-        "# Reads config/org.json (canonical; legacy fallback: config/app.json) and config/deploy.json; loads .env from project root.",
+        "# Reads config/app.json and config/deploy.json; org .env for tenant-only; RAILWAY_* from workspace .mtx.prepare.env (mtx prepare / apply).",
         "header comment",
+    ),
+    (
+        "# Reads config/org.json (canonical; legacy fallback: config/app.json) and config/deploy.json; loads .env from project root.",
+        "# Reads config/org.json (canonical; legacy: config/app.json) and config/deploy.json; org .env for tenant-only; RAILWAY_* from workspace .mtx.prepare.env (mtx prepare / apply).",
+        "header comment org",
     ),
 ]
 for old, new, tag in subs:

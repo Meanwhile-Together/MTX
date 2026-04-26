@@ -345,6 +345,13 @@ trap 'rm -f "${WORK:-}" "${OUT:-}"' EXIT
 # contains "admin" OR source.path resolves to a dir named "payload-admin" / "admin".
 # Without the broader check, orgs that list admin as id="payload-admin" (slug null) get a
 # duplicate synthesized entry, which the unified server flags as "Duplicate API prefix /api".
+#
+# Invariant enforced here (rule-of-law 2026-04-22): admin is always root-mounted — never
+# under `/admin` — so any EXISTING admin entry whose pathPrefix isn't "/" or "" gets
+# rewritten in-place. Mirrors `shared/src/server/config.ts :: applyServerEnvOverrides`
+# so runtime + vendored config agree even when one runs without the other (e.g. Railway
+# build step vendors without booting the server). The eventual `default:true` tag on
+# apps[] will replace this special-case; until then this is the single source of truth.
 jq --arg k "$APP_KEY" '
   def norm: if . == null then "" else (tostring | ascii_downcase) end;
   def _basename(p): (p | norm | sub("/+$"; "") | split("/") | last // "");
@@ -357,7 +364,8 @@ jq --arg k "$APP_KEY" '
     or (_basename(.source.path // "") | IN("admin", "payload-admin"));
   . as $r |
   ($r[$k]) as $arr |
-  if ($arr | any(is_admin)) then $r
+  if ($arr | any(is_admin)) then
+    $r | .[$k] = ($arr | map(if is_admin then . + {"pathPrefix": "/"} else . end))
   else
     $r | .[$k] = ([{
       "id": "admin",
@@ -457,7 +465,49 @@ for ((i = 0; i < n; i++)); do
   fi
 
   mkdir -p "$(dirname "$dest")"
-  rsync -a --delete --exclude node_modules --exclude .git "$resolved/" "$dest/"
+  # Vended payload tree = runtime surface only. The server reads exactly these
+  # paths from a payload dir at Railway runtime (traced through
+  # project-bridge/targets/server/src/payload-enrichment.ts + shared/src/server/config.ts):
+  #
+  #   dist/                              built SPA (index.html + assets/*) and
+  #                                      optional api.js / views.js loaded by
+  #                                      loadPayloadFromPath
+  #   dist/_errors/*.html                payload-level error pages
+  #   config/app.json                    payload identity (name/slug/version)
+  #                                      read by mergePayloadIdentity
+  #   package.json                       loadPayloadModule inspects "type" to
+  #                                      decide ESM vs CJS when requiring dist/api
+  #
+  # Everything else a payload carries — raw .ts[x]/.css, the dev root index.html
+  # (references ./src/main.tsx; the exact file that served 496 bytes of white
+  # page across every staging org on 2026-04-22, rule-of-law "Admin is always
+  # root-mounted"), vite/tsconfig/tailwind/postcss configs, per-payload
+  # lockfiles, dev .env, READMEs, tests, editor cruft, flat-layout source dirs
+  # (App.tsx, components/, hooks/, pages/, utils/, types/, styles/ … the taxonomy
+  # is open-ended) — is not read by anything on Railway (the payload was already
+  # built above; Railway runs `npm install --omit=dev --ignore-scripts && node
+  # targets/server/dist/index.js`, period).
+  #
+  # We use an **allowlist** here instead of chasing a blocklist of every new
+  # source-layout flavor that walks through the door. Rule: ship what the server
+  # reads, strip everything else. If a payload genuinely needs a new runtime-read
+  # directory, it goes in the allowlist (and the server side that reads it goes
+  # in rule-of-law). `--delete-excluded` is mandatory so a prior vendor run's
+  # stale dev files (written before this allowlist existed) get purged on the
+  # next vend — without it, rsync treats excludes as "not in view" on both sides
+  # and pre-existing debris survives. Defense in depth with
+  # template-basic/.railwayignore's `payloads/*/` rules covers in-repo payloads
+  # the vendor never rsyncs (those dirs are git-tracked; we can't prune them on
+  # disk — the upload filter does).
+  rsync -a --delete --delete-excluded \
+    --include='/dist/***' \
+    --include='/config/***' \
+    --include='/public/***' \
+    --include='/_errors/***' \
+    --include='/package.json' \
+    --include='/.env.example' \
+    --exclude='*' \
+    "$resolved/" "$dest/"
   # Rewrite relative monorepo paths (package.json file:, tsconfig extends, vite resolve)
   # so that the vendored tree under $ROOT/payloads/$slug/ resolves to the monorepo again.
   # The source repo lives beside project-bridge/, so it ships with "../project-bridge/..."

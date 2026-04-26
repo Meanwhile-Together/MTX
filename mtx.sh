@@ -56,6 +56,90 @@ execDir="$(pwd)"
             [ -n "$line" ] && echo "$line"
         }
 
+        # Multiline help: lines between helptext=<<'MTXH' and a line that is exactly MTXH. Do not source the file.
+        get_helptext() {
+            local f="$1"
+            [ -f "$f" ] || return 1
+            awk "/^helptext=<<'MTXH'\$/{p=1; next} p&&/^MTXH\$/{p=0; exit} p" "$f" 2>/dev/null
+        }
+
+        mtx_is_help_arg() {
+            [ "$1" = '/?' ] && return 0
+            [ "$1" = '?' ] && return 0
+            case "$1" in
+            -h | --help | -help | --h | -\? | --\? | help | usage | --usage | -usage) return 0 ;;
+            *) return 1 ;;
+            esac
+        }
+
+        mtx_wants_command_help() {
+            [ -n "${1:-}" ] || return 1
+            mtx_is_help_arg "$1"
+        }
+
+        mtx_print_command_file_help() {
+            local f="$1" rel ht d
+            [ -f "$f" ] || {
+                echo "See: $installedName help" >&2
+                return
+            }
+            rel="${f#"$scriptDir/"}"
+            rel="${rel%.sh}"
+            ht=$(get_helptext "$f" || true)
+            if [ -n "$ht" ]; then
+                echo "$ht"
+            else
+                d=$(get_desc "$f" || true)
+                if [ -n "$d" ]; then
+                    echo "$d"
+                else
+                    echo "Usage: $installedName $rel  (see: $installedName help)"
+                fi
+            fi
+        }
+
+        mtx_print_group_command_help() {
+            local s="$1" gdir="$2" inst="${3:-$installedName}" ht
+            echo "Command group: $s — run $inst $s <name> (see list below; each entry is a subcommand .sh in this group)."
+            if [ -f "$gdir/HELPTEXT" ]; then
+                ht=$(get_helptext "$gdir/HELPTEXT" || true)
+                [ -n "$ht" ] && echo && echo "$ht"
+            fi
+            echo
+            echo "Subcommands:"
+            for file in "$gdir"/*; do
+                [ -e "$file" ] || continue
+                b=$(basename "$file")
+                if [ -d "$file" ]; then
+                    printf "  - %s  (directory)\n" "$b"
+                elif [[ "$b" == *.sh ]]; then
+                    n="${b%.sh}"
+                    d=$(get_desc "$file" || true)
+                    printf "  - %-24s  %s\n" "$n" "${d:-}"
+                else
+                    printf "  - %s\n" "$b"
+                fi
+            done
+        }
+
+        mtx_warn_group_command_list() {
+            local s="$1" gdir="$2" inst="${3:-$installedName}"
+            warn "'$s' is a command group (no $s.sh to run as default). Subcommands — use: $inst $s <name>"
+            for file in "$gdir"/*; do
+                [ -e "$file" ] || continue
+                b=$(basename "$file")
+                if [ -d "$file" ]; then
+                    warn "$(printf $'\t- %s  %s' "$(color yellow "$b")" "(directory)")"
+                elif [[ "$b" == *.sh ]]; then
+                    n="${b%.sh}"
+                    d=$(get_desc "$file" || true)
+                    warn "$(printf $'\t- %s  %s' "$(color green "$n")" "${d:-}")"
+                else
+                    warn "$(printf $'\t- %s' "$b")"
+                fi
+            done
+        }
+
         # Opt-in: script sets nobanner=1 in first 30 lines → skip 24h banner for that run only (so interactive runs don't show banner; it shows on a later run)
         get_nobanner() {
             local f="$1"
@@ -561,16 +645,7 @@ case "$1" in
                 if [ $((cmdEndIndex - 1)) -gt 0 ]; then
                     debug "It was a dir! Lets list the contents for the user."
                     script=$(IFS=/; echo "${SCRIPT_ARGS[*]:0:cmdEndIndex-1}")
-                    error "Script '$script' is a directory."
-                    info "Available scripts and subdirectories in this directory are:"
-                    info "Scripts are $(color green "green") and directories are $(color yellow "yellow")"
-                    for file in "$script"/*; do
-                        if [[ -d "$file" ]]; then
-                            info "\t- $(basename "$file")"
-                        else
-                            info "\t- $(basename "$file")"
-                        fi
-                    done
+                    group_dir="$scriptDir/$script"
                 else
                     debug "It wasn't a dir either, looks like the user just wanted to run the wrapper. Maybe they want to update only?"
                     success "We're done here."
@@ -587,20 +662,36 @@ case "$1" in
                     fi
                 fi
             fi
+
+            # Remaining argv for the resolved command (file or subfolder script). When empty, clear
+            # is still an empty array: `source file` with no args must not inherit the caller's $@.
+            subcmd_args=()
+            if [ -n "${cmdEndIndex:-}" ] && [ "$((cmdEndIndex - 1))" -ge 0 ] 2>/dev/null && [ "$cmdEndIndex" -le "${#SCRIPT_ARGS[@]}" ] 2>/dev/null; then
+                for a in "${SCRIPT_ARGS[@]:cmdEndIndex-1}"; do
+                    subcmd_args+=("$a")
+                done
+            fi
+
+            # Command group (directory, no co-located foo.sh): help on stdout, list on stderr; no git reset
+            if [ -n "$script" ] && [ -d "$script" ] && ! [[ "$script" == *.sh ]]; then
+                gdir="${group_dir:-$scriptDir/$script}"
+                if mtx_wants_command_help "${subcmd_args[0]:-}"; then
+                    mtx_print_group_command_help "$script" "$gdir" "$installedName"
+                    exit 0
+                fi
+                mtx_warn_group_command_list "$script" "$gdir" "$installedName"
+                exit 0
+            fi
+
             if [ -f "$script" ]; then
                 show_banner_if_24h "$scriptDir/$script"
                 debug "Running $script"
+                if mtx_wants_command_help "${subcmd_args[0]:-}"; then
+                    mtx_print_command_file_help "$scriptDir/$script"
+                    exit 0
+                fi
                 git -C "$scriptDir" reset --hard origin/main
                 chmod +x "$script"
-                # Remaining argv for the sourced script only. When empty, we must still clear
-                # positional parameters: `source file` with no args leaves the caller's $@ intact,
-                # so e.g. `mtx create org` would wrongly pass "create org" into create/org.sh.
-                subcmd_args=()
-                if [ "$cmdEndIndex" -le "${#SCRIPT_ARGS[@]}" ]; then
-                    for a in "${SCRIPT_ARGS[@]:cmdEndIndex-1}"; do
-                        subcmd_args+=("$a")
-                    done
-                fi
 
                 if [ ! -z "$hoist_target" ]; then
                     #Un-comment to disable multi-hoisting

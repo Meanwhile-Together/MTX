@@ -1,10 +1,26 @@
 #!/usr/bin/env bash
 # MTX setup deploy-menu: interactive deploy menu (from shell-scripts.md §3)
-desc="Interactive deploy menu: tokens, Terraform, Railway"
+desc="Interactive deploy menu: tokens, Terraform, Railway (legacy; read-mostly)"
 nobanner=1
 set -e
 
 ENV_FILE=".env"
+
+# Deprecation: platform tokens live in the workspace .mtx.prepare.env (see mtx prepare).
+# Do not write RAILWAY_* (etc.) to cwd .env — use mtx prepare + mtx deploy.
+_dep_warn_printed=0
+mtx_deploy_menu_deprecation() {
+  if [ "${_dep_warn_printed}" = 1 ]; then
+    return 0
+  fi
+  _dep_warn_printed=1
+  echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+  echo -e "${YELLOW}  Deploy/Railway tokens: use workspace file — run: ${NC}${CYAN}mtx prepare${NC}" >&2
+  echo -e "  →  <workspace>/.mtx.prepare.env  (RAILWAY_*, platform singletons)" >&2
+  echo -e "  This menu is legacy. It will not save RAILWAY_* or VERCEL_TOKEN to ${ENV_FILE}.${NC}" >&2
+  echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+  echo "" >&2
+}
 
 # Colors
 GREEN='\033[0;32m'
@@ -13,6 +29,7 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
+mtx_deploy_menu_deprecation
 
 # Ensure we're in project root (mtx already cd's here; after we cd terraform we need to get back)
 go_to_project_root() {
@@ -30,7 +47,17 @@ fi
 save_env_var() {
     local key="$1"
     local value="$2"
-    
+    case "$key" in
+        RAILWAY_*|RAILWAY_TOKEN|VERCEL_TOKEN|VERCEL_API_TOKEN|RAILWAY_PROJECT_TOKEN|RAILWAY_API_TOKEN|RAILWAY_ACCOUNT_TOKEN)
+            echo -e "${RED}❌ Not saving $key to ./.env — use: mtx prepare${NC} (workspace .mtx.prepare.env)" >&2
+            return 1
+            ;;
+    esac
+    [ -f "$ENV_FILE" ] || touch "$ENV_FILE" 2>/dev/null || true
+    if [ ! -f "$ENV_FILE" ]; then
+        echo -e "${RED}❌ Cannot create $ENV_FILE${NC}" >&2
+        return 1
+    fi
     # Remove existing entry if present
     if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
         if [[ "$OSTYPE" == "darwin"* ]]; then

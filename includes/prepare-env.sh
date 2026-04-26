@@ -137,3 +137,24 @@ mtx_require_prepare_env() {
   export MTX_WORKSPACE_ROOT="$workspace_root"
   export MTX_PREPARE_FILE="$prepare_file"
 }
+
+# Source workspace .mtx.prepare.env if it exists; set MTX_WORKSPACE_ROOT and MTX_PREPARE_FILE.
+# Does not require any keys (for mtx master * commands that only need platform singletons).
+# Usage: mtx_source_prepare_file_from_cwd [start_dir] || exit
+mtx_source_prepare_file_from_cwd() {
+  local start_dir="${1:-$(pwd)}" wr pf
+  wr="$(mtx_detect_workspace_root "$start_dir")" || {
+    echo "❌ Workspace root not found (missing *.code-workspace in parent chain)." >&2
+    return 1
+  }
+  pf="$(mtx_prepare_file_path "$wr")"
+  export MTX_WORKSPACE_ROOT="$wr"
+  export MTX_PREPARE_FILE="$pf"
+  if [ -f "$pf" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$pf"
+    set +a
+  fi
+  return 0
+}

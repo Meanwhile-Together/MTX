@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build unified server artifacts for the project root (tree with config/app.json).
 # Same npm steps as mtx deploy uses before railway up; does not provision infra or upload.
-# Org repos (scripts/org-build-server.sh): before build:server, primes resolved project-bridge with
-# npm install and npm run db:generate (matches org-build-server expectations).
+# Org hosts (config/app.json + project-bridge): before build, primes resolved project-bridge with
+# npm install and db:generate (same as project/org-build-server.sh).
 # Org repos with scripts/prepare-railway-artifact.sh: run npm run prepare:railway instead of
 # build:server — produces targets/server/dist, npm-packs, and deploy manifests for Railway.
 # Path payloads: MTX runs lib/vendor-payloads-from-config.sh on the org root before prepare:railway.
@@ -15,6 +15,8 @@ set -e
 
 MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 export MTX_ROOT
+# shellcheck source=includes/verify-pb-framework-identity.sh
+[ -f "$MTX_ROOT/includes/verify-pb-framework-identity.sh" ] && source "$MTX_ROOT/includes/verify-pb-framework-identity.sh"
 
 # Match deploy/terraform/apply.sh PROJECT_ROOT resolution
 PROJECT_ROOT=""
@@ -39,7 +41,7 @@ case "$TARGET" in
   all|a|'') TARGET=all ;;
   -h|--help|help)
     echo "Usage: mtx build [server|backend|all]"
-    echo "  server   — npm run build:server, or prepare:railway when org Railway scripts exist (path payloads: MTX lib/vendor-payloads-from-config.sh runs first)"
+    echo "  server   — org hosts: MTX project/org-build-server.sh; else npm run build:server. With prepare:railway scripts, runs prepare:railway (path payloads: vendor-payloads-from-config.sh first)"
     echo "  backend  — npm run build:backend-server (or same prepare:railway when unified)"
     echo "  all      — both (default; org repos run one unified build if backend aliases to server)"
     echo "  Org repos: project-bridge is primed with npm install + db:generate first (sibling, vendor/, or PROJECT_BRIDGE_ROOT)."
@@ -52,7 +54,22 @@ case "$TARGET" in
     ;;
 esac
 
-# Same resolution order as template org scripts/org-build-server.sh
+# Harden: project-bridge must carry template placeholder org.json (sibling or cwd); fail before terraform/prime.
+if [ -f "$MTX_ROOT/includes/verify-pb-framework-identity.sh" ] && type mtx_verify_project_bridge_identity_for_build_context >/dev/null 2>&1; then
+  mtx_verify_project_bridge_identity_for_build_context "$PROJECT_ROOT" "$MTX_ROOT" || exit 1
+else
+  echo "❌ MTX missing or incomplete includes/verify-pb-framework-identity.sh; cannot verify framework org identity" >&2
+  exit 1
+fi
+
+# Org host: config/app.json + resolvable project-bridge (same unified build as mtx build server → project/org-build-server.sh).
+mtx_is_org_unified_host() {
+  local root="${1:-$PROJECT_ROOT}"
+  [ -f "$root/config/app.json" ] || return 1
+  mtx_resolve_org_project_bridge "$root" &>/dev/null
+}
+
+# Same resolution order as project/org-build-server.sh and template thin wrapper
 mtx_resolve_org_project_bridge() {
   local root="$1"
   if [ -n "${PROJECT_BRIDGE_ROOT:-}" ] && [ -f "${PROJECT_BRIDGE_ROOT}/package.json" ]; then
@@ -70,7 +87,7 @@ mtx_resolve_org_project_bridge() {
 }
 
 mtx_prime_org_project_bridge_if_needed() {
-  [ -f "$PROJECT_ROOT/scripts/org-build-server.sh" ] || return 0
+  mtx_is_org_unified_host || return 0
   case "$TARGET" in server|backend|all) ;; *) return 0 ;; esac
   local pb
   if ! pb="$(mtx_resolve_org_project_bridge "$PROJECT_ROOT")"; then
@@ -126,6 +143,16 @@ run_server_build() {
     run_prepare_railway_bundle
     return
   fi
+  if mtx_is_org_unified_host; then
+    echo "🔨 Building org unified server (MTX project/org-build-server.sh)..." >&2
+    if [ ! -f "$MTX_ROOT/project/org-build-server.sh" ]; then
+      echo "❌ Missing $MTX_ROOT/project/org-build-server.sh" >&2
+      exit 1
+    fi
+    bash "$MTX_ROOT/project/org-build-server.sh" "$PROJECT_ROOT" || { echo "❌ org unified server build failed" >&2; exit 1; }
+    echo "✅ org unified server build complete" >&2
+    return
+  fi
   echo "🔨 Building app server (npm run build:server)..." >&2
   ensure_npm_deps
   npm run build:server || { echo "❌ build:server failed" >&2; exit 1; }
@@ -156,8 +183,8 @@ case "$TARGET" in
   backend) run_backend_build ;;
   all)
     run_server_build
-    # org template aliases build:backend-server to build:server — avoid duplicate work
-    if [ ! -f "$PROJECT_ROOT/scripts/org-build-server.sh" ]; then
+    # org host: build:backend-server aliases to the same unified build — avoid duplicate work
+    if ! mtx_is_org_unified_host; then
       run_backend_build
     fi
     ;;

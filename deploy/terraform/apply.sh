@@ -65,7 +65,8 @@ mtx_sanitize_railway_token_env_from_dotenv() {
     done
 }
 
-# Load .env if it exists (for RAILWAY_ACCOUNT_TOKEN and other tokens)
+# Load org .env if it exists (host-specific secrets: JWT, master-auth build-time fan-out, etc.).
+# Shared RAILWAY_* tokens are not stored here — they live in $MTX_PREPARE_FILE (see set_prepare_key).
 if [ -f "$ENV_FILE" ]; then
     set -a
     source "$ENV_FILE"
@@ -116,6 +117,40 @@ set_env_var_in_file() {
         echo "$line" >> "$ENV_FILE"
     else
         echo "$line" >> "$ENV_FILE"
+    fi
+}
+
+# Shared Railway account / workspace / project / project-scoped deploy tokens: persist to workspace
+# .mtx.prepare.env (see mtx require/prepare) — not per-org .env, to avoid cross-org drift and duplication.
+set_prepare_key() {
+    local key="$1" value="$2" line
+    line="${key}=${value}"
+    if [ -z "${MTX_PREPARE_FILE:-}" ] || [ ! -f "$MTX_PREPARE_FILE" ]; then
+        echo "❌ Missing workspace prepare file (run: mtx prepare). Could not write ${key}." >&2
+        return 1
+    fi
+    if grep -q "^${key}=" "$MTX_PREPARE_FILE" 2>/dev/null; then
+        grep -v "^${key}=" "$MTX_PREPARE_FILE" > "${MTX_PREPARE_FILE}.tmp" && mv "${MTX_PREPARE_FILE}.tmp" "$MTX_PREPARE_FILE"
+    fi
+    echo "$line" >> "$MTX_PREPARE_FILE"
+    chmod 600 "$MTX_PREPARE_FILE" 2>/dev/null || true
+}
+
+clear_prepare_key() {
+    local key="$1" silent="${2:-}"
+    if [ -z "${MTX_PREPARE_FILE:-}" ] || [ ! -f "$MTX_PREPARE_FILE" ]; then
+        return 0
+    fi
+    if grep -q "^${key}=" "$MTX_PREPARE_FILE" 2>/dev/null; then
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "/^${key}=/d" "$MTX_PREPARE_FILE"
+        else
+            sed -i "/^${key}=/d" "$MTX_PREPARE_FILE"
+        fi
+        unset "$key" 2>/dev/null || true
+        if [ "$silent" != "true" ]; then
+            echo -e "${YELLOW}🗑️  Cleared invalid ${key} from ${MTX_PREPARE_FILE##*/}${NC}"
+        fi
     fi
 }
 
@@ -277,24 +312,24 @@ if [ "$HAS_RAILWAY" = "true" ]; then
     RAILWAY_TOKEN_VALUE="$(mtx_normalize_railway_token "$RAILWAY_TOKEN_VALUE")"
     if [ -z "$RAILWAY_TOKEN_VALUE" ] || [ "$RAILWAY_TOKEN_VALUE" = "null" ]; then
         if [ -t 0 ]; then
-            echo -e "${YELLOW}🔐 Railway account token needed (one-time). It will be saved to .env for future deploys.${NC}"
+            echo -e "${YELLOW}🔐 Railway account token needed (one-time). It will be saved to the workspace prepare file for future deploys.${NC}"
             echo -e "${BLUE}🔗 Get an account token: https://railway.app/account/tokens${NC}"
-            echo -e "${CYAN}   (input is hidden; token will be stored in ${ENV_FILE})${NC}"
+            echo -e "${CYAN}   (input is hidden; token will be stored in ${MTX_PREPARE_FILE})${NC}"
             read -r -sp "Paste your Railway account token: " RAILWAY_TOKEN_VALUE
             echo ""
             if [ -z "$RAILWAY_TOKEN_VALUE" ]; then
                 echo -e "${RED}❌ No token entered. Exiting.${NC}"
                 exit 1
             fi
-            set_env_var_in_file "RAILWAY_ACCOUNT_TOKEN" "$RAILWAY_TOKEN_VALUE"
-            echo -e "${GREEN}✅ Token saved to .env — future deploys will use it automatically.${NC}"
+            set_prepare_key "RAILWAY_ACCOUNT_TOKEN" "$RAILWAY_TOKEN_VALUE"
+            echo -e "${GREEN}✅ Token saved to ${MTX_PREPARE_FILE##*/} — future deploys will use it automatically.${NC}"
         else
-            echo -e "${RED}❌ Railway account token required. Set RAILWAY_ACCOUNT_TOKEN in ${ENV_FILE} (get from https://railway.app/account/tokens).${NC}"
+            echo -e "${RED}❌ Railway account token required. Set RAILWAY_ACCOUNT_TOKEN in ${MTX_PREPARE_FILE} or run mtx prepare (get from https://railway.app/account/tokens).${NC}"
             exit 1
         fi
     else
         # Persist so second deploy (e.g. new shell) never needs token again
-        set_env_var_in_file "RAILWAY_ACCOUNT_TOKEN" "$RAILWAY_TOKEN_VALUE"
+        set_prepare_key "RAILWAY_ACCOUNT_TOKEN" "$RAILWAY_TOKEN_VALUE"
     fi
     TF_VARS+=(-var="railway_token=$RAILWAY_TOKEN_VALUE")
     echo -e "${GREEN}✅${NC} Railway account token ready"
@@ -333,20 +368,20 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     .name // empty
                 ' 2>/dev/null)
                 echo -e "${GREEN}✅${NC} Found workspace: $WORKSPACE_NAME (ID: $RAILWAY_WORKSPACE_ID)"
-                set_env_var_in_file "RAILWAY_WORKSPACE_ID" "$RAILWAY_WORKSPACE_ID"
+                set_prepare_key "RAILWAY_WORKSPACE_ID" "$RAILWAY_WORKSPACE_ID"
                 TF_VARS+=(-var="railway_workspace_id=$RAILWAY_WORKSPACE_ID")
             fi
         fi
         if [ -z "${RAILWAY_WORKSPACE_ID:-}" ] || [ "$RAILWAY_WORKSPACE_ID" = "null" ]; then
-            echo -e "${RED}❌ Could not resolve Railway workspace. Set RAILWAY_WORKSPACE_ID in .env or ensure config/app.json app.owner matches a Railway workspace name.${NC}"
+            echo -e "${RED}❌ Could not resolve Railway workspace. Set RAILWAY_WORKSPACE_ID in ${MTX_PREPARE_FILE:-.mtx.prepare.env} or run mtx prepare, or ensure config org owner (or legacy app.owner) matches a Railway workspace name.${NC}"
             exit 1
         fi
     fi
 
-    # Resolve project: .env is source of truth when set (avoids creating duplicates). Only discover from API when .env has no project ID.
+    # Resolve project: workspace prepare file is source of truth when set (avoids creating duplicates). Only discover from API when unset.
     if [ -n "${RAILWAY_PROJECT_ID:-}" ] && [ "$RAILWAY_PROJECT_ID" != "null" ]; then
         RAILWAY_PROJECT_ID_FOR_RUN="$RAILWAY_PROJECT_ID"
-        echo -e "${GREEN}✅${NC} Using project from .env: $RAILWAY_PROJECT_ID_FOR_RUN (no new project will be created)"
+        echo -e "${GREEN}✅${NC} Using project from workspace prepare file: $RAILWAY_PROJECT_ID_FOR_RUN (no new project will be created)"
     elif [ -z "${RAILWAY_PROJECT_ID_FOR_RUN:-}" ] && [ -n "${RAILWAY_WORKSPACE_ID:-}" ] && [ -n "$RAILWAY_TOKEN_VALUE" ]; then
         PROJECTS_QUERY=$(printf '{"query":"query($wid: String!) { workspace(workspaceId: $wid) { projects(first: 50) { edges { node { id name } } } } }", "variables": {"wid": "%s"}}' "$RAILWAY_WORKSPACE_ID")
         PROJECTS_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
@@ -458,7 +493,7 @@ if [ "$HAS_RAILWAY" = "true" ] && [ -n "${RAILWAY_PROJECT_ID_FOR_RUN:-}" ] && [ 
             echo ""
             echo -e "${RED}❌ Import failed. Terraform would create a new project with the same name if we continued.${NC}"
             echo -e "${YELLOW}   Fix the error above (e.g. token access, project ID) and re-run.${NC}"
-            echo -e "${YELLOW}   Or remove RAILWAY_PROJECT_ID from ${ENV_FILE} only if you intend to create a new project.${NC}"
+            echo -e "${YELLOW}   Or remove RAILWAY_PROJECT_ID from ${MTX_PREPARE_FILE} only if you intend to create a new project.${NC}"
             exit 1
         fi
         if ! terraform state list 2>/dev/null | grep -qF 'module.railway_owner[0].railway_project.owner[0]'; then
@@ -567,10 +602,14 @@ if [ "$HAS_RAILWAY" = "true" ]; then
     PROJECT_ID=$(terraform output -raw railway_project_id 2>/dev/null || echo "")
     # If project ID changed (e.g. Terraform just created a new project), clear project tokens — they're for the old project
     OLD_PROJECT_ID=""
-    if [ -f "$ENV_FILE" ] && grep -q "^RAILWAY_PROJECT_ID=" "$ENV_FILE" 2>/dev/null; then
+    if [ -f "${MTX_PREPARE_FILE:-}" ] && grep -q "^RAILWAY_PROJECT_ID=" "$MTX_PREPARE_FILE" 2>/dev/null; then
+        OLD_PROJECT_ID=$(grep "^RAILWAY_PROJECT_ID=" "$MTX_PREPARE_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+    elif [ -f "$ENV_FILE" ] && grep -q "^RAILWAY_PROJECT_ID=" "$ENV_FILE" 2>/dev/null; then
         OLD_PROJECT_ID=$(grep "^RAILWAY_PROJECT_ID=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
     fi
     if [ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "null" ] && [ -n "$OLD_PROJECT_ID" ] && [ "$OLD_PROJECT_ID" != "$PROJECT_ID" ]; then
+        clear_prepare_key "RAILWAY_PROJECT_TOKEN_STAGING" "true"
+        clear_prepare_key "RAILWAY_PROJECT_TOKEN_PRODUCTION" "true"
         clear_env_var_in_file "RAILWAY_PROJECT_TOKEN_STAGING" "true"
         clear_env_var_in_file "RAILWAY_PROJECT_TOKEN_PRODUCTION" "true"
         unset RAILWAY_PROJECT_TOKEN_STAGING RAILWAY_PROJECT_TOKEN_PRODUCTION
@@ -579,7 +618,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
     fi
     # Persist current project ID for next run
     if [ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "null" ]; then
-        set_env_var_in_file "RAILWAY_PROJECT_ID" "$PROJECT_ID"
+        set_prepare_key "RAILWAY_PROJECT_ID" "$PROJECT_ID"
     fi
     
     # Unified server: one Railway app service; deploy target environment is Railway $ENVIRONMENT.
@@ -598,6 +637,17 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         
         # Navigate to project root
         cd "$PROJECT_ROOT"
+
+        # Harden: framework project-bridge (sibling) or cwd must have placeholder org.json before link/build/upload.
+        if [ -f "$MTX_ROOT/includes/verify-pb-framework-identity.sh" ]; then
+            # shellcheck source=../../includes/verify-pb-framework-identity.sh
+            # shellcheck disable=SC1090
+            source "$MTX_ROOT/includes/verify-pb-framework-identity.sh"
+            mtx_verify_project_bridge_identity_for_build_context "$PROJECT_ROOT" "$MTX_ROOT" || exit 1
+        else
+            echo "❌ MTX missing $MTX_ROOT/includes/verify-pb-framework-identity.sh" >&2
+            exit 1
+        fi
         
         # Check if Railway CLI is installed
         if ! command -v railway &> /dev/null; then
@@ -966,23 +1016,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 exit 1
             fi
             
-            # Save to .env file
-            ENV_FILE="$PROJECT_ROOT/.env"
-            if [ -f "$ENV_FILE" ]; then
-                # Remove existing entry if present
-                if grep -q "^${PRODUCTION_TOKEN_VAR}=" "$ENV_FILE" 2>/dev/null; then
-                    if [[ "$OSTYPE" == "darwin"* ]]; then
-                        sed -i '' "/^${PRODUCTION_TOKEN_VAR}=/d" "$ENV_FILE"
-                    else
-                        sed -i "/^${PRODUCTION_TOKEN_VAR}=/d" "$ENV_FILE"
-                    fi
-                fi
-                # Append new entry
-                echo "${PRODUCTION_TOKEN_VAR}=${PRODUCTION_TOKEN}" >> "$ENV_FILE"
-            else
-                echo "${PRODUCTION_TOKEN_VAR}=${PRODUCTION_TOKEN}" > "$ENV_FILE"
-            fi
-            echo -e "${GREEN}✅ Saved PRODUCTION token to .env as $PRODUCTION_TOKEN_VAR${NC}"
+            set_prepare_key "$PRODUCTION_TOKEN_VAR" "$PRODUCTION_TOKEN"
+            echo -e "${GREEN}✅ Saved PRODUCTION token to ${MTX_PREPARE_FILE##*/} as $PRODUCTION_TOKEN_VAR${NC}"
             echo ""
         else
             echo -e "${GREEN}✅ Found PRODUCTION project token from environment variable${NC}"
@@ -1089,23 +1124,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                         echo -e "${YELLOW}   Continuing with $ENVIRONMENT deployment only...${NC}"
                         echo ""
                     else
-                        # Save to .env file
-                        ENV_FILE="$PROJECT_ROOT/.env"
-                        if [ -f "$ENV_FILE" ]; then
-                            # Remove existing entry if present
-                            if grep -q "^${STAGING_TOKEN_VAR}=" "$ENV_FILE" 2>/dev/null; then
-                                if [[ "$OSTYPE" == "darwin"* ]]; then
-                                    sed -i '' "/^${STAGING_TOKEN_VAR}=/d" "$ENV_FILE"
-                                else
-                                    sed -i "/^${STAGING_TOKEN_VAR}=/d" "$ENV_FILE"
-                                fi
-                            fi
-                            # Append new entry
-                            echo "${STAGING_TOKEN_VAR}=${STAGING_TOKEN}" >> "$ENV_FILE"
-                        else
-                            echo "${STAGING_TOKEN_VAR}=${STAGING_TOKEN}" > "$ENV_FILE"
-                        fi
-                        echo -e "${GREEN}✅ Saved STAGING token to .env as $STAGING_TOKEN_VAR${NC}"
+                        set_prepare_key "$STAGING_TOKEN_VAR" "$STAGING_TOKEN"
+                        echo -e "${GREEN}✅ Saved STAGING token to ${MTX_PREPARE_FILE##*/} as $STAGING_TOKEN_VAR${NC}"
                         echo ""
                     fi
                 fi
@@ -1207,7 +1227,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 if echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "Unauthorized|Invalid RAILWAY_TOKEN|invalid.*token|token.*invalid|valid and has access|Login state is corrupt|failed to parse header value"; then
                     echo ""
                     if echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "Login state is corrupt|failed to parse header value"; then
-                        echo -e "${RED}❌ Railway CLI rejected the token as an HTTP header (often newline, spaces, or quotes in .env).${NC}"
+                        echo -e "${RED}❌ Railway CLI rejected the token as an HTTP header (often newline, spaces, or quotes in the prepare file or .env).${NC}"
                     else
                         echo -e "${RED}❌ Token validation failed - the ${ENVIRONMENT^^} token is invalid, for a different project, or expired${NC}"
                     fi
@@ -1220,17 +1240,10 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                         TOKEN_VAR="RAILWAY_PROJECT_TOKEN_PRODUCTION"
                     fi
                     
-                    # Clear stale token from .env
-                    if [ -f "$PROJECT_ROOT/.env" ]; then
-                        if grep -q "^${TOKEN_VAR}=" "$PROJECT_ROOT/.env" 2>/dev/null; then
-                            if [[ "$OSTYPE" == "darwin"* ]]; then
-                                sed -i '' "/^${TOKEN_VAR}=/d" "$PROJECT_ROOT/.env"
-                            else
-                                sed -i "/^${TOKEN_VAR}=/d" "$PROJECT_ROOT/.env"
-                            fi
-                            echo -e "${YELLOW}🗑️  Cleared stale $TOKEN_VAR from .env${NC}"
-                        fi
-                    fi
+                    # Clear stale token from workspace prepare and legacy org .env
+                    clear_prepare_key "$TOKEN_VAR" "true"
+                    clear_env_var_in_file "$TOKEN_VAR" "true"
+                    echo -e "${YELLOW}🗑️  Cleared stale $TOKEN_VAR from ${MTX_PREPARE_FILE##*/} and/or .env if present${NC}"
                     
                     # Prompt for new token
                     echo -e "${YELLOW}📝 Please provide a valid ${ENVIRONMENT^^} project token:${NC}"
@@ -1245,9 +1258,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                         exit 1
                     fi
                     
-                    # Save new token
-                    echo "${TOKEN_VAR}=${NEW_TOKEN}" >> "$PROJECT_ROOT/.env"
-                    echo -e "${GREEN}✅ Saved new $TOKEN_VAR to .env${NC}"
+                    set_prepare_key "$TOKEN_VAR" "$NEW_TOKEN"
+                    echo -e "${GREEN}✅ Saved new $TOKEN_VAR to ${MTX_PREPARE_FILE##*/}${NC}"
                     
                     # Update token for retry
                     PROJECT_TOKEN="$NEW_TOKEN"
@@ -1267,7 +1279,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     echo -e "${RED}❌ Deployment failed${NC}"
                     echo ""
                     if echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "Login state is corrupt|failed to parse header value"; then
-                        echo -e "${YELLOW}💡 The Railway CLI maps bad HTTP headers to \"Login state is corrupt\". Usually RAILWAY_PROJECT_TOKEN_* in .env has a trailing newline, spaces, or quotes — use a single-line unquoted token.${NC}"
+                        echo -e "${YELLOW}💡 The Railway CLI maps bad HTTP headers to \"Login state is corrupt\". Usually RAILWAY_PROJECT_TOKEN_* in the workspace prepare file has a trailing newline, spaces, or quotes — use a single-line unquoted token.${NC}"
                     else
                         echo -e "${YELLOW}💡 Tip: Make sure the token is a project token for the $ENVIRONMENT environment${NC}"
                         echo "   Get it from: https://railway.app/project/$PROJECT_ID/settings/tokens"
