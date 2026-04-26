@@ -156,6 +156,10 @@ run_prepare_railway_bundle() {
     echo "==> mtx build: vendor path payloads from config/server.json (MTX lib)" >&2
     # Vendor script prints one TTY status line per payload (dots); npm inside it uses mtx_run for quiet.
     bash "$MTX_ROOT/lib/vendor-payloads-from-config.sh" "$PROJECT_ROOT"
+    # scripts/prepare-railway-artifact.sh (invoked by npm run prepare:railway below) runs the same
+    # vendor if MTX_SKIP_PAYLOAD_VENDOR is unset — that duplicates work and prints each "Vendoring…
+    # Finished" line twice. MTX has already vended; skip the second pass.
+    export MTX_SKIP_PAYLOAD_VENDOR=1
   fi
   # At MTX_VERBOSE<=1, mtx_run hides prepare:railway — show one-line status so the gap is not blank.
   if [ "${MTX_VERBOSE:-1}" -le 1 ]; then

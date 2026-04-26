@@ -1274,6 +1274,99 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             echo -e "${RED}❌ Central database wiring failed; aborting deployment.${NC}"
             exit 1
         fi
+
+        # mtx deploy asadmin / child orgs with master trust: auth env on the unified app service (admin + payloads).
+        # Set these *before* the first `railway up` so the initial release runs with the correct env. Doing this
+        # after the code deploy used to require a second `railway redeploy` (extra Railway run / cost) for the
+        # same image just to pick up variables set with --skip-deploys.
+        if [ -n "${RUN_AS_MASTER:-}" ] || [ -n "${MASTER_JWT_SECRET:-}" ] || [ -n "${MASTER_AUTH_ISSUER:-}" ] || [ -n "${MASTER_CORS_ORIGINS:-}" ] || [ -n "${MASTER_AUTH_PUBLIC_URL:-}" ] || [ -n "${VITE_MASTER_AUTH_URL:-}" ]; then
+            echo -e "${BLUE}🔐 Setting master auth variables on $APP_SERVICE_NAME_FOR_ENV (before first deploy)...${NC}"
+            export RAILWAY_TOKEN="$PROJECT_TOKEN"
+            unset RAILWAY_API_TOKEN
+            (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment)
+            # Force CLI context to the exact project/service/environment before setting vars.
+            (cd "$PROJECT_ROOT" && railway link --project "$PROJECT_ID" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1) || true
+            railway_set_var() {
+                local kv="$1"
+                # Batching: --skip-deploys avoids one deploy per variable; the single `deploy_to_railway` below
+                # is the one deploy that applies all of them. (Without --skip-deploys, the CLI can roll the
+                # service many times and amplify transient DNS flakiness.)
+                railway variable set "$kv" --service "$SERVICE_ID" --environment "$ENVIRONMENT" --skip-deploys >/dev/null 2>&1 \
+                  || railway variable set "$kv" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
+                  || railway variables set "$kv" >/dev/null 2>&1
+            }
+            if [ "${MTX_ASADMIN:-}" = "1" ] && [ -n "${RUN_AS_MASTER:-}" ]; then
+                RUN_AS_MASTER_VAL="true"
+                (railway_set_var "RUN_AS_MASTER=$RUN_AS_MASTER_VAL" && echo -e "${GREEN}✅ RUN_AS_MASTER=$RUN_AS_MASTER_VAL on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RUN_AS_MASTER via CLI${NC}"
+            else
+                # Not an asadmin deploy → actively remove RUN_AS_MASTER from the Railway service
+                # so a previously-poisoned tenant self-heals on its next plain `mtx deploy`.
+                # Idempotent (harmless if the var isn't set).
+                #
+                # CLI form (Railway v3.x, confirmed 2026-04-22):
+                #   railway variable delete --service <s> --environment <e> <KEY>
+                # 'variable delete' does NOT accept --yes or --skip-deploys. On older CLIs the
+                # plural form 'variables delete' existed — kept as a fallback. Any successful path
+                # prints a success line so the deploy log shows the scrub happened.
+                if railway variable delete RUN_AS_MASTER --service "$APP_SERVICE_NAME_FOR_ENV" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
+                  || railway variable delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
+                  || railway variables delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1; then
+                    echo -e "${YELLOW}🧹 Scrubbed stale RUN_AS_MASTER from $APP_SERVICE_NAME_FOR_ENV (plain 'mtx deploy' does not assert master).${NC}"
+                fi
+            fi
+            # Master admin addon reads Railway env vars at runtime to list services/logs/apps.
+            # Persist project-scoped token + project id on the deployed service.
+            [ -n "${PROJECT_TOKEN:-}" ] && (railway_set_var "RAILWAY_PROJECT_TOKEN=$PROJECT_TOKEN" && echo -e "${GREEN}✅ RAILWAY_PROJECT_TOKEN set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RAILWAY_PROJECT_TOKEN via CLI${NC}"
+            [ -n "${PROJECT_TOKEN:-}" ] && (railway_set_var "RAILWAY_TOKEN=$PROJECT_TOKEN" && echo -e "${GREEN}✅ RAILWAY_TOKEN set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RAILWAY_TOKEN via CLI${NC}"
+            [ -n "${PROJECT_ID:-}" ] && (railway_set_var "RAILWAY_PROJECT_ID=$PROJECT_ID" && echo -e "${GREEN}✅ RAILWAY_PROJECT_ID set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RAILWAY_PROJECT_ID via CLI${NC}"
+            [ -n "${MASTER_JWT_SECRET:-}" ] && (railway_set_var "MASTER_JWT_SECRET=$MASTER_JWT_SECRET" && echo -e "${GREEN}✅ MASTER_JWT_SECRET set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set MASTER_JWT_SECRET via CLI${NC}"
+            # JWT_SECRET policy under the asmaster architecture (rule-of-law §1 2026-04-21):
+            #   • Master (RUN_AS_MASTER=true): admin lane and master-hosted apps both use master-issued
+            #     tokens, so JWT_SECRET is mirrored from MASTER_JWT_SECRET. verifyMasterAuthToken on the
+            #     admin mount also uses MASTER_JWT_SECRET; the mirror just keeps any legacy code path
+            #     using getAuthService() aligned.
+            #   • Tenant (no RUN_AS_MASTER, but MASTER_JWT_SECRET set via workspace overlay): tenant
+            #     app payloads sign/verify with a tenant-local JWT_SECRET that is INTENTIONALLY distinct
+            #     from MASTER_JWT_SECRET, so a compromised tenant cannot forge master-valid admin tokens
+            #     and vice versa. If JWT_SECRET is missing we generate a random one here, persist it to
+            #     PROJECT_ROOT/.env (so future deploys reuse it — rotating it on every deploy would
+            #     invalidate every active tenant-app session), and set it on the Railway service.
+            if [ -n "${MASTER_JWT_SECRET:-}" ] && [ -z "${JWT_SECRET:-}" ]; then
+                if [ -n "${RUN_AS_MASTER:-}" ]; then
+                    (railway_set_var "JWT_SECRET=$MASTER_JWT_SECRET" && echo -e "${GREEN}✅ JWT_SECRET mirrored from MASTER_JWT_SECRET on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set JWT_SECRET via CLI${NC}"
+                    export JWT_SECRET="$MASTER_JWT_SECRET"
+                else
+                    NEW_JWT_SECRET=""
+                    if command -v openssl >/dev/null 2>&1; then
+                        NEW_JWT_SECRET="$(openssl rand -base64 48 | tr -d '\n\r')"
+                    elif [ -r /dev/urandom ]; then
+                        NEW_JWT_SECRET="$(tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 64)"
+                    fi
+                    if [ -n "$NEW_JWT_SECRET" ]; then
+                        (railway_set_var "JWT_SECRET=$NEW_JWT_SECRET" && echo -e "${GREEN}✅ Generated tenant JWT_SECRET on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set JWT_SECRET via CLI${NC}"
+                        # Persist to PROJECT_ROOT/.env only when no JWT_SECRET= line is already present
+                        # (treat any existing line — even empty — as authoritative to avoid fighting an operator edit).
+                        if [ -f "$PROJECT_ROOT/.env" ]; then
+                            if ! grep -qE '^[[:space:]]*JWT_SECRET=' "$PROJECT_ROOT/.env" 2>/dev/null; then
+                                echo "JWT_SECRET=$NEW_JWT_SECRET" >> "$PROJECT_ROOT/.env"
+                                echo -e "${GREEN}✅ Persisted tenant JWT_SECRET to $PROJECT_ROOT/.env${NC}"
+                            fi
+                        else
+                            echo "JWT_SECRET=$NEW_JWT_SECRET" >> "$PROJECT_ROOT/.env"
+                            chmod 600 "$PROJECT_ROOT/.env" 2>/dev/null || true
+                            echo -e "${GREEN}✅ Persisted tenant JWT_SECRET to $PROJECT_ROOT/.env${NC}"
+                        fi
+                        export JWT_SECRET="$NEW_JWT_SECRET"
+                    else
+                        echo -e "${YELLOW}⚠️  Could not generate tenant JWT_SECRET (install openssl or ensure /dev/urandom is readable).${NC}"
+                    fi
+                fi
+            fi
+            [ -n "${MASTER_AUTH_ISSUER:-}" ] && railway_set_var "MASTER_AUTH_ISSUER=$MASTER_AUTH_ISSUER" || true
+            [ -n "${MASTER_CORS_ORIGINS:-}" ] && railway_set_var "MASTER_CORS_ORIGINS=$MASTER_CORS_ORIGINS" || true
+            [ -n "${MASTER_AUTH_PUBLIC_URL:-}" ] && railway_set_var "MASTER_AUTH_PUBLIC_URL=$MASTER_AUTH_PUBLIC_URL" || true
+            [ -n "${VITE_MASTER_AUTH_URL:-}" ] && railway_set_var "VITE_MASTER_AUTH_URL=$VITE_MASTER_AUTH_URL" || true
+        fi
         
         # Step 4: Deploy using Railway CLI with environment-specific project token
         echo -e "${BLUE}🚀 Deploying to Railway ($ENVIRONMENT environment)...${NC}"
@@ -1388,112 +1481,6 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT" "app" || true
         else
             (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && railway domain 2>/dev/null) || true
-        fi
-
-        # mtx deploy asadmin / child orgs with master trust: auth env on the unified app service (same binary as local admin + payloads)
-        if [ -n "${RUN_AS_MASTER:-}" ] || [ -n "${MASTER_JWT_SECRET:-}" ] || [ -n "${MASTER_AUTH_ISSUER:-}" ] || [ -n "${MASTER_CORS_ORIGINS:-}" ] || [ -n "${MASTER_AUTH_PUBLIC_URL:-}" ] || [ -n "${VITE_MASTER_AUTH_URL:-}" ]; then
-            echo -e "${BLUE}🔐 Setting master auth variables on $APP_SERVICE_NAME_FOR_ENV...${NC}"
-            export RAILWAY_TOKEN="$PROJECT_TOKEN"
-            unset RAILWAY_API_TOKEN
-            (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment)
-            # Force CLI context to the exact project/service/environment before setting vars.
-            (cd "$PROJECT_ROOT" && railway link --project "$PROJECT_ID" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1) || true
-            railway_set_var() {
-                local kv="$1"
-                # Prefer explicit service/environment targeting with --skip-deploys so we do not trigger a redeploy
-                # per variable (this block sets up to 10+ vars; without --skip-deploys Railway rolls the service
-                # that many times, which amplifies transient DNS flakiness on the initial post-deploy request).
-                # Fallback paths also use --skip-deploys where supported by the CLI.
-                railway variable set "$kv" --service "$SERVICE_ID" --environment "$ENVIRONMENT" --skip-deploys >/dev/null 2>&1 \
-                  || railway variable set "$kv" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
-                  || railway variables set "$kv" >/dev/null 2>&1
-            }
-            if [ "${MTX_ASADMIN:-}" = "1" ] && [ -n "${RUN_AS_MASTER:-}" ]; then
-                RUN_AS_MASTER_VAL="true"
-                (railway_set_var "RUN_AS_MASTER=$RUN_AS_MASTER_VAL" && echo -e "${GREEN}✅ RUN_AS_MASTER=$RUN_AS_MASTER_VAL on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RUN_AS_MASTER via CLI${NC}"
-            else
-                # Not an asadmin deploy → actively remove RUN_AS_MASTER from the Railway service
-                # so a previously-poisoned tenant self-heals on its next plain `mtx deploy`.
-                # Idempotent (harmless if the var isn't set).
-                #
-                # CLI form (Railway v3.x, confirmed 2026-04-22):
-                #   railway variable delete --service <s> --environment <e> <KEY>
-                # 'variable delete' does NOT accept --yes or --skip-deploys. On older CLIs the
-                # plural form 'variables delete' existed — kept as a fallback. Any successful path
-                # prints a success line so the deploy log shows the scrub happened.
-                if railway variable delete RUN_AS_MASTER --service "$APP_SERVICE_NAME_FOR_ENV" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
-                  || railway variable delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
-                  || railway variables delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1; then
-                    echo -e "${YELLOW}🧹 Scrubbed stale RUN_AS_MASTER from $APP_SERVICE_NAME_FOR_ENV (plain 'mtx deploy' does not assert master).${NC}"
-                fi
-            fi
-            # Master admin addon reads Railway env vars at runtime to list services/logs/apps.
-            # Persist project-scoped token + project id on the deployed service.
-            [ -n "${PROJECT_TOKEN:-}" ] && (railway_set_var "RAILWAY_PROJECT_TOKEN=$PROJECT_TOKEN" && echo -e "${GREEN}✅ RAILWAY_PROJECT_TOKEN set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RAILWAY_PROJECT_TOKEN via CLI${NC}"
-            [ -n "${PROJECT_TOKEN:-}" ] && (railway_set_var "RAILWAY_TOKEN=$PROJECT_TOKEN" && echo -e "${GREEN}✅ RAILWAY_TOKEN set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RAILWAY_TOKEN via CLI${NC}"
-            [ -n "${PROJECT_ID:-}" ] && (railway_set_var "RAILWAY_PROJECT_ID=$PROJECT_ID" && echo -e "${GREEN}✅ RAILWAY_PROJECT_ID set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RAILWAY_PROJECT_ID via CLI${NC}"
-            [ -n "${MASTER_JWT_SECRET:-}" ] && (railway_set_var "MASTER_JWT_SECRET=$MASTER_JWT_SECRET" && echo -e "${GREEN}✅ MASTER_JWT_SECRET set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set MASTER_JWT_SECRET via CLI${NC}"
-            # JWT_SECRET policy under the asmaster architecture (rule-of-law §1 2026-04-21):
-            #   • Master (RUN_AS_MASTER=true): admin lane and master-hosted apps both use master-issued
-            #     tokens, so JWT_SECRET is mirrored from MASTER_JWT_SECRET. verifyMasterAuthToken on the
-            #     admin mount also uses MASTER_JWT_SECRET; the mirror just keeps any legacy code path
-            #     using getAuthService() aligned.
-            #   • Tenant (no RUN_AS_MASTER, but MASTER_JWT_SECRET set via workspace overlay): tenant
-            #     app payloads sign/verify with a tenant-local JWT_SECRET that is INTENTIONALLY distinct
-            #     from MASTER_JWT_SECRET, so a compromised tenant cannot forge master-valid admin tokens
-            #     and vice versa. If JWT_SECRET is missing we generate a random one here, persist it to
-            #     PROJECT_ROOT/.env (so future deploys reuse it — rotating it on every deploy would
-            #     invalidate every active tenant-app session), and set it on the Railway service.
-            if [ -n "${MASTER_JWT_SECRET:-}" ] && [ -z "${JWT_SECRET:-}" ]; then
-                if [ -n "${RUN_AS_MASTER:-}" ]; then
-                    (railway_set_var "JWT_SECRET=$MASTER_JWT_SECRET" && echo -e "${GREEN}✅ JWT_SECRET mirrored from MASTER_JWT_SECRET on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set JWT_SECRET via CLI${NC}"
-                    export JWT_SECRET="$MASTER_JWT_SECRET"
-                else
-                    NEW_JWT_SECRET=""
-                    if command -v openssl >/dev/null 2>&1; then
-                        NEW_JWT_SECRET="$(openssl rand -base64 48 | tr -d '\n\r')"
-                    elif [ -r /dev/urandom ]; then
-                        NEW_JWT_SECRET="$(tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 64)"
-                    fi
-                    if [ -n "$NEW_JWT_SECRET" ]; then
-                        (railway_set_var "JWT_SECRET=$NEW_JWT_SECRET" && echo -e "${GREEN}✅ Generated tenant JWT_SECRET on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set JWT_SECRET via CLI${NC}"
-                        # Persist to PROJECT_ROOT/.env only when no JWT_SECRET= line is already present
-                        # (treat any existing line — even empty — as authoritative to avoid fighting an operator edit).
-                        if [ -f "$PROJECT_ROOT/.env" ]; then
-                            if ! grep -qE '^[[:space:]]*JWT_SECRET=' "$PROJECT_ROOT/.env" 2>/dev/null; then
-                                echo "JWT_SECRET=$NEW_JWT_SECRET" >> "$PROJECT_ROOT/.env"
-                                echo -e "${GREEN}✅ Persisted tenant JWT_SECRET to $PROJECT_ROOT/.env${NC}"
-                            fi
-                        else
-                            echo "JWT_SECRET=$NEW_JWT_SECRET" >> "$PROJECT_ROOT/.env"
-                            chmod 600 "$PROJECT_ROOT/.env" 2>/dev/null || true
-                            echo -e "${GREEN}✅ Persisted tenant JWT_SECRET to $PROJECT_ROOT/.env${NC}"
-                        fi
-                        export JWT_SECRET="$NEW_JWT_SECRET"
-                    else
-                        echo -e "${YELLOW}⚠️  Could not generate tenant JWT_SECRET (install openssl or ensure /dev/urandom is readable).${NC}"
-                    fi
-                fi
-            fi
-            [ -n "${MASTER_AUTH_ISSUER:-}" ] && railway_set_var "MASTER_AUTH_ISSUER=$MASTER_AUTH_ISSUER" || true
-            [ -n "${MASTER_CORS_ORIGINS:-}" ] && railway_set_var "MASTER_CORS_ORIGINS=$MASTER_CORS_ORIGINS" || true
-            [ -n "${MASTER_AUTH_PUBLIC_URL:-}" ] && railway_set_var "MASTER_AUTH_PUBLIC_URL=$MASTER_AUTH_PUBLIC_URL" || true
-            [ -n "${VITE_MASTER_AUTH_URL:-}" ] && railway_set_var "VITE_MASTER_AUTH_URL=$VITE_MASTER_AUTH_URL" || true
-
-            # railway_set_var used --skip-deploys above, so the running container still has the env
-            # from before this block. Without a follow-up redeploy, /auth (master) is only mounted on
-            # the next unrelated push. Trigger one redeploy now (cheap — same image; Railway just
-            # restarts with the new env) so MASTER_JWT_SECRET / RUN_AS_MASTER take effect immediately.
-            #
-            # `railway redeploy` does NOT accept --environment (unlike most other subcommands); it
-            # operates on the currently-linked environment of the project root. We rely on `railway
-            # link` / `railway environment` having set that to $ENVIRONMENT earlier in this deploy.
-            # Passing --environment here silently fails the subshell and skips the redeploy, which
-            # re-creates the first-deploy /auth-returns-HTML failure class — see rule-of-law.
-            echo -e "${BLUE}🔁 Redeploying $APP_SERVICE_NAME_FOR_ENV to apply master auth env...${NC}"
-            (railway redeploy --service "$APP_SERVICE_NAME_FOR_ENV" --yes >/dev/null 2>&1 \
-              && echo -e "${GREEN}✅ Redeployed $APP_SERVICE_NAME_FOR_ENV with master auth env${NC}") \
-              || echo -e "${YELLOW}⚠️  Could not trigger redeploy; /auth may need one more deploy to mount${NC}"
         fi
 
         echo ""
