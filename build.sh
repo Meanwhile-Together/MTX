@@ -130,7 +130,8 @@ run_prepare_railway_bundle() {
       exit 1
     fi
     echo "==> mtx build: vendor path payloads from config/server.json (MTX lib)" >&2
-    mtx_run bash "$MTX_ROOT/lib/vendor-payloads-from-config.sh" "$PROJECT_ROOT"
+    # Vendor script prints one TTY status line per payload (dots); npm inside it uses mtx_run for quiet.
+    bash "$MTX_ROOT/lib/vendor-payloads-from-config.sh" "$PROJECT_ROOT"
   fi
   mtx_run npm run prepare:railway || { echo "❌ prepare:railway failed" >&2; exit 1; }
   echo "✅ prepare:railway complete" >&2

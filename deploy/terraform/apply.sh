@@ -28,6 +28,12 @@ mtx_tf_tee() {
   return "${PIPESTATUS[0]}"
 }
 
+# shellcheck source=../../includes/mtx-deploy-spinner.sh
+[ -f "$MTX_ROOT/includes/mtx-deploy-spinner.sh" ] && source "$MTX_ROOT/includes/mtx-deploy-spinner.sh" || {
+  mtx_deploy_spinner_start() { :; }
+  mtx_deploy_spinner_stop() { :; }
+}
+
 # Resolve project root (directory containing config/org.json or legacy config/app.json) so .env is
 # always loaded from the right place. Per rule-of-law §1 2026-04-20 Config triad, org identity lives
 # in config/org.json; config/app.json is retired on orgs but tolerated as a fallback.
@@ -479,6 +485,10 @@ echo ""
 echo -e "${BLUE}🚀 Running terraform apply...${NC}"
 echo ""
 
+# Bottom-line “train” spinner during infra + build (stops before token prompts; MTX_DEPLOY_SPINNER=0 to disable)
+trap 'mtx_deploy_spinner_stop' EXIT
+mtx_deploy_spinner_start "$ENVIRONMENT"
+
 # Change to terraform directory
 cd "$SCRIPT_DIR"
 
@@ -629,6 +639,11 @@ fi
 
 # Output was already shown in real-time above, no need to echo again
 
+# If we are not doing an app deploy, stop the infra spinner (terraform phase only)
+if [ "$HAS_RAILWAY" != "true" ]; then
+  mtx_deploy_spinner_stop
+fi
+
 # If Railway was deployed successfully, automatically deploy code
 if [ "$HAS_RAILWAY" = "true" ]; then
     echo ""
@@ -668,6 +683,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
     if [ -z "$SERVICE_ID" ] || [ "$SERVICE_ID" = "null" ]; then
         echo -e "${YELLOW}⚠️  Could not get Railway app service ID for $ENVIRONMENT${NC}"
         echo "Skipping code deployment"
+        mtx_deploy_spinner_stop
     else
         echo -e "${GREEN}✅ Deploying app to $APP_SERVICE_NAME_FOR_ENV ($SERVICE_ID) for environment $ENVIRONMENT${NC}"
         echo -e "${GREEN}✅ Project: $PROJECT_ID${NC}"
@@ -1038,6 +1054,9 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             return 0
         }
         
+        # Pause spinner before any project-token / staging prompts (stderr reads)
+        mtx_deploy_spinner_stop
+        
         # Deploy to Railway - ensure environment exists first, then deploy
         echo -e "${BLUE}🚀 Deploying to Railway...${NC}"
         
@@ -1247,6 +1266,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         fi
 
         # Step 3b: enforce shared DB policy and wire DATABASE_URL onto the deploy target service.
+        mtx_deploy_spinner_start "database"
         if ! ensure_central_database_for_env "$PROJECT_TOKEN" "$PROJECT_ID" "$ENVIRONMENT" "$SERVICE_ID" "$RAILWAY_TOKEN_VALUE"; then
             echo -e "${RED}❌ Central database wiring failed; aborting deployment.${NC}"
             exit 1
@@ -1263,7 +1283,10 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         mtx_railway_restore_deploy_server_json_cleanup() {
             mtx_railway_restore_server_config_after_upload "$PROJECT_ROOT"
         }
-        trap mtx_railway_restore_deploy_server_json_cleanup EXIT
+        trap 'mtx_deploy_spinner_stop; mtx_railway_restore_deploy_server_json_cleanup' EXIT
+        
+        # Resume while Railway CLI uploads (quiet at default -v; no spinner during read below)
+        mtx_deploy_spinner_start "railway-up"
         
         # Run Railway CLI and capture output - retry with new token if validation fails
         RAILWAY_DEPLOY_OUTPUT=""  # Initialize global output variable
@@ -1298,6 +1321,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     clear_env_var_in_file "$TOKEN_VAR" "true"
                     echo -e "${YELLOW}🗑️  Cleared stale $TOKEN_VAR from ${MTX_PREPARE_FILE##*/} and/or .env if present${NC}"
                     
+                    mtx_deploy_spinner_stop
                     # Prompt for new token
                     echo -e "${YELLOW}📝 Please provide a valid ${ENVIRONMENT^^} project token:${NC}"
                     echo -e "${BLUE}🔗 Get it from: https://railway.app/project/$PROJECT_ID/settings/tokens${NC}"
@@ -1320,6 +1344,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     TOKEN_RETRY_COUNT=$((TOKEN_RETRY_COUNT + 1))
                     echo ""
                     echo -e "${CYAN}Retrying deployment with new token...${NC}"
+                    mtx_deploy_spinner_start "railway-up"
                 elif echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "404|Failed to upload code"; then
                     # Service/environment ID invalid – invalidate so setup can re-discover (same as token invalidation)
                     clear_env_var_in_file "RAILWAY_APP_SERVICE_ID"
@@ -1347,8 +1372,9 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             exit 1
         fi
         
-        trap - EXIT
+        mtx_deploy_spinner_stop
         mtx_railway_restore_deploy_server_json_cleanup
+        trap 'mtx_deploy_spinner_stop' EXIT
         
         # Ensure app service has a Railway-provided public domain (*.railway.app). Terraform provider has no domain resource; use CLI.
         echo -e "${BLUE}🔗 Ensuring public domain for app service...${NC}"

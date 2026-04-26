@@ -5,6 +5,8 @@
 # Requires: jq, rsync, perl (File::Spec for relpaths), bash.
 # Env: MTX_SKIP_PAYLOAD_VENDOR=1 — no-op.
 #      MTX_VENDOR_FAIL_ON_ERROR=1 — exit 1 if any payload build failed (default: exit 0 after all attempts).
+#      MTX_VENDOR_PROGRESS=0 — plain one-line start/end (no growing dots on /dev/tty).
+#      MTX_VENDOR_DOT_SEC=1 — seconds between extra dots (default 1) while vendoring.
 # Arg: org repo root (default: cwd).
 #
 # On npm install/build failure: stderr banner, sleep 5s, continue (skip rsync for that app).
@@ -24,6 +26,10 @@ MTX_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 MTX_ROOT="$(cd "$MTX_LIB_DIR/.." && pwd)"
 # shellcheck source=mtx-vendor-pinned.sh
 [ -f "$MTX_LIB_DIR/mtx-vendor-pinned.sh" ] && source "$MTX_LIB_DIR/mtx-vendor-pinned.sh"
+# shellcheck source=../includes/mtx-run.sh
+[ -f "$MTX_ROOT/includes/mtx-run.sh" ] && source "$MTX_ROOT/includes/mtx-run.sh"
+[ -z "${MTX_VERBOSE+x}" ] && mtx_run() { "$@"; }
+declare -F mtx_run &>/dev/null || mtx_run() { "$@"; }
 
 mtx_vendor_normalize_payload_dir() {
   local dir="$1"
@@ -36,6 +42,70 @@ mtx_vendor_normalize_payload_dir() {
     MTX_VENDOR_PREDEPLOY_LOADED=1
   fi
   mtx_predeploy_normalize_payload_dir "$dir" || return 1
+}
+
+# One-line “Vendoring 'slug' …” with growing dots on /dev/tty (visible even if stderr is muted).
+# MTX_VENDOR_PROGRESS=0 — plain one-line messages, no animation. MTX_VENDOR_DOT_SEC=1 — seconds between dots.
+mtx_vendor_progress_tty() {
+  if [ -w /dev/tty ] 2>/dev/null; then
+    echo /dev/tty
+  else
+    echo /dev/stderr
+  fi
+}
+
+MTX_VENDOR_VPROG_PID=""
+MTX_VENDOR_VPROG_SLUG=""
+MTX_VENDOR_VPROG_T=""
+
+mtx_vendor_vprog_stop() {
+  if [ -n "${MTX_VENDOR_VPROG_PID:-}" ]; then
+    kill "$MTX_VENDOR_VPROG_PID" 2>/dev/null || true
+    wait "$MTX_VENDOR_VPROG_PID" 2>/dev/null || true
+  fi
+  MTX_VENDOR_VPROG_PID=""
+}
+
+# args: slug
+mtx_vendor_vprog_begin() {
+  local slug="$1"
+  mtx_vendor_vprog_stop
+  MTX_VENDOR_VPROG_SLUG="$slug"
+  MTX_VENDOR_VPROG_T="$(mtx_vendor_progress_tty)"
+  if [ "${MTX_VENDOR_PROGRESS:-1}" = "0" ]; then
+    MTX_VENDOR_VPROG_SLUG="$slug"
+    MTX_VENDOR_VPROG_T="$(mtx_vendor_progress_tty)"
+    printf "  Vendoring '%s'…\n" "$slug" >>"${MTX_VENDOR_VPROG_T}" 2>/dev/null || printf "  Vendoring '%s'…\n" "$slug" >&2
+    return 0
+  fi
+  (
+    local sec="${MTX_VENDOR_DOT_SEC:-1}"
+    local dots="..."
+    while :; do
+      sleep "$sec"
+      dots="${dots}."
+      printf "\r\033[0K  Vendoring '%s' %s" "$slug" "$dots" >>"${MTX_VENDOR_VPROG_T}" 2>/dev/null || true
+    done
+  ) &
+  MTX_VENDOR_VPROG_PID=$!
+  printf "\r\033[0K  Vendoring '%s' ..." "$slug" >>"${MTX_VENDOR_VPROG_T}" 2>/dev/null || printf "\r\033[0K  Vendoring '%s' ..." "$slug" >&2
+}
+
+# arg: ok | fail
+mtx_vendor_vprog_end() {
+  local st="${1:-ok}"
+  local t="${MTX_VENDOR_VPROG_T:-$(mtx_vendor_progress_tty)}"
+  local slug="${MTX_VENDOR_VPROG_SLUG:-}"
+  mtx_vendor_vprog_stop
+  local tail="Finished"
+  [ "$st" = "fail" ] && tail="Finished (build failed)"
+  if [ "${MTX_VENDOR_PROGRESS:-1}" = "0" ]; then
+    printf "  Vendoring '%s' — %s\n" "$slug" "$tail" >>"$t" 2>/dev/null || printf "  Vendoring '%s' — %s\n" "$slug" "$tail" >&2
+  else
+    printf "\r\033[0K  Vendoring '%s' ... %s\n" "$slug" "$tail" >>"$t" 2>/dev/null || printf "\r\033[0K  Vendoring '%s' ... %s\n" "$slug" "$tail" >&2
+  fi
+  MTX_VENDOR_VPROG_SLUG=""
+  MTX_VENDOR_VPROG_T=""
 }
 
 mtx_vendor_clip() {
@@ -215,11 +285,15 @@ mtx_vendor_run_build() {
     echo "[vendor-payloads] no package.json in $dir" >&2
     return 1
   fi
-  echo "[vendor-payloads] npm install in $dir"
-  (cd "$dir" && npm install) || return 1
+  if [ "${MTX_VERBOSE:-1}" -ge 2 ]; then
+    echo "[vendor-payloads] npm install in $dir" >&2
+  fi
+  (cd "$dir" && mtx_run npm install) || return 1
   if jq -e '.scripts.build | type == "string"' "$dir/package.json" >/dev/null 2>&1; then
-    echo "[vendor-payloads] npm run build in $dir"
-    (cd "$dir" && npm run build) || return 1
+    if [ "${MTX_VERBOSE:-1}" -ge 2 ]; then
+      echo "[vendor-payloads] npm run build in $dir" >&2
+    fi
+    (cd "$dir" && mtx_run npm run build) || return 1
   else
     echo "[vendor-payloads] no \"build\" script in $dir; expected dist/ may be missing" >&2
   fi
@@ -338,7 +412,7 @@ fi
 
 WORK="$(mktemp)"
 OUT="$(mktemp)"
-trap 'rm -f "${WORK:-}" "${OUT:-}"' EXIT
+trap 'mtx_vendor_vprog_stop; rm -f "${WORK:-}" "${OUT:-}"' EXIT
 
 # Ensure admin entry (same object shape as Node implementation).
 # Detect an existing admin by: id|slug|name == "admin" (case-insensitive) OR id|name
@@ -435,7 +509,7 @@ for ((i = 0; i < n; i++)); do
     payloads|payloads/*|./payloads|./payloads/*) in_repo=true ;;
   esac
   if [ "$in_repo" = true ]; then
-    echo "[vendor-payloads] build in-repo payload $build_dir"
+    mtx_vendor_vprog_begin "$slug"
     # Committed in-repo payloads (e.g. org-project-bridge/payloads/admin) were often copied
     # from a sibling-layout template and still carry `../project-bridge/...` in their configs.
     # From `$ROOT/payloads/<slug>/` that resolves to `$ROOT/payloads/project-bridge/` which
@@ -450,17 +524,20 @@ for ((i = 0; i < n; i++)); do
     fi
     if mtx_vendor_run_build_or_banner "$build_dir" "in-repo \"$entry_id\""; then
       mtx_vendor_normalize_payload_dir "$build_dir" || true
+      mtx_vendor_vprog_end ok
     else
       vendor_build_failures=$((vendor_build_failures + 1))
+      mtx_vendor_vprog_end fail
     fi
     continue
   fi
 
   dest="$ROOT/payloads/$slug"
-  echo "[vendor-payloads] build + vendor \"$entry_id\" ($resolved -> $dest)"
+  mtx_vendor_vprog_begin "$slug"
   if ! mtx_vendor_run_build_or_banner "$build_dir" "payload \"$entry_id\""; then
     vendor_build_failures=$((vendor_build_failures + 1))
     echo "[vendor-payloads] skipping rsync for \"$entry_id\" (build failed); not updating server.json.railway path for this app" >&2
+    mtx_vendor_vprog_end fail
     continue
   fi
 
@@ -514,6 +591,7 @@ for ((i = 0; i < n; i++)); do
   # paths — those escape the org tree after rsync. See mtx_vendor_rewrite_monorepo_paths.
   mtx_vendor_rewrite_monorepo_paths "$dest" "$resolved" "$ROOT" || true
   mtx_vendor_normalize_payload_dir "$dest" || true
+  mtx_vendor_vprog_end ok
 
   rel_out="./payloads/$slug"
   TMP="$(mktemp)"
