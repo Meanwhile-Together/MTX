@@ -25,8 +25,13 @@ mtx_deploy_spinner_stop() {
     MTX_DEPLOY_SPINNER_PID=""
   fi
   # End the in-place status line only if we were drawing; avoids blank stderr lines and extra spacing when code calls stop "just in case".
-  if [ "$had" = 1 ] && { [ -t 2 ] || [ -w /dev/tty ] 2>/dev/null; }; then
-    printf '\r\033[2K\n' >&2
+  if [ "$had" = 1 ]; then
+    # Clear + cursor reset only on a real tty; the trailing newline is always needed so the next
+    # stdout line does not start on the same row as the spinner (had=1 is only set when we were drawing).
+    if { [ -t 2 ] || [ -w /dev/tty ] 2>/dev/null; }; then
+      printf '\r\033[2K' >&2
+    fi
+    printf '\n' >&2
   fi
 }
 
