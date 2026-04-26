@@ -389,6 +389,7 @@ fi
 if [ ! -f "$SERVER_JSON" ]; then
   echo "vendor-payloads-from-config: no config/server.json, skip"
   [ ! -f "$RAILWAY_JSON" ] || rm -f "$RAILWAY_JSON"
+  rm -f "$ROOT/.mtx/path-vendored-payload-slugs"
   exit 0
 fi
 
@@ -397,6 +398,7 @@ if declare -F mtx_vendor_is_pinned &>/dev/null && mtx_vendor_is_pinned "$ROOT" p
     mtx_vendor_console_log_pinned "$ROOT" payloads ""
   fi
   echo "vendor-payloads-from-config: payloads pinned — skipping path payload vendor (see line above)." >&2
+  rm -f "$ROOT/.mtx/path-vendored-payload-slugs"
   exit 0
 fi
 
@@ -407,6 +409,7 @@ elif jq -e '.payloads | type == "array"' "$SERVER_JSON" >/dev/null 2>&1; then
   APP_KEY=payloads
 else
   echo "vendor-payloads-from-config: no apps[] or payloads[], skip"
+  rm -f "$ROOT/.mtx/path-vendored-payload-slugs"
   exit 0
 fi
 
@@ -469,6 +472,11 @@ cp -f "$WORK" "$OUT"
 # when the tree is clean; loud (to stderr, never fails the vendor pass) when
 # it finds debris. See mtx_vendor_reap_project_bridge_stale comment.
 mtx_vendor_reap_project_bridge_stale "$projectRoot"
+
+# Slugs rsync'd to ./payloads/<slug>/ (path payloads only). mtx deploy removes these after upload;
+# cleared here so a fresh vendor pass records only current path payloads.
+mkdir -p "$ROOT/.mtx"
+rm -f "$ROOT/.mtx/path-vendored-payload-slugs"
 
 rewrote=false
 vendor_build_failures=0
@@ -591,6 +599,7 @@ for ((i = 0; i < n; i++)); do
   # paths — those escape the org tree after rsync. See mtx_vendor_rewrite_monorepo_paths.
   mtx_vendor_rewrite_monorepo_paths "$dest" "$resolved" "$ROOT" || true
   mtx_vendor_normalize_payload_dir "$dest" || true
+  printf '%s\n' "$slug" >> "$ROOT/.mtx/path-vendored-payload-slugs"
   mtx_vendor_vprog_end ok
 
   rel_out="./payloads/$slug"

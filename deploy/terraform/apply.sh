@@ -1471,6 +1471,12 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         mtx_deploy_spinner_stop
         mtx_railway_restore_deploy_server_json_cleanup
         trap 'mtx_deploy_spinner_stop' EXIT
+
+        # Drop path-vendored ./payloads/<slug>/ trees from the org host after upload; next mtx build / deploy compile re-vendors them.
+        # Skip when MTX_SKIP_BUILD=1 so a deploy without a compile in this run can still upload a payloads/ tree from a prior build.
+        if [ "${MTX_SKIP_BUILD:-}" != "1" ] && [ -f "$MTX_ROOT/lib/cleanup-path-vendored-payloads-after-deploy.sh" ]; then
+          bash "$MTX_ROOT/lib/cleanup-path-vendored-payloads-after-deploy.sh" "$PROJECT_ROOT" || true
+        fi
         
         # Ensure app service has a Railway-provided public domain (*.railway.app). Terraform provider has no domain resource; use CLI.
         echo -e "${BLUE}🔗 Ensuring public domain for app service...${NC}"
