@@ -14,7 +14,7 @@ source "$MTX_ROOT/includes/prepare-env.sh"
 # All token/id-aware deploy flows require workspace prepare context.
 mtx_require_prepare_env "$(pwd)" || exit 1
 
-# Accept staging|production and optional --revendor in any order
+# Accept staging|production and optional flags in any order
 unset MTX_VENDOR_REVENDOR 2>/dev/null || true
 ENV=""
 MTX_VENDOR_REVENDOR=0
@@ -22,6 +22,8 @@ for _arg in "$@"; do
   case "$_arg" in
     staging|production) ENV="$_arg" ;;
     --revendor) MTX_VENDOR_REVENDOR=1 ;;
+    --no-provision-tenant) export MTX_SKIP_AUTO_TENANT_PROVISION=1 ;;
+    --rotate-tenant-secret) export MTX_ROTATE_TENANT_SECRET=1 ;;
   esac
 done
 [ "$MTX_VENDOR_REVENDOR" = 1 ] && export MTX_VENDOR_REVENDOR=1
@@ -41,6 +43,8 @@ fi
 [ -n "${FORCE_BACKEND:-}" ] && export FORCE_BACKEND
 REV_ARGS=()
 [ "${MTX_VENDOR_REVENDOR:-}" = 1 ] && REV_ARGS+=(--revendor)
+[ "${MTX_SKIP_AUTO_TENANT_PROVISION:-}" = 1 ] && REV_ARGS+=(--no-provision-tenant)
+[ "${MTX_ROTATE_TENANT_SECRET:-}" = 1 ] && REV_ARGS+=(--rotate-tenant-secret)
 # Run MTX's deploy/terraform/apply.sh (never the project's ./terraform/apply.sh)
 if [ -n "${FORCE_BACKEND:-}" ]; then
   "$MTX_ROOT/deploy/terraform/apply.sh" --force-backend "${REV_ARGS[@]}" "$ENV"

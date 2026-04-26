@@ -310,6 +310,8 @@ mtx_print_network_help() {
 # Subroutine: ensure Railway public domain (source from MTX/deploy/terraform, not project dir)
 # shellcheck source=ensure-railway-domain.sh
 [ -f "$APPLY_SCRIPT_DIR/ensure-railway-domain.sh" ] && source "$APPLY_SCRIPT_DIR/ensure-railway-domain.sh"
+# shellcheck source=../../includes/mtx-tenant-provision-deploy.sh
+[ -f "$MTX_ROOT/includes/mtx-tenant-provision-deploy.sh" ] && source "$MTX_ROOT/includes/mtx-tenant-provision-deploy.sh"
 
 echo -e "${BLUE}🚀 Terraform Apply - Smart API Key Detection${NC}"
 echo "=========================================="
@@ -348,6 +350,14 @@ while [ $# -gt 0 ]; do
             ;;
         --revendor)
             export MTX_VENDOR_REVENDOR=1
+            shift
+            ;;
+        --no-provision-tenant)
+            export MTX_SKIP_AUTO_TENANT_PROVISION=1
+            shift
+            ;;
+        --rotate-tenant-secret)
+            export MTX_ROTATE_TENANT_SECRET=1
             shift
             ;;
         *) ENVIRONMENT="$1"; shift ;;
@@ -1479,6 +1489,10 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 fi
             elif [ -n "${JWT_SECRET:-}" ]; then
                 (railway_set_var "JWT_SECRET=$JWT_SECRET" && echo -e "${GREEN}✅ JWT_SECRET set on $APP_SERVICE_NAME_FOR_ENV (from deploy env)${NC}") || echo -e "${YELLOW}⚠️  Could not set JWT_SECRET via CLI${NC}"
+            fi
+            # Default-on tenant_registry upsert for non-master orgs when MASTER_DATABASE_URL is set (rule-of-law).
+            if declare -F mtx_deploy_auto_provision_tenant_if_needed &>/dev/null; then
+                mtx_deploy_auto_provision_tenant_if_needed || true
             fi
             unset MTX_ORG_DECLARES_MASTER
             [ -n "${MASTER_AUTH_ISSUER:-}" ] && railway_set_var "MASTER_AUTH_ISSUER=$MASTER_AUTH_ISSUER" || true

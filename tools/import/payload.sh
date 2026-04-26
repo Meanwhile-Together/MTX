@@ -3,7 +3,7 @@ desc="Scan standalone app -> generate payload import skeleton and warnings (non-
 nobanner=1
 set -euo pipefail
 
-MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKSPACE_ROOT="${MTX_WORKSPACE_ROOT:-$(cd "$MTX_ROOT/.." && pwd)}"
 PROJECT_BRIDGE_DIR="${MTX_PROJECT_BRIDGE_DIR:-$WORKSPACE_ROOT/project-bridge}"
 
@@ -11,7 +11,7 @@ target_dir="${1:-}"
 output_dir="${2:-}"
 
 if [ -z "$target_dir" ]; then
-  echo "Usage: mtx tools import payload <standalone-app-dir> [output-dir]"
+  echo "Usage: mtx import payload <standalone-app-dir> [output-dir]"
   exit 1
 fi
 

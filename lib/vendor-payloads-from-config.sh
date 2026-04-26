@@ -36,7 +36,7 @@ mtx_vendor_normalize_payload_dir() {
   [ -d "$dir" ] || return 0
   [ -f "$MTX_ROOT/includes/mtx-predeploy.sh" ] || return 0
   if [ "${MTX_VENDOR_PREDEPLOY_LOADED:-}" != 1 ]; then
-    # Loads tools/fixes/root-paths-lib.sh (HTML / Vite base normalization for path-prefixed mounts).
+    # Loads fixes/root-paths-lib.sh (HTML / Vite base normalization for path-prefixed mounts).
     # shellcheck disable=SC1091
     source "$MTX_ROOT/includes/mtx-predeploy.sh"
     MTX_VENDOR_PREDEPLOY_LOADED=1

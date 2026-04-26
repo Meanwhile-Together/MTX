@@ -15,7 +15,8 @@
 #     tenant env, redeploy tenant).
 #
 # Usage:
-#   mtx master provision-tenant <orgSlug> <baseUrl> [railwayServiceId]
+#   mtx master provision-tenant [--emit-secret-only] [--env-file <path>] <orgSlug> <baseUrl> [railwayServiceId]
+#     --emit-secret-only — machine mode: stderr for messages; stdout one line TENANT_SECRET=<hex> only
 #     <orgSlug>          — canonical tenant id (matches `config/org.json#org.slug`)
 #     <baseUrl>          — public https URL of the tenant (no trailing slash)
 #     [railwayServiceId] — optional Railway service UUID for fleet audit join
@@ -36,11 +37,15 @@ MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 source "$MTX_ROOT/includes/prepare-env.sh"
 
 env_file_arg=""
+emit_secret_only=""
 remaining=()
 while [ $# -gt 0 ]; do
   if [ "$1" = "--env-file" ] && [ -n "${2:-}" ]; then
     env_file_arg="$2"
     shift 2
+  elif [ "$1" = "--emit-secret-only" ]; then
+    emit_secret_only=1
+    shift
   else
     remaining+=("$1")
     shift
@@ -57,7 +62,7 @@ base_url="${2:-}"
 railway_service_id="${3:-}"
 
 if [ -z "$org_slug" ] || [ -z "$base_url" ]; then
-  echo "Usage: mtx master provision-tenant [--env-file <path>] <orgSlug> <baseUrl> [railwayServiceId]" >&2
+  echo "Usage: mtx master provision-tenant [--emit-secret-only] [--env-file <path>] <orgSlug> <baseUrl> [railwayServiceId]" >&2
   echo "  orgSlug must match the tenant's config/org.json#org.slug" >&2
   echo "  baseUrl must be the tenant's public https URL (no trailing slash)" >&2
   echo "  DB: workspace .mtx.prepare.env (MASTER_DATABASE_URL) or --env-file or export or legacy .env" >&2
@@ -164,6 +169,11 @@ ON CONFLICT ("orgSlug") DO UPDATE SET
   "railwayServiceId" = EXCLUDED."railwayServiceId",
   "tenantSecret" = EXCLUDED."tenantSecret";
 SQL
+
+if [ -n "$emit_secret_only" ]; then
+  printf '%s\n' "TENANT_SECRET=$tenant_secret"
+  exit 0
+fi
 
 echo
 echo "[provision-tenant] OK — tenant '$org_slug' provisioned at $base_url"

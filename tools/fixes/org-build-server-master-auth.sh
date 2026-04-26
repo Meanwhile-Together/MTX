@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mtx tools fixes org-build-server-master-auth — bring an org-*'s scripts/org-build-server.sh to
+# mtx fixes org-build-server-master-auth — bring an org-*'s scripts/org-build-server.sh to
 # master-auth parity: source .env so build-time VITE_MASTER_AUTH_URL is baked into payload-
 # admin, derive VITE_MASTER_AUTH_URL from MASTER_AUTH_PUBLIC_URL when only the latter is
 # set, and always run npm run build:backend (payload-admin) after build:client. Idempotent:
@@ -22,15 +22,15 @@
 #   with valid master credentials.
 #
 # Usage:
-#   mtx tools fixes org-build-server-master-auth                 # patch cwd if it's an org-*; else all workspace siblings
-#   mtx tools fixes org-build-server-master-auth org-foo org-bar # patch explicit paths
-#   mtx tools fixes org-build-server-master-auth --dry-run ...   # show what would change, no writes
+#   mtx fixes org-build-server-master-auth                 # patch cwd if it's an org-*; else all workspace siblings
+#   mtx fixes org-build-server-master-auth org-foo org-bar # patch explicit paths
+#   mtx fixes org-build-server-master-auth --dry-run ...   # show what would change, no writes
 desc="Patch org-*/scripts/org-build-server.sh to source .env and always rebuild payload-admin with VITE_MASTER_AUTH_URL"
 nobanner=1
 set -e
 
 _fix_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MTX_ROOT="${MTX_ROOT:-$(cd "$_fix_dir/../.." && pwd)}"
+MTX_ROOT="${MTX_ROOT:-$(cd "$_fix_dir/.." && pwd)}"
 if [ -d "$MTX_ROOT/includes" ]; then
   # shellcheck disable=SC1091
   for f in "$MTX_ROOT"/includes/*.sh; do source "$f"; done

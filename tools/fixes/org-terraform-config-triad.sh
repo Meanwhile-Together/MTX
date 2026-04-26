@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mtx tools fixes org-terraform-config-triad — rewrite an org-*'s vendored terraform/apply.sh and
+# mtx fixes org-terraform-config-triad — rewrite an org-*'s vendored terraform/apply.sh and
 # terraform/destroy.sh to read identity from config/org.json (canonical) with a legacy fallback to
 # config/app.json. Idempotent: files that already define ORG_IDENTITY_FILE are left untouched.
 #
@@ -10,16 +10,16 @@
 #   break `mtx deploy` on next run. This fix backports the org.json-first resolver.
 #
 # Usage:
-#   mtx tools fixes org-terraform-config-triad                 # patch cwd if it's an org-*; else all workspace siblings
-#   mtx tools fixes org-terraform-config-triad org-foo org-bar # patch explicit paths
-#   mtx tools fixes org-terraform-config-triad --dry-run ...   # show what would change, no writes
+#   mtx fixes org-terraform-config-triad                 # patch cwd if it's an org-*; else all workspace siblings
+#   mtx fixes org-terraform-config-triad org-foo org-bar # patch explicit paths
+#   mtx fixes org-terraform-config-triad --dry-run ...   # show what would change, no writes
 desc="Patch org-*/terraform/{apply,destroy}.sh to read config/org.json (canonical) with config/app.json fallback"
 nobanner=1
 set -e
 
 # Resolve MTX root + load bolors if available.
 _fix_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MTX_ROOT="${MTX_ROOT:-$(cd "$_fix_dir/../.." && pwd)}"
+MTX_ROOT="${MTX_ROOT:-$(cd "$_fix_dir/.." && pwd)}"
 if [ -d "$MTX_ROOT/includes" ]; then
   # shellcheck disable=SC1091
   for f in "$MTX_ROOT"/includes/*.sh; do source "$f"; done
