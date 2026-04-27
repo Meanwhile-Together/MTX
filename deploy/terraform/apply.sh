@@ -1460,7 +1460,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             elif [ -n "${JWT_SECRET:-}" ]; then
                 (railway_set_var "JWT_SECRET=$JWT_SECRET" && echo -e "${GREEN}✅ JWT_SECRET set on $APP_SERVICE_NAME_FOR_ENV (from deploy env)${NC}") || echo -e "${YELLOW}⚠️  Could not set JWT_SECRET via CLI${NC}"
             fi
-            # Default-on tenant_registry upsert for non-master orgs when MASTER_DATABASE_URL is set (rule-of-law).
+            # Default-on org_registry upsert for non-master orgs when MASTER_DATABASE_URL is set (rule-of-law).
             if declare -F mtx_deploy_auto_provision_tenant_if_needed &>/dev/null; then
                 mtx_deploy_auto_provision_tenant_if_needed || true
             fi

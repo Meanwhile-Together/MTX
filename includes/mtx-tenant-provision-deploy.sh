@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sourced by deploy/terraform/apply.sh: auto tenant_registry provision (rule-of-law) before Railway TENANT_SECRET sync.
+# Sourced by deploy/terraform/apply.sh: auto org_registry provision (rule-of-law) before Railway TENANT_SECRET sync.
 # Expects caller scope: PROJECT_ROOT, MTX_ROOT, ORG_IDENTITY_FILE, ORG_IDENTITY_KEY, APP_SLUG, ENVIRONMENT,
 # PROJECT_ID, SERVICE_ID, PROJECT_TOKEN, MTX_ORG_DECLARES_MASTER, ENV_FILE, NC, YELLOW, GREEN, CYAN (optional).
 
@@ -154,6 +154,6 @@ mtx_deploy_auto_provision_tenant_if_needed() {
 
   mtx_deploy_persist_tenant_secret_to_dotenv "${ENV_FILE:-$PROJECT_ROOT/.env}" "$secret_val" "$rotate"
   export TENANT_SECRET="$secret_val"
-  echo -e "${GREEN:-}✅ Auto-provisioned tenant_registry; TENANT_SECRET set for Railway (${org_slug} @ ${base_url})${NC:-}"
+  echo -e "${GREEN:-}✅ Auto-provisioned org_registry; TENANT_SECRET set for Railway (${org_slug} @ ${base_url})${NC:-}"
   return 0
 }

@@ -4,7 +4,7 @@
 #
 # Provision a new tenant in the App Bridge Federation registry on the master
 # host (rule-of-law §1 2026-04-25 per-tenant tenantSecret). Generates a fresh
-# 32-byte hex `tenantSecret`, inserts (or upserts) the `tenant_registry` row,
+# 32-byte hex `tenantSecret`, inserts (or upserts) the `platform.org_registry` row,
 # and prints the secret to stdout exactly once. The operator is expected to
 # paste the secret into the tenant's `TENANT_SECRET` env var (Railway dash,
 # .env file, etc.) — it is NEVER stored on disk.
@@ -28,7 +28,7 @@
 #   3 — psql or openssl missing
 #   4 — psql command failed
 #
-desc="Provision a tenant: generate tenantSecret, upsert tenant_registry row, print secret."
+desc="Provision a tenant: generate tenantSecret, upsert org_registry row, print secret."
 
 set -euo pipefail
 
@@ -152,7 +152,7 @@ tenant_secret=$(openssl rand -hex 32)
 # constraint on `orgSlug` (the @id) makes this safe; we deliberately do NOT
 # overwrite `firstSeenAt` so the registry preserves provenance.
 psql "$APP_DB" -v ON_ERROR_STOP=1 <<SQL
-INSERT INTO "tenant_registry" (
+INSERT INTO "platform"."org_registry" (
   "orgSlug", "baseUrl", "railwayServiceId", "tenantSecret",
   "lastHeartbeatAt", "firstSeenAt"
 )
