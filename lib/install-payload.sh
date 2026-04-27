@@ -476,7 +476,7 @@ Usage:
   mtx payload install <payload-id> [--target-org <org-name>]   (from an org-* / host repo)
   mtx payload install [<payload-id>] [--target-org <org-name>]  (from a payload-* repo)
 
-Installs a payload package/source into a host repo's config/server.json (idempotent apps[] entry).
+Installs a payload via a local path into a host repo's config/server.json (idempotent apps[] entry).
 
 Where it runs from determines behavior:
   * Inside an org-* host (or project-bridge dev tree):
@@ -494,9 +494,9 @@ Where it runs from determines behavior:
       defaults to path=../<payload-id> in this mode. See project-bridge/docs/rule-of-law.md
       §1 2026-04-20.
 
-<payload-id> is the app entry id (e.g. payload-client-portal); required from a host repo,
-optional in redirect mode (auto-filled from cwd). Default npm package is
-@meanwhile-together/<payload-id>.
+<payload-id> is the app entry id (e.g. payload-client-portal); on a host it can be passed or
+picked interactively; in redirect mode it is auto-filled from cwd. Source in server.json is
+path-only (sibling payload repo); see rule-of-law for package/git.
 
 Environment:
   MTX_TARGET_ORG         Pre-select target org for redirect mode (skips interactive org prompt).
@@ -644,11 +644,6 @@ case "$PAYLOAD_ID" in
     DEFAULT_NAME="Payload template $(echo "$_trest" | sed 's/[-_]/ /g')"
     ;;
 esac
-DEFAULT_PACKAGE="@meanwhile-together/$PAYLOAD_ID"
-if [[ "$PAYLOAD_ID" == @*/* ]]; then
-  DEFAULT_PACKAGE="$PAYLOAD_ID"
-fi
-
 # Config triad (rule-of-law §1 2026-04-20): pre-fill name/slug from the payload's own config/app.json
 # when we can see the payload source on disk (redirect-from-payload case, or a sibling path). Identity
 # is the payload's property — the org's server.json entry only carries routing.
@@ -691,63 +686,27 @@ read -rp "$(echo -e "${bold:-}Slug:${reset:-} [${PAYLOAD_SLUG}] ")" INPUT_SLUG
 INPUT_SLUG="$(slugify "$(trim "${INPUT_SLUG:-$PAYLOAD_SLUG}")")"
 [ -n "$INPUT_SLUG" ] || INPUT_SLUG="$PAYLOAD_SLUG"
 
-# When redirected from a payload, defaults shift: the payload lives as a sibling repo, so
-# source.path = ../<payload-id> is the canonical reference (see rule-of-law §1 2026-04-20).
-DEFAULT_SRC_CHOICE="1"
+# Path-only source: sibling ../<payload-id> is canonical when present (see rule-of-law).
 DEFAULT_SIBLING_PATH=""
-if [ "${REDIRECTED_FROM_PAYLOAD:-0}" = "1" ]; then
-  DEFAULT_SRC_CHOICE="2"
-  DEFAULT_SIBLING_PATH="../$PAYLOAD_ID"
-elif [ -n "${WORKSPACE_ROOT:-}" ] && [ -d "$WORKSPACE_ROOT/$PAYLOAD_ID" ]; then
-  # Host run with interactive sibling pick (or explicit WORKSPACE_ROOT) — same default as redirect.
-  DEFAULT_SRC_CHOICE="2"
+if [ "${REDIRECTED_FROM_PAYLOAD:-0}" = "1" ] || [ -d "$PROJECT_ROOT/../$PAYLOAD_ID" ] \
+  || { [ -n "${WORKSPACE_ROOT:-}" ] && [ -d "$WORKSPACE_ROOT/$PAYLOAD_ID" ]; }; then
   DEFAULT_SIBLING_PATH="../$PAYLOAD_ID"
 fi
 
+echoc dim "Source type is path only (package/git are legacy; not offered here — see project-bridge rule-of-law)."
 echo ""
-echo "Payload source type:"
-echo "  1) package (npm install)"
-echo "  2) path"
-echo "  3) git"
-read -rp "Choice [${DEFAULT_SRC_CHOICE}]: " SRC_CHOICE
-SRC_CHOICE="${SRC_CHOICE:-$DEFAULT_SRC_CHOICE}"
-
-SOURCE_KIND="package"
+SOURCE_KIND="path"
 SOURCE_VALUE=""
+if [ -n "$DEFAULT_SIBLING_PATH" ]; then
+  read -rp "Path to payload (relative to project root, or absolute) [${DEFAULT_SIBLING_PATH}]: " SOURCE_VALUE
+  SOURCE_VALUE="$(trim "${SOURCE_VALUE:-$DEFAULT_SIBLING_PATH}")"
+else
+  read -rp "Path to payload (relative to project root, or absolute): " SOURCE_VALUE
+  SOURCE_VALUE="$(trim "$SOURCE_VALUE")"
+fi
+[ -n "$SOURCE_VALUE" ] || { error "Path source requires a value."; exit 1; }
 SOURCE_REF=""
-case "$SRC_CHOICE" in
-  1|package)
-    SOURCE_KIND="package"
-    read -rp "Package name [${DEFAULT_PACKAGE}]: " SOURCE_VALUE
-    SOURCE_VALUE="$(trim "${SOURCE_VALUE:-$DEFAULT_PACKAGE}")"
-    [ -n "$SOURCE_VALUE" ] || SOURCE_VALUE="$DEFAULT_PACKAGE"
-    ;;
-  2|path)
-    SOURCE_KIND="path"
-    if [ -n "$DEFAULT_SIBLING_PATH" ]; then
-      read -rp "Path (relative to project root, or absolute) [${DEFAULT_SIBLING_PATH}]: " SOURCE_VALUE
-      SOURCE_VALUE="$(trim "${SOURCE_VALUE:-$DEFAULT_SIBLING_PATH}")"
-    else
-      read -rp "Path (relative to project root, or absolute): " SOURCE_VALUE
-      SOURCE_VALUE="$(trim "$SOURCE_VALUE")"
-    fi
-    [ -n "$SOURCE_VALUE" ] || { error "Path source requires a value."; exit 1; }
-    ;;
-  3|git)
-    SOURCE_KIND="git"
-    read -rp "Git URL (https://... or git@...): " SOURCE_VALUE
-    SOURCE_VALUE="$(trim "$SOURCE_VALUE")"
-    [ -n "$SOURCE_VALUE" ] || { error "Git source requires URL."; exit 1; }
-    read -rp "Git ref [main]: " SOURCE_REF
-    SOURCE_REF="$(trim "${SOURCE_REF:-main}")"
-    ;;
-  *)
-    error "Invalid source choice."
-    exit 1
-    ;;
-esac
 
-echo ""
 read -rp "Set as default/fallback app for unmatched hosts? [y/N]: " MAKE_DEFAULT
 MAKE_DEFAULT="$(echo "${MAKE_DEFAULT:-n}" | tr '[:upper:]' '[:lower:]')"
 
@@ -756,10 +715,11 @@ DOMAINS_CSV=""
 if [ "$MAKE_DEFAULT" = "y" ] || [ "$MAKE_DEFAULT" = "yes" ]; then
   ROUTE_PATH_PREFIX=""
 else
-  read -rp "Route path prefix (empty for root, e.g. /portal): " ROUTE_PATH_PREFIX
-  ROUTE_PATH_PREFIX="$(trim "$ROUTE_PATH_PREFIX")"
-  if [ -n "$ROUTE_PATH_PREFIX" ] && [ "$ROUTE_PATH_PREFIX" != "/" ] && [[ "$ROUTE_PATH_PREFIX" != /* ]]; then
-    ROUTE_PATH_PREFIX="/$ROUTE_PATH_PREFIX"
+  # Not the fallback app: mount at /<slug> (same as the slug; no extra prompt).
+  if [ -n "$INPUT_SLUG" ]; then
+    ROUTE_PATH_PREFIX="/$INPUT_SLUG"
+  else
+    ROUTE_PATH_PREFIX=""
   fi
   [ "$ROUTE_PATH_PREFIX" = "/" ] && ROUTE_PATH_PREFIX=""
   read -rp "Domains/hosts (comma-separated, optional): " DOMAINS_CSV
@@ -772,33 +732,18 @@ if [ -n "$API_PREFIX" ] && [[ "$API_PREFIX" != /* ]]; then
   API_PREFIX="/$API_PREFIX"
 fi
 
-if [ "$SOURCE_KIND" = "path" ]; then
-  # Rule-of-law §1 2026-04-24: enforce framework-owned Tailwind on the path source the
-  # operator picked. Resolve relative to the host project root, the same way the host
-  # would later read this entry. We deliberately don't try to enforce on package sources
-  # (no on-disk tree to inspect at install time) — the source-of-truth payload repos are
-  # already gated by the redirect-mode check above.
-  _payload_src_dir=""
-  if [[ "$SOURCE_VALUE" == /* ]]; then
-    _payload_src_dir="$SOURCE_VALUE"
-  else
-    _payload_src_dir="$(cd "$PROJECT_ROOT" 2>/dev/null && cd "$SOURCE_VALUE" 2>/dev/null && pwd -P || true)"
-  fi
-  if [ -n "$_payload_src_dir" ] && [ -d "$_payload_src_dir" ]; then
-    mtx_install_assert_no_payload_tailwind "$_payload_src_dir" || exit $?
-  fi
-  unset _payload_src_dir
+# Rule-of-law §1 2026-04-24: enforce framework-owned Tailwind on the path source. Resolve
+# relative to the host project root, the same way the host would later read this entry.
+_payload_src_dir=""
+if [[ "$SOURCE_VALUE" == /* ]]; then
+  _payload_src_dir="$SOURCE_VALUE"
+else
+  _payload_src_dir="$(cd "$PROJECT_ROOT" 2>/dev/null && cd "$SOURCE_VALUE" 2>/dev/null && pwd -P || true)"
 fi
-
-if [ "$SOURCE_KIND" = "package" ]; then
-  echo ""
-  info "Installing package in $PROJECT_ROOT ..."
-  (
-    cd "$PROJECT_ROOT"
-    mtx_run npm install "$SOURCE_VALUE"
-  )
-  success "Installed package: $SOURCE_VALUE"
+if [ -n "$_payload_src_dir" ] && [ -d "$_payload_src_dir" ]; then
+  mtx_install_assert_no_payload_tailwind "$_payload_src_dir" || exit $?
 fi
+unset _payload_src_dir
 
 echo ""
 info "Updating $CONFIG_PATH ..."
