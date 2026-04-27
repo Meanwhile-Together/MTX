@@ -499,7 +499,10 @@ optional in redirect mode (auto-filled from cwd). Default npm package is
 @meanwhile-together/<payload-id>.
 
 Environment:
-  MTX_TARGET_ORG        Pre-select target org for redirect mode (skips interactive prompt).
+  MTX_TARGET_ORG         Pre-select target org for redirect mode (skips interactive org prompt).
+  MTX_CREATE_NONINTERACTIVE=1
+                         Disables the interactive org prompt (redirect) and the host sibling
+                         payload picker; pass <payload-id> on the command line.
 EOF
 }
 
@@ -693,6 +696,10 @@ INPUT_SLUG="$(slugify "$(trim "${INPUT_SLUG:-$PAYLOAD_SLUG}")")"
 DEFAULT_SRC_CHOICE="1"
 DEFAULT_SIBLING_PATH=""
 if [ "${REDIRECTED_FROM_PAYLOAD:-0}" = "1" ]; then
+  DEFAULT_SRC_CHOICE="2"
+  DEFAULT_SIBLING_PATH="../$PAYLOAD_ID"
+elif [ -n "${WORKSPACE_ROOT:-}" ] && [ -d "$WORKSPACE_ROOT/$PAYLOAD_ID" ]; then
+  # Host run with interactive sibling pick (or explicit WORKSPACE_ROOT) — same default as redirect.
   DEFAULT_SRC_CHOICE="2"
   DEFAULT_SIBLING_PATH="../$PAYLOAD_ID"
 fi
