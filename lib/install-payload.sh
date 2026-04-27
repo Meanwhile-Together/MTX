@@ -190,6 +190,115 @@ mtx_install_list_org_siblings() {
   done
 }
 
+# List payload-* repo dirs under a workspace root (sibling to org-*, project-bridge, etc.).
+# Emits one absolute path per line; only dirs that pass mtx_install_cwd_is_payload_root.
+mtx_install_list_payload_siblings() {
+  local ws="$1"
+  local p
+  [ -d "$ws" ] || return 0
+  while IFS= read -r p; do
+    [ -n "$p" ] && [ -d "$p" ] || continue
+    mtx_install_cwd_is_payload_root "$p" || continue
+    echo "$p"
+  done < <(find "$ws" -mindepth 1 -maxdepth 1 -type d -name 'payload-*' 2>/dev/null | LC_ALL=C sort)
+}
+
+# When running from a host (not redirect from payload) with no payload id on the CLI, list
+# sibling payload-* under the workspace and prompt to pick one. Sets PAYLOAD_ID and
+# WORKSPACE_ROOT on success. Returns 0 when PAYLOAD_ID is set, 1 when not (caller should
+# error). Exits 0 when all siblings are already registered (nothing to do, same as redirect
+# org picker).
+mtx_install_interactive_select_payload_id_for_host() {
+  local host_path="$1"
+  local workspace_root
+  local -a all=() eligible=() already=() unreadable=()
+  local d id rc selection i
+
+  workspace_root="$(cd "$host_path/.." 2>/dev/null && pwd -P)" || return 1
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    all+=("$d")
+  done < <(mtx_install_list_payload_siblings "$workspace_root")
+
+  if [ "${#all[@]}" -eq 0 ]; then
+    warn "No payload-* sibling repos under $workspace_root (expected alongside $(basename "$host_path"))."
+    return 1
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    warn "jq is required to show which sibling payload repos are not yet on this host."
+    return 1
+  fi
+
+  for d in "${all[@]}"; do
+    id="$(mtx_install_derive_payload_id "$d" 2>/dev/null || true)"
+    if [ -z "$id" ]; then
+      unreadable+=("$(basename "$d")")
+      continue
+    fi
+    rc=0
+    mtx_install_org_has_payload "$host_path" "$id" || rc=$?
+    case $rc in
+      0) already+=("$(basename "$d")") ;;
+      1) eligible+=("$d") ;;
+      *) unreadable+=("$(basename "$d")") ;;
+    esac
+  done
+
+  if [ "${#eligible[@]}" -eq 0 ]; then
+    if [ "${#already[@]}" -gt 0 ] && [ "${#unreadable[@]}" -eq 0 ]; then
+      echoc yellow "All ${#all[@]} sibling payload repo(s) are already on this host — nothing to install."
+      for d in "${all[@]}"; do echoc dim "  - $(basename "$d")"; done
+      exit 0
+    fi
+    if [ "${#unreadable[@]}" -gt 0 ] || [ "${#already[@]}" -gt 0 ]; then
+      warn "Could not find a new sibling to install. Pass an explicit: mtx payload install <payload-id>"
+    fi
+    if [ "${#already[@]}" -gt 0 ]; then
+      echoc dim "  already on host: $(printf '%s ' "${already[@]}")"
+    fi
+    if [ "${#unreadable[@]}" -gt 0 ]; then
+      echoc dim "  skipped (id or config): $(printf '%s ' "${unreadable[@]}")"
+    fi
+    return 1
+  fi
+
+  if [ ! -t 0 ] || [ ! -t 1 ] || [ "${MTX_CREATE_NONINTERACTIVE:-}" = "1" ]; then
+    return 1
+  fi
+
+  echo ""
+  echoc bold "Install which payload into $(basename "$host_path")?"
+  echoc dim  "(siblings already on this host are not listed; jq + readable server config required)"
+  i=1
+  for d in "${eligible[@]}"; do
+    printf "  %2d) %s\n" "$i" "$(basename "$d")"
+    i=$((i + 1))
+  done
+  if [ "${#already[@]}" -gt 0 ]; then
+    echoc dim "  (already installed: $(printf '%s ' "${already[@]}"))"
+  fi
+  if [ "${#unreadable[@]}" -gt 0 ]; then
+    echoc dim "  (skipped, id or config: $(printf '%s ' "${unreadable[@]}"))"
+  fi
+  echo ""
+  read -rp "Choice [1]: " selection
+  selection="${selection:-1}"
+  if ! [[ "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt "${#eligible[@]}" ]; then
+    error "Invalid selection: $selection"
+    exit 2
+  fi
+
+  d="${eligible[$((selection - 1))]}"
+  PAYLOAD_ID="$(mtx_install_derive_payload_id "$d" 2>/dev/null || true)"
+  if [ -z "$PAYLOAD_ID" ]; then
+    return 1
+  fi
+  WORKSPACE_ROOT="$workspace_root"
+  echoc dim "Selected payload: $PAYLOAD_ID"
+  return 0
+}
+
 # Check whether a given org already has a given payload registered in config/server.json.
 # Match rules: id, slug, source.path (../<repo> | ./payloads/<slug>), source.package
 # (@meanwhile-together/<repo>), source.git.url containing <repo>. Requires jq.
@@ -364,23 +473,30 @@ mtx_install_resolve_target_host() {
 show_help() {
   cat <<'EOF'
 Usage:
-  mtx payload install [<payload-id>] [--target-org <org-name>]
+  mtx payload install <payload-id> [--target-org <org-name>]   (from an org-* / host repo)
+  mtx payload install [<payload-id>] [--target-org <org-name>]  (from a payload-* repo)
 
 Installs a payload package/source into a host repo's config/server.json (idempotent apps[] entry).
 
 Where it runs from determines behavior:
   * Inside an org-* host (or project-bridge dev tree):
-      Walks up from cwd, finds the host's config/server.json, registers the payload.
+      <payload-id> is optional in an interactive TTY: the command walks up, finds the host, then
+      lists sibling payload-* dirs under the workspace (same parent as the host) and prompts
+      for one to install. Skip the list by passing the id, e.g. payload-vibe-check. Non-TTY
+      and MTX_CREATE_NONINTERACTIVE=1 require an explicit id. Listing needs jq and a
+      readable server config to hide payloads already in apps[].
   * Inside a payload-* repo:
-      Flips direction. Detects the payload id from cwd, scans sibling org-* hosts, filters out
-      orgs that already register this payload (id / slug / source.path / source.package /
-      source.git.url match), and prompts for a target. If your org isn't in the list, the
-      payload is already registered there. With --target-org <name> or MTX_TARGET_ORG=<name>,
-      the prompt is skipped. Source defaults to path=../<payload-id> in this mode.
-      See project-bridge/docs/rule-of-law.md §1 2026-04-20.
+      Flips direction. <payload-id> is optional (default: inferred from the repo / cwd).
+      Scans sibling org-* hosts, filters out orgs that already register this payload
+      (id / slug / source.path / source.package / source.git.url match), and prompts for a
+      target org. If your org isn't in the list, the payload is already registered there.
+      With --target-org <name> or MTX_TARGET_ORG=<name>, the prompt is skipped. Source
+      defaults to path=../<payload-id> in this mode. See project-bridge/docs/rule-of-law.md
+      §1 2026-04-20.
 
-<payload-id> is the app entry id (e.g. payload-client-portal); optional in redirect mode
-(auto-filled from cwd). Default npm package is @meanwhile-together/<payload-id>.
+<payload-id> is the app entry id (e.g. payload-client-portal); required from a host repo,
+optional in redirect mode (auto-filled from cwd). Default npm package is
+@meanwhile-together/<payload-id>.
 
 Environment:
   MTX_TARGET_ORG        Pre-select target org for redirect mode (skips interactive prompt).
@@ -441,8 +557,22 @@ if [ "$REDIRECTED_FROM_PAYLOAD" = "1" ] && [ -z "$PAYLOAD_ID" ]; then
   echoc dim "Payload id (from cwd): $PAYLOAD_ID"
 fi
 
+# From a host with no <payload-id> on the CLI, resolve project root and prompt for a
+# sibling payload-* to install (same workspace; requires TTY, jq, readable server config).
+if [ -z "$PAYLOAD_ID" ] && [ "${REDIRECTED_FROM_PAYLOAD:-0}" != "1" ]; then
+  if [ -z "${PROJECT_ROOT:-}" ]; then
+    PROJECT_ROOT="$(find_project_root || true)"
+  fi
+  if [ -n "$PROJECT_ROOT" ]; then
+    mtx_install_interactive_select_payload_id_for_host "$PROJECT_ROOT" || true
+  fi
+fi
+
 if [ -z "$PAYLOAD_ID" ]; then
   error "Missing payload id."
+  if [ -t 0 ] && [ -t 1 ] && [ -z "${CI:-}" ]; then
+    echoc dim "From a host: pass mtx payload install <id>, or run in a TTY (with sibling payload-* under the workspace) for an interactive list."
+  fi
   echo ""
   show_help
   exit 1
