@@ -179,24 +179,17 @@ clear_prepare_key() {
     fi
 }
 
-# Persist is-master switch only when the caller is *explicitly* asadmin (MTX_ASADMIN=1 sentinel
-# set by MTX/deploy/asadmin.sh). Without this gate, any `mtx deploy` from an org whose .env
-# accidentally contains RUN_AS_MASTER=true would re-persist and re-propagate master-ness —
-# see apply.sh:1290+ block and rule-of-law "Master promotion is declarative, not incidental".
-if [ "${MTX_ASADMIN:-}" = "1" ] && [ -n "${RUN_AS_MASTER:-}" ]; then
-    set_env_var_in_file "RUN_AS_MASTER" "true"
-elif [ -z "${MTX_ASADMIN:-}" ] && [ -n "${RUN_AS_MASTER:-}" ]; then
-    # Defensive: scrub inherited RUN_AS_MASTER from the deploy shell so the master-auth block
-    # at apply.sh:1290+ cannot re-set it on the Railway service. The authoritative way to
-    # restore master-ness is `mtx deploy asadmin` (guarded by org.master: true).
-    echo -e "${YELLOW}⚠️  Ignoring RUN_AS_MASTER in environment for this deploy — MTX_ASADMIN sentinel not set (run 'mtx deploy asadmin' for a master deploy).${NC}"
+# Master lane: MTX_MASTER_LANE=1 is set only by mtx deploy from org-project-bridge (see deploy.sh).
+# Ignore stale RUN_AS_MASTER in the environment — it is no longer persisted or synced to Railway.
+if [ -z "${MTX_MASTER_LANE:-}" ] && [ -n "${RUN_AS_MASTER:-}" ]; then
+    echo -e "${YELLOW}⚠️  Ignoring RUN_AS_MASTER in environment — master lane is org-project-bridge deploy only.${NC}"
     unset RUN_AS_MASTER
 fi
-# Persist MASTER_JWT_SECRET into the org .env only on an explicit asadmin master deploy.
+# Persist MASTER_JWT_SECRET into the org .env only on master-lane deploy (org-project-bridge).
 # Workspace overlay still exports MASTER_JWT_SECRET for the shell during tenant deploys so
 # mtx build can reach master — but it must never be copied into tenant repos (rule-of-law
 # §1 2026-04-25: MASTER_JWT_SECRET is master-only on Railway and in tenant trees).
-if [ "${MTX_ASADMIN:-}" = "1" ] && [ -n "${RUN_AS_MASTER:-}" ] && [ -n "${MASTER_JWT_SECRET:-}" ]; then
+if [ "${MTX_MASTER_LANE:-}" = "1" ] && [ -n "${MASTER_JWT_SECRET:-}" ]; then
     set_env_var_in_file "MASTER_JWT_SECRET" "$MASTER_JWT_SECRET"
 fi
 [ -n "${MASTER_AUTH_ISSUER:-}" ] && set_env_var_in_file "MASTER_AUTH_ISSUER" "$MASTER_AUTH_ISSUER"
@@ -1389,7 +1382,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         #   • TENANT_SECRET — federation + heartbeat signing (per-tenant shared secret)
         #   • Master-pool browser JWTs — HybridAuthService verify-by-callback to
         #     $MASTER_BASE_URL/api/internal/master/verify-token (tenant never holds MASTER_JWT_SECRET)
-        # Master-only on Railway: RUN_AS_MASTER, MASTER_JWT_SECRET, MASTER_CORS_ORIGINS.
+        # Master-only on Railway: MASTER_JWT_SECRET, MASTER_CORS_ORIGINS (no RUN_AS_MASTER).
         # Always sync: verifier env must land before `railway up` (skip-deploys batching below).
         if true; then
             echo -e "${BLUE}🔐 Setting auth / verifier / Railway variables on $APP_SERVICE_NAME_FOR_ENV (before first deploy)...${NC}"
@@ -1413,45 +1406,22 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                   || railway variable delete "$key" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
                   || railway variables delete "$key" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1
             }
-            if [ "${MTX_ASADMIN:-}" = "1" ] && [ -n "${RUN_AS_MASTER:-}" ]; then
-                RUN_AS_MASTER_VAL="true"
-                (railway_set_var "RUN_AS_MASTER=$RUN_AS_MASTER_VAL" && echo -e "${GREEN}✅ RUN_AS_MASTER=$RUN_AS_MASTER_VAL on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RUN_AS_MASTER via CLI${NC}"
-            else
-                # Not an asadmin deploy → actively remove RUN_AS_MASTER from the Railway service
-                # so a previously-poisoned tenant self-heals on its next plain `mtx deploy`.
-                # Idempotent (harmless if the var isn't set).
-                #
-                # CLI form (Railway v3.x, confirmed 2026-04-22):
-                #   railway variable delete --service <s> --environment <e> <KEY>
-                # 'variable delete' does NOT accept --yes or --skip-deploys. On older CLIs the
-                # plural form 'variables delete' existed — kept as a fallback. Any successful path
-                # prints a success line so the deploy log shows the scrub happened.
-                if railway variable delete RUN_AS_MASTER --service "$APP_SERVICE_NAME_FOR_ENV" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
-                  || railway variable delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
-                  || railway variables delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1; then
-                    echo -e "${YELLOW}🧹 Scrubbed stale RUN_AS_MASTER from $APP_SERVICE_NAME_FOR_ENV (plain 'mtx deploy' does not assert master).${NC}"
-                fi
+            # RUN_AS_MASTER is retired — always scrub from Railway (idempotent).
+            if railway variable delete RUN_AS_MASTER --service "$APP_SERVICE_NAME_FOR_ENV" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
+              || railway variable delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
+              || railway variables delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1; then
+                echo -e "${YELLOW}🧹 Scrubbed RUN_AS_MASTER from $APP_SERVICE_NAME_FOR_ENV (retired; use org-project-bridge deploy for master lane).${NC}"
             fi
             # Master admin addon reads Railway env vars at runtime to list services/logs/apps.
             # Persist project-scoped token + project id on the deployed service.
             [ -n "${PROJECT_TOKEN:-}" ] && (railway_set_var "RAILWAY_PROJECT_TOKEN=$PROJECT_TOKEN" && echo -e "${GREEN}✅ RAILWAY_PROJECT_TOKEN set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RAILWAY_PROJECT_TOKEN via CLI${NC}"
             [ -n "${PROJECT_TOKEN:-}" ] && (railway_set_var "RAILWAY_TOKEN=$PROJECT_TOKEN" && echo -e "${GREEN}✅ RAILWAY_TOKEN set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RAILWAY_TOKEN via CLI${NC}"
             [ -n "${PROJECT_ID:-}" ] && (railway_set_var "RAILWAY_PROJECT_ID=$PROJECT_ID" && echo -e "${GREEN}✅ RAILWAY_PROJECT_ID set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set RAILWAY_PROJECT_ID via CLI${NC}"
-            # MASTER_JWT_SECRET + MASTER_CORS_ORIGINS: set only when this deploy asserts RUN_AS_MASTER (asadmin).
-            # Scrub from Railway on *tenant* hosts only — the declarative master org may run plain `mtx deploy`
-            # (RUN_AS_MASTER cleared in-shell) while still needing MASTER_JWT_SECRET on Railway until the next
-            # `mtx deploy asadmin` (rule-of-law §1 2026-04-26; same master-declaration probe as deploy/asadmin.sh).
-            MTX_ORG_DECLARES_MASTER=false
-            for _mtx_master_cfg in "$PROJECT_ROOT/config/org.json" "$PROJECT_ROOT/config/app.json"; do
-                [ -f "$_mtx_master_cfg" ] || continue
-                if grep -qE '"master"[[:space:]]*:[[:space:]]*true' "$_mtx_master_cfg" 2>/dev/null; then
-                    MTX_ORG_DECLARES_MASTER=true
-                    break
-                fi
-            done
-            if [ -n "${RUN_AS_MASTER:-}" ] && [ -n "${MASTER_JWT_SECRET:-}" ]; then
+            # MASTER_JWT_SECRET + MASTER_CORS_ORIGINS: set only on master lane (org-project-bridge deploy).
+            # Scrub from Railway when not master lane.
+            if [ "${MTX_MASTER_LANE:-}" = "1" ] && [ -n "${MASTER_JWT_SECRET:-}" ]; then
                 (railway_set_var "MASTER_JWT_SECRET=$MASTER_JWT_SECRET" && echo -e "${GREEN}✅ MASTER_JWT_SECRET set on $APP_SERVICE_NAME_FOR_ENV${NC}") || echo -e "${YELLOW}⚠️  Could not set MASTER_JWT_SECRET via CLI${NC}"
-            elif [ "$MTX_ORG_DECLARES_MASTER" != "true" ]; then
+            else
                 for _mtx_scrub_k in MASTER_JWT_SECRET MASTER_CORS_ORIGINS; do
                     if railway_delete_var "$_mtx_scrub_k"; then
                         echo -e "${YELLOW}🧹 Scrubbed ${_mtx_scrub_k} from $APP_SERVICE_NAME_FOR_ENV (tenant host; ${_mtx_scrub_k} is master-only on Railway).${NC}"
@@ -1494,9 +1464,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             if declare -F mtx_deploy_auto_provision_tenant_if_needed &>/dev/null; then
                 mtx_deploy_auto_provision_tenant_if_needed || true
             fi
-            unset MTX_ORG_DECLARES_MASTER
             [ -n "${MASTER_AUTH_ISSUER:-}" ] && railway_set_var "MASTER_AUTH_ISSUER=$MASTER_AUTH_ISSUER" || true
-            if [ -n "${RUN_AS_MASTER:-}" ] && [ -n "${MASTER_CORS_ORIGINS:-}" ]; then
+            if [ "${MTX_MASTER_LANE:-}" = "1" ] && [ -n "${MASTER_CORS_ORIGINS:-}" ]; then
                 railway_set_var "MASTER_CORS_ORIGINS=$MASTER_CORS_ORIGINS" || true
             fi
             [ -n "${MASTER_AUTH_PUBLIC_URL:-}" ] && railway_set_var "MASTER_AUTH_PUBLIC_URL=$MASTER_AUTH_PUBLIC_URL" || true

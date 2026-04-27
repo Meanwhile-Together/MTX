@@ -140,12 +140,15 @@ mtx_install_cwd_is_payload_root() {
   local base name
   base="$(basename "$d")"
   case "$base" in
-    payload-*) return 0 ;;
     template-*) return 1 ;;
+    admin-org-*|admin-platform-*) return 1 ;;
+    payload-admin) return 1 ;;
+    payload-*) return 0 ;;
   esac
   if [ -f "$d/package.json" ] && command -v node >/dev/null 2>&1; then
     name=$(cd "$d" && node -p "require('./package.json').name" 2>/dev/null || true)
     case "$name" in
+      @meanwhile-together/admin|@meanwhile-together/admin-*|@meanwhile-together/admin-org-*|@meanwhile-together/admin-platform-*) return 1 ;;
       @meanwhile-together/payload-*) return 0 ;;
     esac
   fi
@@ -167,11 +170,14 @@ mtx_install_derive_payload_id() {
   local base name id
   base="$(basename "$d")"
   case "$base" in
+    payload-admin) return 1 ;;
+    admin-org-*|admin-platform-*) return 1 ;;
     payload-*) echo "$base"; return 0 ;;
   esac
   if [ -f "$d/package.json" ] && command -v node >/dev/null 2>&1; then
     name=$(cd "$d" && node -p "require('./package.json').name" 2>/dev/null || true)
     case "$name" in
+      @meanwhile-together/admin|@meanwhile-together/admin-org-*|@meanwhile-together/admin-platform-*) return 1 ;;
       @meanwhile-together/payload-*) id="${name#@meanwhile-together/}"; echo "$id"; return 0 ;;
     esac
   fi

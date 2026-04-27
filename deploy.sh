@@ -14,6 +14,32 @@ source "$MTX_ROOT/includes/prepare-env.sh"
 # All token/id-aware deploy flows require workspace prepare context.
 mtx_require_prepare_env "$(pwd)" || exit 1
 
+# Intelligent master lane: only org-project-bridge (see includes/mtx-bridge-deploy.sh) rotates master JWT
+# and exports MTX_MASTER_LANE=1 for apply.sh / Railway — no mtx deploy asadmin / RUN_AS_MASTER / MTX_ASADMIN.
+PROJECT_ROOT="$(mtx_deploy_resolve_project_root)"
+export PROJECT_ROOT
+unset MTX_ASADMIN 2>/dev/null || true
+unset RUN_AS_MASTER 2>/dev/null || true
+if mtx_deploy_is_org_project_bridge "$PROJECT_ROOT"; then
+  export MTX_MASTER_LANE=1
+  ENV_FILE="$PROJECT_ROOT/.env"
+  if [ -f "$ENV_FILE" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
+    set +a
+  fi
+  mtx_workspace_rotate_master_jwt_secret_for_asadmin || exit 1
+  if [ -z "${MASTER_JWT_SECRET:-}" ] || [ "$MASTER_JWT_SECRET" = "null" ]; then
+    echo "❌ org-project-bridge deploy requires MASTER_JWT_SECRET after rotation (check workspace .env.master)." >&2
+    exit 1
+  fi
+  [ -n "${MASTER_AUTH_ISSUER:-}" ] && export MASTER_AUTH_ISSUER
+  [ -n "${MASTER_CORS_ORIGINS:-}" ] && export MASTER_CORS_ORIGINS
+else
+  unset MTX_MASTER_LANE 2>/dev/null || true
+fi
+
 # Accept staging|production and optional flags in any order
 unset MTX_VENDOR_REVENDOR 2>/dev/null || true
 ENV=""

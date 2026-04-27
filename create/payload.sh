@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Normative: mtx create payload … (see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_COMMAND_SURFACE.md).
 # New payload templates: `mtx create template` from a payload root snapshots into template-* (see https://github.com/Meanwhile-Together/project-bridge/blob/main/docs/MTX_SCAFFOLDING_MODEL.md).
-desc="Create a payload-* repo from template-payload (GitHub + local); register in project-bridge apps[]"
+desc="Create a payload-* repo from template-payload (GitHub + local); from inside an existing payload-* folder, publishes cwd when the name would target a different sibling (see MTX_CREATE_FORCE_SIBLING_PAYLOAD)"
 nobanner=1
 set -e
 

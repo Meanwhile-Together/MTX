@@ -1044,6 +1044,31 @@ mtx_create_from_template_run() {
   fi
   REPO_PATH="$WORKSPACE_ROOT/$REPO_NAME"
 
+  # When the operator is already inside a workspace `payload-*` tree (e.g. hand-scaffolded or
+  # agent-created) but the display name slugifies to a *different* sibling repo name, the naive
+  # resolution would target $WORKSPACE_ROOT/payload-other while their files live in cwd. For
+  # `mtx create payload`, treat that as "publish this folder" — same metadata + GitHub path as
+  # `mtx_create_apply_metadata_and_github_publish` would use for a fresh clone. Opt out with
+  # MTX_CREATE_FORCE_SIBLING_PAYLOAD=1 to create the originally resolved sibling path instead.
+  if [ "${MTX_CREATE_VARIANT:-}" = "payload" ] && [ "${MTX_CREATE_RUN_CONTEXT:-}" = "flat_payload_app" ]; then
+    local _here _base
+    _here="$(pwd -P)"
+    _base="$(basename "$_here")"
+    if [[ "$_base" == payload-* ]] && [ -f "$_here/package.json" ] && [ "$_here" != "$REPO_PATH" ]; then
+      case "${MTX_CREATE_FORCE_SIBLING_PAYLOAD:-}" in
+        1 | true | yes) ;;
+        *)
+          info "Working inside $_base but the entered name would target $REPO_PATH."
+          info "Publishing this directory instead (metadata + GitHub), like create for an existing tree. Set MTX_CREATE_FORCE_SIBLING_PAYLOAD=1 to keep the sibling path $REPO_PATH."
+          REPO_NAME="$_base"
+          REPO_PATH="$_here"
+          APP_SLUG="${_base#payload-}"
+          [ -z "$APP_SLUG" ] && APP_SLUG="app"
+          ;;
+      esac
+    fi
+  fi
+
   echo ""
   echoc cyan "Workspace: $WORKSPACE_ROOT"
   echoc cyan "Template: $TEMPLATE_REPO"
@@ -1103,6 +1128,11 @@ mtx_create_from_template_run() {
     mtx_org_merge_host_into_package_json "$REPO_PATH" "$WORKSPACE_ROOT" || {
       warn "Could not wire package.json to project-bridge (jq or scripts/org-build-server.sh missing)."
     }
+    # template-org admin is sibling payload-admin (../payload-admin in config/server.json), not bundled under payloads/.
+    local _ws_admin="${WORKSPACE_ROOT%/}/payload-admin"
+    if [ ! -d "$_ws_admin" ] || [ ! -f "$_ws_admin/package.json" ]; then
+      warn "Sibling payload-admin not found at $_ws_admin — org config/server.json references ../payload-admin for the admin SPA. Clone payload-admin next to this org (same parent as MTX and project-bridge) before dev/build."
+    fi
   elif [ "${MTX_CREATE_VARIANT:-}" = "payload" ]; then
     mtx_payload_stamp_identity "$REPO_PATH" "$REPO_NAME" "$APP_SLUG" "$NEW_APP_NAME" || {
       warn "Could not stamp payload identity into config/app.json; operator should verify."

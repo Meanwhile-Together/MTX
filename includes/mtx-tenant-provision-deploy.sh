@@ -55,6 +55,10 @@ mtx_deploy_auto_provision_tenant_if_needed() {
     [ "${MTX_VERBOSE:-1}" -ge 2 ] 2>/dev/null && echo "[mtx-tenant-provision] Skipped (declarative master org)." >&2 || true
     return 0
   fi
+  if declare -F mtx_deploy_is_org_project_bridge >/dev/null 2>&1 && [ -n "${PROJECT_ROOT:-}" ] && mtx_deploy_is_org_project_bridge "$PROJECT_ROOT"; then
+    [ "${MTX_VERBOSE:-1}" -ge 2 ] 2>/dev/null && echo "[mtx-tenant-provision] Skipped (org-project-bridge host)." >&2 || true
+    return 0
+  fi
 
   local app_db=""
   if [ -n "${MASTER_DATABASE_URL:-}" ]; then

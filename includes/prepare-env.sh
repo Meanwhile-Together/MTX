@@ -74,10 +74,10 @@ mtx_workspace_overlay_master_jwt_secret() {
   return 0
 }
 
-# mtx deploy asadmin only: always write a new MASTER_JWT_SECRET to .env.master (rotate every run).
-# mtx deploy (non-asadmin) never calls this — missing secret stays missing until the next asadmin deploy.
+# mtx deploy master lane (org-project-bridge): always write a new MASTER_JWT_SECRET to .env.master (rotate every run).
+# Plain tenant deploy never calls this — missing secret stays missing until the next deploy from org-project-bridge.
 mtx_workspace_rotate_master_jwt_secret_for_asadmin() {
-  case "${RUN_AS_MASTER:-}" in true|1|yes) ;;
+  case "${MTX_MASTER_LANE:-}" in 1|true|yes) ;;
   *) return 0 ;;
   esac
   local root="${MTX_WORKSPACE_ROOT:-}"
@@ -105,9 +105,15 @@ mtx_workspace_rotate_master_jwt_secret_for_asadmin() {
   mv "$tmp" "$mf"
   chmod 600 "$mf" 2>/dev/null || true
   export MASTER_JWT_SECRET="$gen"
-  echo "[INFO] Rotated MASTER_JWT_SECRET for asadmin deploy; wrote $mf (workspace root). mtx deploy (non-asadmin) only reads this file and never auto-generates a missing secret." >&2
+  echo "[INFO] Rotated MASTER_JWT_SECRET for org-project-bridge master lane; wrote $mf (workspace root). Tenant deploys only read this file and never auto-generate a missing secret." >&2
   return 0
 }
+
+# shellcheck source=mtx-bridge-deploy.sh
+_bridge_deploy_inc="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/mtx-bridge-deploy.sh"
+[ -f "$_bridge_deploy_inc" ] && # shellcheck disable=SC1090
+source "$_bridge_deploy_inc"
+unset _bridge_deploy_inc
 
 # Load and validate workspace-level prepare file.
 # Exports MTX_WORKSPACE_ROOT and MTX_PREPARE_FILE.

@@ -171,19 +171,9 @@ print_domain_line "App" "$SERVICE_ID" "$APP_DOMAIN"
 print_domain_line "Backend" "$BACKEND_SERVICE_ID" "$BACKEND_DOMAIN"
 echo ""
 
-# mtx deploy asadmin: persist the live app origin to workspace .mtx.prepare.env as MASTER_AUTH_PUBLIC_URL
-# so tenant org-build / mtx prepare fan-out stays aligned without manual URL copy (platform singleton).
-mtx_urls_org_declares_master() {
-  local root="$1" f
-  for f in "$root/config/org.json" "$root/config/app.json"; do
-    [ -f "$f" ] || continue
-    if grep -qE '"master"[[:space:]]*:[[:space:]]*true' "$f" 2>/dev/null; then
-      return 0
-    fi
-  done
-  return 1
-}
-if [ "${MTX_ASADMIN:-}" = "1" ] && mtx_urls_org_declares_master "$PROJECT_ROOT"; then
+# Master lane (org-project-bridge deploy): persist the live app origin to workspace .mtx.prepare.env
+# as MASTER_AUTH_PUBLIC_URL so tenant org-build / mtx prepare fan-out stays aligned.
+if [ "${MTX_MASTER_LANE:-}" = "1" ] && mtx_deploy_is_org_project_bridge "$PROJECT_ROOT"; then
   _mtx_urls_host=""
   if [ -n "$APP_DOMAIN" ] && [ "$APP_DOMAIN" != "null" ]; then
     _mtx_urls_host="$(echo "$APP_DOMAIN" | tr -d '\n\r' | sed 's|^https\?://||' | sed 's|/.*||')"
@@ -191,12 +181,12 @@ if [ "${MTX_ASADMIN:-}" = "1" ] && mtx_urls_org_declares_master "$PROJECT_ROOT";
   if [ -n "$_mtx_urls_host" ]; then
     _mtx_url_origin="https://${_mtx_urls_host}"
     if mtx_prepare_env_set_key "MASTER_AUTH_PUBLIC_URL" "$_mtx_url_origin"; then
-      echo -e "${GREEN}✅ Wrote MASTER_AUTH_PUBLIC_URL=${_mtx_url_origin} to ${MTX_PREPARE_FILE##*/} (asadmin + declarative master).${NC}"
+      echo -e "${GREEN}✅ Wrote MASTER_AUTH_PUBLIC_URL=${_mtx_url_origin} to ${MTX_PREPARE_FILE##*/} (org-project-bridge master lane).${NC}"
     else
       echo -e "${YELLOW}⚠️  Could not update MASTER_AUTH_PUBLIC_URL in prepare file.${NC}" >&2
     fi
   else
-    echo -e "${YELLOW}⚠️  Asadmin: no Railway app domain resolved — left MASTER_AUTH_PUBLIC_URL in ${MTX_PREPARE_FILE##*/} unchanged.${NC}" >&2
+    echo -e "${YELLOW}⚠️  Master lane: no Railway app domain resolved — left MASTER_AUTH_PUBLIC_URL in ${MTX_PREPARE_FILE##*/} unchanged.${NC}" >&2
   fi
   unset _mtx_urls_host _mtx_url_origin
 fi

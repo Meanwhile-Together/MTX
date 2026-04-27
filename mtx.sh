@@ -331,7 +331,7 @@ case "$1" in
         echo "   -vv      More detail (debug messages)"
         echo "   -vvv     Full output from scripts"
         echo "   -vvvv    Trace: print every command run"
-        echo "   (Same -v/-vv/... flags work after the command path, e.g. $installedName deploy asadmin -vv.)"
+        echo "   (Same -v/-vv/... flags work after the command path, e.g. $installedName deploy staging -vv.)"
         echo "   --update Update nnw"
         echo "   --uninstall Uninstall nnw"
         echo "   --reinstall Reinstall nnw"
@@ -646,7 +646,7 @@ case "$1" in
                 esac
             done
 
-            # Late mtx verbosity (e.g. `mtx deploy asadmin -vv`): the pre-command `while` loop stops
+            # Late mtx verbosity (e.g. `mtx deploy staging -vv`): the pre-command `while` loop stops
             # at the first word that is not an mtx global flag (`deploy`), so trailing `-vv` never
             # reached. Strip these from SCRIPT_ARGS and merge into `verbose` (max wins) so
             # `terraform apply` and other subprocesses see MTX_VERBOSE>=2.
