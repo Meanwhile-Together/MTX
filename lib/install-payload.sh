@@ -722,15 +722,10 @@ else
     ROUTE_PATH_PREFIX=""
   fi
   [ "$ROUTE_PATH_PREFIX" = "/" ] && ROUTE_PATH_PREFIX=""
-  read -rp "Domains/hosts (comma-separated, optional): " DOMAINS_CSV
-  DOMAINS_CSV="$(trim "$DOMAINS_CSV")"
 fi
 
-read -rp "API prefix (blank = default /api/<slug>): " API_PREFIX
-API_PREFIX="$(trim "$API_PREFIX")"
-if [ -n "$API_PREFIX" ] && [[ "$API_PREFIX" != /* ]]; then
-  API_PREFIX="/$API_PREFIX"
-fi
+# Omit apiPrefix in server.json so the host uses the default /api/<slug> (no prompt).
+API_PREFIX=""
 
 # Rule-of-law §1 2026-04-24: enforce framework-owned Tailwind on the path source. Resolve
 # relative to the host project root, the same way the host would later read this entry.
@@ -845,12 +840,6 @@ fi
 
 echo ""
 echo "Next steps:"
-echo "  1) Build host/server:"
-echo "     npm run build:server"
-echo "  2) Restart local server or redeploy:"
-echo "     npm run dev:server"
-echo "     # or: mtx deploy staging|production"
-echo "  3) Verify routes:"
-echo "     - UI route host/path matches domains + pathPrefix"
-echo "     - API route uses ${API_PREFIX:-/api/$INPUT_SLUG} (or payload default)"
+echo "  - Local:  npm run dev"
+echo "  - Deploy: mtx deploy staging|production"
 }
