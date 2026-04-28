@@ -449,9 +449,13 @@ mtx_railway_assert_resolved_environment_and_service_for_deploy() {
             -H "Content-Type: application/json" \
             -d "$q" 2>/dev/null)
     }
+    # Match Railway node shape: instance may expose serviceId and/or nested service.id.
     mtx_railway_count_sid_in_resp() {
         local sid="${1:-}"
-        c1=$(echo "$resp" | jq -r --arg sid "$sid" '[.data.environment.serviceInstances.edges[]?.node.serviceId? | select(. == $sid)] | length' 2>/dev/null)
+        c1=$(echo "$resp" | jq -r --arg sid "$sid" '
+            [.data.environment.serviceInstances.edges[]?.node
+              | select(((.serviceId // .service.id // "") | tostring) == $sid)
+            ] | length' 2>/dev/null)
         case "${c1:-0}" in ''|*[!0-9]*) c1=0 ;; esac
     }
     mtx_railway_refresh_env_instances_resp
@@ -524,9 +528,9 @@ mtx_railway_assert_resolved_environment_and_service_for_deploy() {
     export RAILWAY_SERVICE="$SERVICE_ID"
     set_env_var_in_file "RAILWAY_APP_SERVICE_ID" "$SERVICE_ID" 2>/dev/null || true
     if [ "$SERVICE_ID" = "$cur" ]; then
-        echo -e "${GREEN}✅ Deploy target is still ${SERVICE_ID}; instance materialized in ${logical}.${NC}"
+        echo -e "${GREEN}✅ Deploy target remains ${SERVICE_ID}; triggered Railway materialization in ${logical} (verifying via GraphQL…)${NC}"
     else
-        echo -e "${GREEN}✅ Adopted Railway app service ${SERVICE_ID} for ${logical} (Terraform had ${cur}).${NC}"
+        echo -e "${GREEN}✅ Adopted Railway app service ${SERVICE_ID} for ${logical} (Terraform had ${cur}); verifying via GraphQL…${NC}"
     fi
 
     if [ "$SERVICE_ID" != "$cur" ] && [ -d "${SCRIPT_DIR:-}" ] && command -v terraform >/dev/null 2>&1; then
@@ -536,8 +540,9 @@ mtx_railway_assert_resolved_environment_and_service_for_deploy() {
     fi
 
     poll_sid="$SERVICE_ID"
-    _poll_max="${MTX_RAILWAY_INSTANCE_ATTACH_POLL_MAX:-15}"
-    _poll_sleep="${MTX_RAILWAY_INSTANCE_ATTACH_POLL_SLEEP:-4}"
+    # After a wipe, Backboard can lag listing serviceInstances even though deploy/create succeeded; defaults are generous.
+    _poll_max="${MTX_RAILWAY_INSTANCE_ATTACH_POLL_MAX:-25}"
+    _poll_sleep="${MTX_RAILWAY_INSTANCE_ATTACH_POLL_SLEEP:-5}"
     for ((_pi=1; _pi<=_poll_max; _pi++)); do
         if [ "$_pi" -gt 1 ]; then
             sleep "$_poll_sleep"
@@ -549,16 +554,22 @@ mtx_railway_assert_resolved_environment_and_service_for_deploy() {
         fi
         mtx_railway_count_sid_in_resp "$poll_sid"
         if [ "${c1}" -ge 1 ]; then
-            echo -e "${GREEN}✅ New service ${poll_sid} is visible in ${logical} (${env_id}).${NC}"
+            echo -e "${GREEN}✅ Service ${poll_sid} is visible in ${logical} (${env_id}).${NC}"
             return 0
         fi
     done
 
-    echo -e "${RED}❌ Timed out waiting for new service ${poll_sid} to appear in ${logical} (${env_id}).${NC}" >&2
-    echo -e "${CYAN}   Increase MTX_RAILWAY_INSTANCE_ATTACH_POLL_MAX / MTX_RAILWAY_INSTANCE_ATTACH_POLL_SLEEP.${NC}" >&2
-    echo -e "${CYAN}   Instances visible now:${NC}" >&2
+    echo -e "${YELLOW}⚠️  GraphQL still does not list service ${poll_sid} under ${logical} (${env_id}) after ${_poll_max} polls (~$((_poll_max * _poll_sleep))s).${NC}" >&2
+    echo -e "${CYAN}   Instances visible in last response:${NC}" >&2
     echo "$resp" | jq -r '.data.environment.serviceInstances.edges[]?.node | "   - " + (.serviceName // (.service.name // "?")) + "  (" + (.serviceId // .service.id // "?") + ")"' 2>/dev/null >&2 || true
-    return 1
+    if [ "${MTX_RAILWAY_STRICT_INSTANCE_POLL:-0}" = "1" ]; then
+        echo -e "${RED}❌ MTX_RAILWAY_STRICT_INSTANCE_POLL=1 — aborting deploy.${NC}" >&2
+        echo -e "${CYAN}   Increase MTX_RAILWAY_INSTANCE_ATTACH_POLL_MAX / MTX_RAILWAY_INSTANCE_ATTACH_POLL_SLEEP, or unset strict mode.${NC}" >&2
+        return 1
+    fi
+    echo -e "${YELLOW}⚠️  Continuing deploy anyway (self-heal: create/deploy already succeeded; \`railway up\` often works while GraphQL catches up).${NC}" >&2
+    echo -e "${CYAN}   Set MTX_RAILWAY_STRICT_INSTANCE_POLL=1 to hard-fail when the instance is not visible.${NC}" >&2
+    return 0
 }
 
 mtx_output_looks_like_network_problem() {
