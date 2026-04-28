@@ -473,10 +473,37 @@ jq --arg k "$APP_KEY" '
       else
         $e
       end;
+  # Same pattern as admin: orgs often commit ./payloads/vibe-check with only config/ + package.json.
+  # The real Vite app lives once as ../payload-vibe-check (sibling of the org). Building the stub
+  # dir fails with "Could not resolve entry module index.html".
+  def is_vibe_check:
+    ((.id | norm) == "payload-vibe-check")
+    or ((.slug | norm) == "vibe-check")
+    or ((.name | norm) == "vibe check");
+  def vibe_check_path_placeholder(p):
+    if p == null then true
+    else
+      (p | tostring | sub("^\\s+|\\s+$"; "")) as $t
+      | ($t == "" or $t == "./payloads/vibe-check" or $t == "payloads/vibe-check"
+         or $t == "./payloads/vibe-check/" or $t == "payloads/vibe-check/"
+         or ($t | test("^\\.?/?payloads/vibe-check/?$")))
+    end;
+  def normalize_vibe_check_entry:
+    if is_vibe_check then
+      if (.source | type) != "object" then
+        .source = {"path": "../payload-vibe-check"}
+      elif vibe_check_path_placeholder(.source.path) then
+        .source = (.source + {"path": "../payload-vibe-check"})
+      else
+        .
+      end
+    else
+      .
+    end;
   . as $r |
   ($r[$k]) as $arr |
   if ($arr | any(is_admin)) then
-    $r | .[$k] = ($arr | map(if is_admin then normalize_admin_entry else . end))
+    $r | .[$k] = ($arr | map(if is_admin then normalize_admin_entry else . end | normalize_vibe_check_entry))
   else
     $r | .[$k] = ([{
       "id": "admin",
@@ -488,7 +515,7 @@ jq --arg k "$APP_KEY" '
       "runAsMaster": false,
       "app": {"name": "Admin", "slug": "admin", "version": "1.0.0"},
       "source": {"path": "../payload-admin"}
-    }] + $arr)
+    }] + $arr | map(normalize_vibe_check_entry))
   end
 ' "$SERVER_JSON" >"$WORK"
 
