@@ -37,7 +37,7 @@ ensure_railway_domain() {
     if [ -n "$status_json" ] && command -v jq >/dev/null 2>&1; then
         resolved_name="$(echo "$status_json" | jq -r --arg env "$environment" --arg sid "$service_id" '
           .environments.edges[]
-          | select(.node.name == $env)
+          | select(.node.name == $env or .node.id == $env)
           | .node.serviceInstances.edges[]
           | select(.node.serviceId == $sid)
           | .node.serviceName

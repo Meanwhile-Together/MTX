@@ -289,6 +289,70 @@ CYAN='\033[0;36m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+# Resolve canonical Railway environment UUID (GraphQL; environments.edges[].node).
+# Prints id to stdout. Uses the same shape as railwayapp/cli Project.graphql.
+mtx_railway_resolve_project_environment_id() {
+    local api_token="$1" project_id="$2" env_name="$3"
+    local q resp eid
+    api_token="$(mtx_normalize_railway_token "$api_token")"
+    [ -z "$api_token" ] || [ -z "$project_id" ] || [ -z "$env_name" ] && return 1
+    q=$(jq -n --arg pid "$project_id" '{"query":"query($id:String!){project(id:$id){environments{edges{node{id name}}}}}","variables":{"id":$pid}}')
+    resp=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+        -H "Authorization: Bearer $api_token" \
+        -H "Content-Type: application/json" \
+        -d "$q" 2>/dev/null)
+    eid=$(echo "$resp" | jq -r --arg n "$env_name" '.data.project.environments.edges[]?.node | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | .id // empty' 2>/dev/null | head -1)
+    if [ -z "$eid" ] || [ "$eid" = "null" ]; then
+        resp=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+            -H "Authorization: Bearer $api_token" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"query { project(id: \"'"$project_id"'\") { environments { id name } } }"}' 2>/dev/null)
+        eid=$(echo "$resp" | jq -r --arg n "$env_name" '.data.project.environments[]? | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | .id // empty' 2>/dev/null | head -1)
+    fi
+    if [ -n "$eid" ] && [ "$eid" != "null" ]; then
+        printf '%s' "$eid"
+        return 0
+    fi
+    return 1
+}
+
+# With RAILWAY_TOKEN set to a project token, Railway exposes projectToken { environment { id name } }.
+# Fail if the token is scoped to a different logical environment than mtx deploy (prevents prod↔staging mixups).
+mtx_railway_assert_project_token_scoped_to_env() {
+    local project_token="$1" expect_logical="$2" expect_env_id="${3:-}"
+    local resp tid tname el nl tok_hint
+    project_token="$(mtx_normalize_railway_token "$project_token")"
+    el=$(printf '%s' "$expect_logical" | tr '[:upper:]' '[:lower:]')
+    case "$el" in
+        staging) tok_hint="RAILWAY_PROJECT_TOKEN_STAGING" ;;
+        production) tok_hint="RAILWAY_PROJECT_TOKEN_PRODUCTION" ;;
+        *) tok_hint="RAILWAY_PROJECT_TOKEN_*" ;;
+    esac
+    [ -z "$project_token" ] && return 0
+    resp=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+        -H "Authorization: Bearer $project_token" \
+        -H "Content-Type: application/json" \
+        -d '{"query":"query { projectToken { environment { id name } project { id } } }"}' 2>/dev/null)
+    tid=$(echo "$resp" | jq -r '.data.projectToken.environment.id // empty' 2>/dev/null)
+    tname=$(echo "$resp" | jq -r '.data.projectToken.environment.name // empty' 2>/dev/null)
+    if [ -z "$tid" ] || [ "$tid" = "null" ]; then
+        echo -e "${YELLOW}ℹ️  Could not read Railway projectToken environment (GraphQL). Skipping token/env scope check.${NC}" >&2
+        return 0
+    fi
+    nl=$(printf '%s' "$tname" | tr '[:upper:]' '[:lower:]')
+    if [ "$nl" != "$el" ]; then
+        echo -e "${RED}❌ Railway project token is scoped to environment \"$tname\" (id $tid), but this mtx deploy targets \"$expect_logical\".${NC}" >&2
+        echo -e "${CYAN}   Fix: set ${tok_hint} to a Railway project token scoped only to \"$expect_logical\" for this project (Railway → Project → Settings → Tokens).${NC}" >&2
+        return 1
+    fi
+    if [ -n "$expect_env_id" ] && [ "$expect_env_id" != "null" ] && [ "$tid" != "$expect_env_id" ]; then
+        echo -e "${RED}❌ Project token environment id ($tid) does not match resolved \"$expect_logical\" id ($expect_env_id).${NC}" >&2
+        echo -e "${CYAN}   Regenerate ${tok_hint} for this project/environment and update ${MTX_PREPARE_FILE##*/}.${NC}" >&2
+        return 1
+    fi
+    return 0
+}
+
 mtx_output_looks_like_network_problem() {
     local text="${1:-}"
     echo "$text" | grep -qiE "ENOTFOUND|server misbehaving|Temporary failure in name resolution|Could not resolve host|dial tcp: lookup|network is unreachable|No route to host|ECONNRESET|ECONNREFUSED|ETIMEDOUT|i/o timeout|TLS handshake timeout|connection timed out|request timed out|Failed to connect"
@@ -812,6 +876,19 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         # Navigate to project root
         cd "$PROJECT_ROOT"
 
+        # Canonical Railway environment UUID for CLI/link/upload (avoids name drift and mismatched .railway/ vs --environment).
+        MTX_RAILWAY_DEPLOY_ENVIRONMENT_ID=""
+        RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD="$ENVIRONMENT"
+        if [ -n "${RAILWAY_TOKEN_VALUE:-}" ] && [ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "null" ]; then
+            MTX_RAILWAY_DEPLOY_ENVIRONMENT_ID="$(mtx_railway_resolve_project_environment_id "$RAILWAY_TOKEN_VALUE" "$PROJECT_ID" "$ENVIRONMENT" || true)"
+            if [ -n "$MTX_RAILWAY_DEPLOY_ENVIRONMENT_ID" ] && [ "$MTX_RAILWAY_DEPLOY_ENVIRONMENT_ID" != "null" ]; then
+                RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD="$MTX_RAILWAY_DEPLOY_ENVIRONMENT_ID"
+            fi
+        fi
+        if [ "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" != "$ENVIRONMENT" ]; then
+            echo -e "${CYAN}ℹ️  Railway CLI/link/upload will use environment id ${RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD} (logical: ${ENVIRONMENT}).${NC}"
+        fi
+
         # Harden: framework project-bridge (sibling) or cwd must have placeholder org.json before link/build/upload.
         if [ -f "$MTX_ROOT/includes/verify-pb-framework-identity.sh" ]; then
             # shellcheck source=../../includes/verify-pb-framework-identity.sh
@@ -844,22 +921,23 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         # Explicitly link to this environment's app service so we deploy to the correct one (not another env's service)
         if [ ! -d ".railway" ]; then
             echo -e "${BLUE}🔗 Linking to app service $APP_SERVICE_NAME_FOR_ENV...${NC}"
-            railway link --service "$SERVICE_ID" --project "$PROJECT_ID" --environment "$ENVIRONMENT" 2>/dev/null || {
+            railway link --service "$SERVICE_ID" --project "$PROJECT_ID" --environment "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" 2>/dev/null || {
                 mkdir -p .railway
                 echo "$SERVICE_ID" > .railway/service
                 echo "$PROJECT_ID" > .railway/project
-                echo "$ENVIRONMENT" > .railway/environment
+                echo "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" > .railway/environment
             }
         else
             LINKED_SERVICE=$(cat .railway/service 2>/dev/null || echo "")
-            if [ "$LINKED_SERVICE" != "$SERVICE_ID" ]; then
-                echo -e "${BLUE}🔗 Re-linking to app service $APP_SERVICE_NAME_FOR_ENV (was linked to different service)...${NC}"
+            LINKED_ENV=$(cat .railway/environment 2>/dev/null || echo "")
+            if [ "$LINKED_SERVICE" != "$SERVICE_ID" ] || [ "$LINKED_ENV" != "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" ]; then
+                echo -e "${BLUE}🔗 Re-linking to app service $APP_SERVICE_NAME_FOR_ENV (service or environment link drifted)...${NC}"
                 rm -rf .railway
-                railway link --service "$SERVICE_ID" --project "$PROJECT_ID" --environment "$ENVIRONMENT" 2>/dev/null || {
+                railway link --service "$SERVICE_ID" --project "$PROJECT_ID" --environment "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" 2>/dev/null || {
                     mkdir -p .railway
                     echo "$SERVICE_ID" > .railway/service
                     echo "$PROJECT_ID" > .railway/project
-                    echo "$ENVIRONMENT" > .railway/environment
+                    echo "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" > .railway/environment
                 }
             fi
         fi
@@ -891,12 +969,14 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             TOKEN="$(mtx_normalize_railway_token "$1")"
             PROJ_ID="$(mtx_normalize_railway_token "$2")"
             SVC_ID="$(mtx_normalize_railway_token "$3")"
-            ENV_NAME="$(mtx_normalize_railway_token "$4")"  # staging or production
+            ENV_NAME="$(mtx_normalize_railway_token "$4")"  # logical name (staging|production) or environment UUID
             VERBOSE="${5:-}"  # non-empty = add --verbose (e.g. for backend to see tarball size)
             
             # Set token for Railway CLI
             export RAILWAY_TOKEN="$TOKEN"
             unset RAILWAY_API_TOKEN
+            # Avoid stale operator shell leaking a different environment id into the CLI.
+            unset RAILWAY_ENVIRONMENT_ID 2>/dev/null || true
             
             # Global variable to capture output
             RAILWAY_DEPLOY_OUTPUT=""
@@ -1116,20 +1196,29 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 return 1
             fi
 
-            # Match Railway CLI Project.graphql: environments are edges[].node (not legacy flat environments[]).
-            ENV_QUERY=$(jq -n --arg pid "$PROJ_ID" '{"query":"query($id:String!){project(id:$id){environments{edges{node{id name}}}}}","variables":{"id":$pid}}')
-            ENV_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
-                -H "Authorization: Bearer $API_TOKEN" \
-                -H "Content-Type: application/json" \
-                -d "$ENV_QUERY" 2>/dev/null)
-            ENV_ID=$(echo "$ENV_RESPONSE" | jq -r --arg n "$ENV_NAME" '.data.project.environments.edges[]?.node | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | .id // empty' 2>/dev/null | head -1)
-
-            if [ -z "$ENV_ID" ] || [ "$ENV_ID" = "null" ]; then
+            local ENV_DISPLAY="$ENV_NAME"
+            ENV_ID=""
+            ENV_RESPONSE=""
+            # Callers may pass the canonical environment UUID (from mtx_railway_resolve_project_environment_id).
+            if [[ "$ENV_NAME" =~ ^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$ ]]; then
+                ENV_ID="$ENV_NAME"
+                ENV_DISPLAY="environment $ENV_ID"
+            else
+                # Match Railway CLI Project.graphql: environments are edges[].node (not legacy flat environments[]).
+                ENV_QUERY=$(jq -n --arg pid "$PROJ_ID" '{"query":"query($id:String!){project(id:$id){environments{edges{node{id name}}}}}","variables":{"id":$pid}}')
                 ENV_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
                     -H "Authorization: Bearer $API_TOKEN" \
                     -H "Content-Type: application/json" \
-                    -d '{"query":"query { project(id: \"'"$PROJ_ID"'\") { environments { id name } } }"}' 2>/dev/null)
-                ENV_ID=$(echo "$ENV_RESPONSE" | jq -r --arg n "$ENV_NAME" '.data.project.environments[]? | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | .id // empty' 2>/dev/null | head -1)
+                    -d "$ENV_QUERY" 2>/dev/null)
+                ENV_ID=$(echo "$ENV_RESPONSE" | jq -r --arg n "$ENV_NAME" '.data.project.environments.edges[]?.node | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | .id // empty' 2>/dev/null | head -1)
+
+                if [ -z "$ENV_ID" ] || [ "$ENV_ID" = "null" ]; then
+                    ENV_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+                        -H "Authorization: Bearer $API_TOKEN" \
+                        -H "Content-Type: application/json" \
+                        -d '{"query":"query { project(id: \"'"$PROJ_ID"'\") { environments { id name } } }"}' 2>/dev/null)
+                    ENV_ID=$(echo "$ENV_RESPONSE" | jq -r --arg n "$ENV_NAME" '.data.project.environments[]? | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | .id // empty' 2>/dev/null | head -1)
+                fi
             fi
 
             HAS_INST=0
@@ -1144,7 +1233,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             fi
 
             if [ -z "$ENV_ID" ] || [ "$ENV_ID" = "null" ]; then
-                echo -e "${YELLOW}ℹ️  Could not resolve environment id for \"$ENV_NAME\" in project (GraphQL).${NC}" >&2
+                echo -e "${YELLOW}ℹ️  Could not resolve environment id for \"$ENV_DISPLAY\" in project (GraphQL).${NC}" >&2
                 echo "$ENV_RESPONSE" | jq -r '.errors[]? | .message' 2>/dev/null | while IFS= read -r _em; do
                     [ -n "$_em" ] && echo -e "${YELLOW}   ${_em}${NC}" >&2
                 done
@@ -1152,11 +1241,11 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             fi
 
             if [ "$HAS_INST" -ge 1 ]; then
-                echo -e "${CYAN}ℹ️  Service instance for $SVC_ID already exists in $ENV_NAME.${NC}"
+                echo -e "${CYAN}ℹ️  Service instance for $SVC_ID already exists in $ENV_DISPLAY.${NC}"
                 return 0
             fi
 
-            echo -e "${YELLOW}ℹ️  Self-heal: no service instance for this app in $ENV_NAME; calling serviceInstanceDeployV2 (Railway CLI mutation)…${NC}"
+            echo -e "${YELLOW}ℹ️  Self-heal: no service instance for this app in $ENV_DISPLAY; calling serviceInstanceDeployV2 (Railway CLI mutation)…${NC}"
             MUT_RESP=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
                 -H "Authorization: Bearer $API_TOKEN" \
                 -H "Content-Type: application/json" \
@@ -1172,7 +1261,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                 echo "$MUT_RESP" | jq -r '.errors[]? | .message' 2>/dev/null >&2 || true
                 return 1
             fi
-            echo -e "${GREEN}✅ Self-heal: triggered Railway deploy for service $SVC_ID in $ENV_NAME.${NC}"
+            echo -e "${GREEN}✅ Self-heal: triggered Railway deploy for service $SVC_ID in $ENV_DISPLAY.${NC}"
             sleep "${MTX_RAILWAY_SERVICE_INSTANCE_HEAL_SLEEP:-3}"
             return 0
         }
@@ -1585,28 +1674,28 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             echo -e "${BLUE}🔐 Setting auth / verifier / Railway variables on $APP_SERVICE_NAME_FOR_ENV (before first deploy)...${NC}"
             export RAILWAY_TOKEN="$PROJECT_TOKEN"
             unset RAILWAY_API_TOKEN
-            (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment)
+            (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" > .railway/environment)
             # Force CLI context to the exact project/service/environment before setting vars.
-            (cd "$PROJECT_ROOT" && railway link --project "$PROJECT_ID" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1) || true
+            (cd "$PROJECT_ROOT" && railway link --project "$PROJECT_ID" --service "$SERVICE_ID" --environment "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" >/dev/null 2>&1) || true
             railway_set_var() {
                 local kv="$1"
                 # Batching: --skip-deploys avoids one deploy per variable; the single `deploy_to_railway` below
                 # is the one deploy that applies all of them. (Without --skip-deploys, the CLI can roll the
                 # service many times and amplify transient DNS flakiness.)
-                railway variable set "$kv" --service "$SERVICE_ID" --environment "$ENVIRONMENT" --skip-deploys >/dev/null 2>&1 \
-                  || railway variable set "$kv" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
+                railway variable set "$kv" --service "$SERVICE_ID" --environment "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" --skip-deploys >/dev/null 2>&1 \
+                  || railway variable set "$kv" --service "$SERVICE_ID" --environment "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" >/dev/null 2>&1 \
                   || railway variables set "$kv" >/dev/null 2>&1
             }
             railway_delete_var() {
                 local key="$1"
-                railway variable delete "$key" --service "$APP_SERVICE_NAME_FOR_ENV" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
-                  || railway variable delete "$key" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
-                  || railway variables delete "$key" --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1
+                railway variable delete "$key" --service "$APP_SERVICE_NAME_FOR_ENV" --environment "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" >/dev/null 2>&1 \
+                  || railway variable delete "$key" --service "$SERVICE_ID" --environment "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" >/dev/null 2>&1 \
+                  || railway variables delete "$key" --service "$SERVICE_ID" --environment "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" >/dev/null 2>&1
             }
             # RUN_AS_MASTER is retired — always scrub from Railway (idempotent).
-            if railway variable delete RUN_AS_MASTER --service "$APP_SERVICE_NAME_FOR_ENV" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
-              || railway variable delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1 \
-              || railway variables delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1; then
+            if railway variable delete RUN_AS_MASTER --service "$APP_SERVICE_NAME_FOR_ENV" --environment "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" >/dev/null 2>&1 \
+              || railway variable delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" >/dev/null 2>&1 \
+              || railway variables delete RUN_AS_MASTER --service "$SERVICE_ID" --environment "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" >/dev/null 2>&1; then
                 echo -e "${YELLOW}🧹 Scrubbed RUN_AS_MASTER from $APP_SERVICE_NAME_FOR_ENV (retired; use org-project-bridge deploy for master lane).${NC}"
             fi
             # Master admin addon reads Railway env vars at runtime to list services/logs/apps.
@@ -1713,9 +1802,13 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         TOKEN_RETRY_COUNT=0
         RAILWAY_APP_SERVICE_REDISCOVER_COUNT=0
         _mtx_same_id_404_phase=0
+
+        if [ -n "${PROJECT_TOKEN:-}" ]; then
+            mtx_railway_assert_project_token_scoped_to_env "$PROJECT_TOKEN" "$ENVIRONMENT" "${MTX_RAILWAY_DEPLOY_ENVIRONMENT_ID:-}" || exit 1
+        fi
         
         while [ "$DEPLOY_SUCCESS" = "false" ]; do
-            if deploy_to_railway "$PROJECT_TOKEN" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT"; then
+            if deploy_to_railway "$PROJECT_TOKEN" "$PROJECT_ID" "$SERVICE_ID" "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD"; then
                 DEPLOY_SUCCESS=true
                 echo -e "${GREEN}✅ Deployment successful!${NC}"
             else
@@ -1764,6 +1857,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     # Update token for retry
                     PROJECT_TOKEN="$NEW_TOKEN"
                     export RAILWAY_TOKEN="$PROJECT_TOKEN"
+                    mtx_railway_assert_project_token_scoped_to_env "$PROJECT_TOKEN" "$ENVIRONMENT" "${MTX_RAILWAY_DEPLOY_ENVIRONMENT_ID:-}" || exit 1
                     TOKEN_RETRY_COUNT=$((TOKEN_RETRY_COUNT + 1))
                     echo ""
                     echo -e "${CYAN}Retrying deployment with new token...${NC}"
@@ -1837,7 +1931,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                             fi
                             if [ "${_mtx_same_id_404_phase:-0}" -eq 0 ]; then
                                 _mtx_same_id_404_phase=1
-                                if [ -n "${RAILWAY_TOKEN_VALUE:-}" ] && mtx_railway_ensure_service_instance_in_environment "$RAILWAY_TOKEN_VALUE" "$PROJECT_ID" "$ENVIRONMENT" "$SERVICE_ID"; then
+                                if [ -n "${RAILWAY_TOKEN_VALUE:-}" ] && mtx_railway_ensure_service_instance_in_environment "$RAILWAY_TOKEN_VALUE" "$PROJECT_ID" "${MTX_RAILWAY_DEPLOY_ENVIRONMENT_ID:-$ENVIRONMENT}" "$SERVICE_ID"; then
                                     :
                                 else
                                     echo -e "${YELLOW}ℹ️  Environment attach/deploy self-heal did not complete (GraphQL or token); trying Terraform reconcile next.${NC}"
@@ -1887,8 +1981,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                             mkdir -p .railway
                             printf '%s\n' "$PROJECT_ID" > .railway/project
                             printf '%s\n' "$SERVICE_ID" > .railway/service
-                            printf '%s\n' "$ENVIRONMENT" > .railway/environment
-                            (railway link --service "$SERVICE_ID" --project "$PROJECT_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1) || true
+                            printf '%s\n' "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" > .railway/environment
+                            (railway link --service "$SERVICE_ID" --project "$PROJECT_ID" --environment "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" >/dev/null 2>&1) || true
                             mtx_deploy_spinner_start "railway-up" "$APP_NAME"
                             continue
                         fi
@@ -1909,8 +2003,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     mkdir -p .railway
                     printf '%s\n' "$PROJECT_ID" > .railway/project
                     printf '%s\n' "$SERVICE_ID" > .railway/service
-                    printf '%s\n' "$ENVIRONMENT" > .railway/environment
-                    (railway link --service "$SERVICE_ID" --project "$PROJECT_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1) || true
+                    printf '%s\n' "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" > .railway/environment
+                    (railway link --service "$SERVICE_ID" --project "$PROJECT_ID" --environment "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" >/dev/null 2>&1) || true
                     mtx_deploy_spinner_start "railway-up" "$APP_NAME"
                 else
                     # Non-token error, don't retry
@@ -1952,9 +2046,9 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         export RAILWAY_TOKEN="${PROJECT_TOKEN:-${RAILWAY_ACCOUNT_TOKEN:-}}"
         unset RAILWAY_API_TOKEN
         if type ensure_railway_domain &>/dev/null; then
-            ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT" "app" || true
+            ensure_railway_domain "$PROJECT_ROOT" "$PROJECT_ID" "$SERVICE_ID" "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" "app" || true
         else
-            (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$ENVIRONMENT" > .railway/environment && railway domain 2>/dev/null) || true
+            (cd "$PROJECT_ROOT" && mkdir -p .railway && echo "$PROJECT_ID" > .railway/project && echo "$SERVICE_ID" > .railway/service && echo "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" > .railway/environment && railway domain 2>/dev/null) || true
         fi
 
         echo ""
