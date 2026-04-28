@@ -1091,6 +1091,74 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             fi
         }
 
+        # After a Railway wipe, project-level GraphQL can list a service while the target
+        # environment has no instance yet (staging often only shows Postgres). The CLI upload
+        # endpoint is /project/.../environment/{environmentId}/up — without an instance, Railway
+        # may return 404. Prefer account token for GraphQL (project tokens can be scoped).
+        mtx_railway_ensure_service_instance_in_environment() {
+            local API_TOKEN="$1"
+            local PROJ_ID="$2"
+            local ENV_NAME="$3"
+            local SVC_ID="$4"
+            local ENV_RESPONSE ENV_ID INST_RESP HAS_INST MUT_RESP ERR_MSG
+            API_TOKEN="$(mtx_normalize_railway_token "$API_TOKEN")"
+            if [ -z "$API_TOKEN" ] || [ -z "$PROJ_ID" ] || [ -z "$ENV_NAME" ] || [ -z "$SVC_ID" ]; then
+                return 1
+            fi
+
+            ENV_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+                -H "Authorization: Bearer $API_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d '{"query":"query { project(id: \"'"$PROJ_ID"'\") { environments { id name } } }"}' 2>/dev/null)
+            ENV_ID=$(echo "$ENV_RESPONSE" | jq -r --arg n "$ENV_NAME" '.data.project.environments[]? | select(.name == $n) | .id // empty' 2>/dev/null | head -1)
+            if [ -z "$ENV_ID" ] || [ "$ENV_ID" = "null" ]; then
+                echo -e "${YELLOW}ℹ️  Could not resolve environment id for \"$ENV_NAME\" in project (GraphQL).${NC}" >&2
+                return 1
+            fi
+
+            INST_RESP=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+                -H "Authorization: Bearer $API_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d '{"query":"query($eid:String!){environment(id:$eid){id serviceInstances{edges{node{id serviceId service{id name}}}}}}","variables":{"eid":"'"$ENV_ID"'"}}' 2>/dev/null)
+            ERR_MSG=$(echo "$INST_RESP" | jq -r 'if (.errors|type)=="array" and (.errors|length)>0 then .errors|map(.message)|join("; ") else empty end' 2>/dev/null)
+            if [ -n "$ERR_MSG" ]; then
+                INST_RESP=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+                    -H "Authorization: Bearer $API_TOKEN" \
+                    -H "Content-Type: application/json" \
+                    -d '{"query":"query($eid:String!){environment(id:$eid){id serviceInstances{edges{node{id service{id}}}}}}","variables":{"eid":"'"$ENV_ID"'"}}' 2>/dev/null)
+            fi
+
+            HAS_INST=$(echo "$INST_RESP" | jq -r --arg sid "$SVC_ID" '
+                [ (.data.environment.serviceInstances.edges // [])[]?.node
+                  | [(.serviceId // empty), (.service.id // empty)] | .[]
+                  | select(. != "" and . == $sid) ] | length' 2>/dev/null)
+            case "${HAS_INST:-0}" in ''|*[!0-9]*) HAS_INST=0 ;; esac
+            if [ "$HAS_INST" -ge 1 ]; then
+                echo -e "${CYAN}ℹ️  Service instance for $SVC_ID already exists in $ENV_NAME.${NC}"
+                return 0
+            fi
+
+            echo -e "${YELLOW}ℹ️  Self-heal: no service instance for this app in $ENV_NAME; calling Railway GraphQL to attach/deploy the service…${NC}"
+            MUT_RESP=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+                -H "Authorization: Bearer $API_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d '{"query":"mutation($e:String!,$s:String!){serviceInstanceDeployV2(environmentId:$e,serviceId:$s)}","variables":{"e":"'"$ENV_ID"'","s":"'"$SVC_ID"'"}}' 2>/dev/null)
+            if echo "$MUT_RESP" | jq -e '(.errors|type)=="array" and (.errors|length)>0' >/dev/null 2>&1; then
+                MUT_RESP=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+                    -H "Authorization: Bearer $API_TOKEN" \
+                    -H "Content-Type: application/json" \
+                    -d '{"query":"mutation($e:String!,$s:String!){serviceInstanceDeploy(environmentId:$e,serviceId:$s)}","variables":{"e":"'"$ENV_ID"'","s":"'"$SVC_ID"'"}}' 2>/dev/null)
+            fi
+            if echo "$MUT_RESP" | jq -e '(.errors|type)=="array" and (.errors|length)>0' >/dev/null 2>&1; then
+                echo -e "${YELLOW}ℹ️  GraphQL deploy mutation failed (Railway may use a different schema revision):${NC}" >&2
+                echo "$MUT_RESP" | jq -r '.errors[]? | .message' 2>/dev/null >&2 || true
+                return 1
+            fi
+            echo -e "${GREEN}✅ Self-heal: triggered Railway deploy for service $SVC_ID in $ENV_NAME.${NC}"
+            sleep "${MTX_RAILWAY_SERVICE_INSTANCE_HEAL_SLEEP:-3}"
+            return 0
+        }
+
         # Central DB policy: one shared DB service per environment, then wire app service DATABASE_URL.
         ensure_central_database_for_env() {
             local TOKEN="$1"
@@ -1626,6 +1694,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         MAX_TOKEN_RETRIES=2
         TOKEN_RETRY_COUNT=0
         RAILWAY_APP_SERVICE_REDISCOVER_COUNT=0
+        _mtx_same_id_404_phase=0
         
         while [ "$DEPLOY_SUCCESS" = "false" ]; do
             if deploy_to_railway "$PROJECT_TOKEN" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT"; then
@@ -1743,15 +1812,67 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     if [ -z "$NEW_APP_SERVICE_ID" ] || [ "$NEW_APP_SERVICE_ID" = "null" ]; then
                         if [ "${_mtx_found_same_id:-0}" -eq 1 ]; then
                             echo -e "${YELLOW}ℹ️  GraphQL lists app service \"${_mtx_disc_match_name:-$APP_SLUG}\" as ${SERVICE_ID} — same id Terraform uses — but \`railway up\` still returned 404.${NC}"
-                            echo -e "${CYAN}   So the service **exists in the project graph**, but uploads are rejected: most often **${ENVIRONMENT}** is missing, the service is not attached / not deployed in that environment yet, or the project token is scoped to a different environment.${NC}"
-                            echo -e "${CYAN}   Open https://railway.app/project/${PROJECT_ID} → **${ENVIRONMENT}** and confirm this service is present (create **staging** if you deploy to staging).${NC}"
-                            echo -e "${CYAN}   When GraphQL id matches Terraform output, a **Terraform state reset usually does not fix** this 404 — fix env + token first.${NC}"
-                            echo -e "${CYAN}   If you wiped Railway and Terraform still tracks **deleted** services (apply drift / wrong resources), run once: **MTX_RESET_RAILWAY_TF_STATE=1 mtx deploy ${ENVIRONMENT}** (add **MTX_RESET_RAILWAY_TF_STATE_INCLUDE_DB=1** if Postgres plugin state is stale).${NC}"
-                            echo -e "${CYAN}   Debug: \`mtx deploy ${ENVIRONMENT} -vv\` for full Railway CLI output.${NC}"
+                            echo -e "${CYAN}   Common cause after a wipe: the service exists on the project but has **no instance in ${ENVIRONMENT}** (only Postgres appears there). Self-heal will try GraphQL deploy + Terraform state reconcile.${NC}"
+                            # Self-heal (bounded): phase 0 = ensure service instance in target env (account token); phase 1 = terraform state rm app + apply; then give up.
+                            if [ "${MTX_RAILWAY_DISABLE_SAME_ID_404_SELF_HEAL:-}" = "1" ]; then
+                                _mtx_same_id_404_phase=2
+                            fi
+                            if [ "${_mtx_same_id_404_phase:-0}" -eq 0 ]; then
+                                _mtx_same_id_404_phase=1
+                                if [ -n "${RAILWAY_TOKEN_VALUE:-}" ] && mtx_railway_ensure_service_instance_in_environment "$RAILWAY_TOKEN_VALUE" "$PROJECT_ID" "$ENVIRONMENT" "$SERVICE_ID"; then
+                                    :
+                                else
+                                    echo -e "${YELLOW}ℹ️  Environment attach/deploy self-heal did not complete (GraphQL or token); trying Terraform reconcile next.${NC}"
+                                fi
+                            elif [ "${_mtx_same_id_404_phase:-0}" -eq 1 ]; then
+                                _mtx_same_id_404_phase=2
+                                echo -e "${YELLOW}ℹ️  Self-heal: dropping managed app service from Terraform state and re-running apply…${NC}"
+                                set +e
+                                cd "$SCRIPT_DIR" || exit 1
+                                if terraform state list 2>/dev/null | grep -qF 'module.railway_app[0].railway_service.app[0]'; then
+                                    terraform state rm 'module.railway_app[0].railway_service.app[0]' 2>/dev/null || true
+                                fi
+                                if [ "${MTX_RESET_RAILWAY_TF_STATE_INCLUDE_DB:-}" = "1" ] && terraform state list 2>/dev/null | grep -qF 'module.railway_owner[0].railway_service.db[0]'; then
+                                    terraform state rm 'module.railway_owner[0].railway_service.db[0]' 2>/dev/null || true
+                                fi
+                                if [ "${MTX_VERBOSE:-1}" -le 1 ]; then
+                                    mtx_run terraform apply -auto-approve "${TF_VARS[@]}"
+                                else
+                                    terraform apply -auto-approve "${TF_VARS[@]}"
+                                fi
+                                _mtx_tf_heal_exit=$?
+                                set -e
+                                if [ "${_mtx_tf_heal_exit:-1}" -ne 0 ]; then
+                                    echo -e "${RED}❌ Terraform self-heal apply failed after 404 (see errors above).${NC}"
+                                    exit 1
+                                fi
+                                SERVICE_ID=$(terraform output -raw railway_app_service_id 2>/dev/null || echo "")
+                                PROJECT_ID=$(terraform output -raw railway_project_id 2>/dev/null || echo "$PROJECT_ID")
+                                cd "$PROJECT_ROOT" || exit 1
+                                export RAILWAY_SERVICE="$SERVICE_ID"
+                                if [ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "null" ]; then
+                                    set_prepare_key "RAILWAY_PROJECT_ID" "$PROJECT_ID"
+                                fi
+                                echo -e "${GREEN}✅ Terraform self-heal finished (service id: ${SERVICE_ID:-<none>}).${NC}"
+                            else
+                                echo -e "${CYAN}   Open https://railway.app/project/${PROJECT_ID} → **${ENVIRONMENT}** and confirm this service is present; verify RAILWAY_PROJECT_TOKEN_${ENVIRONMENT^^} is scoped to ${ENVIRONMENT}.${NC}"
+                                echo -e "${CYAN}   Optional: **MTX_RESET_RAILWAY_TF_STATE_INCLUDE_DB=1** with deploy if Postgres plugin state is stale; **MTX_RAILWAY_DISABLE_SAME_ID_404_SELF_HEAL=1** to skip auto self-heal.${NC}"
+                                echo -e "${CYAN}   Debug: \`mtx deploy ${ENVIRONMENT} -vv\` for full Railway CLI output.${NC}"
+                                echo ""
+                                echo -e "${CYAN}   Services in project (GraphQL):${NC}"
+                                echo "$APP_SVC_REDISCOVER_RESPONSE" | jq -r '.data.project.services.edges[]? | "   - " + (.node.name // "?") + "  (" + (.node.id // "?") + ")"' 2>/dev/null || true
+                                exit 2
+                            fi
                             echo ""
-                            echo -e "${CYAN}   Services in project (GraphQL):${NC}"
-                            echo "$APP_SVC_REDISCOVER_RESPONSE" | jq -r '.data.project.services.edges[]? | "   - " + (.node.name // "?") + "  (" + (.node.id // "?") + ")"' 2>/dev/null || true
-                            exit 2
+                            cd "$PROJECT_ROOT" || exit 1
+                            rm -rf .railway
+                            mkdir -p .railway
+                            printf '%s\n' "$PROJECT_ID" > .railway/project
+                            printf '%s\n' "$SERVICE_ID" > .railway/service
+                            printf '%s\n' "$ENVIRONMENT" > .railway/environment
+                            (railway link --service "$SERVICE_ID" --project "$PROJECT_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1) || true
+                            mtx_deploy_spinner_start "railway-up" "$APP_NAME"
+                            continue
                         fi
                         echo -e "${RED}❌ No Railway service in project ${PROJECT_ID} matched any of: ${APP_SLUG} / repo folder slug (Terraform may not have created the app service yet).${NC}"
                         echo -e "${CYAN}   Services GraphQL can see (check names vs config org.slug and the Railway dashboard):${NC}"
