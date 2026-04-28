@@ -1059,9 +1059,11 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             
             # Temporarily disable set -e
             set +e
-            local ENV_QUERY='{"query":"query { project(id: \"'$PROJ_ID'\") { environments { id name } } }"}'
+            # Railway GraphQL uses environments.edges[].node (same as CLI Project.graphql); legacy flat environments[] is a fallback.
+            local ENV_QUERY
+            ENV_QUERY=$(jq -n --arg pid "$PROJ_ID" '{"query":"query($id:String!){project(id:$id){environments{edges{node{id name}}}}}","variables":{"id":$pid}}')
             local ENV_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
-                -H "Authorization: Bearer $TOKEN" \
+                -H "Authorization: Bearer $(mtx_normalize_railway_token "$TOKEN")" \
                 -H "Content-Type: application/json" \
                 -d "$ENV_QUERY" 2>/dev/null || echo "")
             local CURL_EXIT=$?
@@ -1079,7 +1081,15 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             fi
             
             set +e
-            local ENV_ID=$(echo "$ENV_RESPONSE" | jq -r ".data.project.environments[] | select(.name == \"$ENV_NAME\") | .id" 2>/dev/null)
+            local ENV_ID
+            ENV_ID=$(echo "$ENV_RESPONSE" | jq -r --arg n "$ENV_NAME" '.data.project.environments.edges[]?.node | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | .id // empty' 2>/dev/null | head -1)
+            if [ -z "$ENV_ID" ] || [ "$ENV_ID" = "null" ]; then
+                ENV_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+                    -H "Authorization: Bearer $(mtx_normalize_railway_token "$TOKEN")" \
+                    -H "Content-Type: application/json" \
+                    -d '{"query":"query { project(id: \"'"$PROJ_ID"'\") { environments { id name } } }"}' 2>/dev/null || echo "")
+                ENV_ID=$(echo "$ENV_RESPONSE" | jq -r --arg n "$ENV_NAME" '.data.project.environments[]? | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | .id // empty' 2>/dev/null | head -1)
+            fi
             local JQ_EXIT=$?
             set -e
             
@@ -1100,45 +1110,53 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             local PROJ_ID="$2"
             local ENV_NAME="$3"
             local SVC_ID="$4"
-            local ENV_RESPONSE ENV_ID INST_RESP HAS_INST MUT_RESP ERR_MSG
+            local ENV_RESPONSE ENV_ID HAS_INST MUT_RESP ENV_QUERY
             API_TOKEN="$(mtx_normalize_railway_token "$API_TOKEN")"
             if [ -z "$API_TOKEN" ] || [ -z "$PROJ_ID" ] || [ -z "$ENV_NAME" ] || [ -z "$SVC_ID" ]; then
                 return 1
             fi
 
+            # Match Railway CLI Project.graphql: environments are edges[].node (not legacy flat environments[]).
+            ENV_QUERY=$(jq -n --arg pid "$PROJ_ID" '{"query":"query($id:String!){project(id:$id){environments{edges{node{id name}}}}}","variables":{"id":$pid}}')
             ENV_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
                 -H "Authorization: Bearer $API_TOKEN" \
                 -H "Content-Type: application/json" \
-                -d '{"query":"query { project(id: \"'"$PROJ_ID"'\") { environments { id name } } }"}' 2>/dev/null)
-            ENV_ID=$(echo "$ENV_RESPONSE" | jq -r --arg n "$ENV_NAME" '.data.project.environments[]? | select(.name == $n) | .id // empty' 2>/dev/null | head -1)
+                -d "$ENV_QUERY" 2>/dev/null)
+            ENV_ID=$(echo "$ENV_RESPONSE" | jq -r --arg n "$ENV_NAME" '.data.project.environments.edges[]?.node | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | .id // empty' 2>/dev/null | head -1)
+
             if [ -z "$ENV_ID" ] || [ "$ENV_ID" = "null" ]; then
-                echo -e "${YELLOW}ℹ️  Could not resolve environment id for \"$ENV_NAME\" in project (GraphQL).${NC}" >&2
-                return 1
+                ENV_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+                    -H "Authorization: Bearer $API_TOKEN" \
+                    -H "Content-Type: application/json" \
+                    -d '{"query":"query { project(id: \"'"$PROJ_ID"'\") { environments { id name } } }"}' 2>/dev/null)
+                ENV_ID=$(echo "$ENV_RESPONSE" | jq -r --arg n "$ENV_NAME" '.data.project.environments[]? | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | .id // empty' 2>/dev/null | head -1)
             fi
 
-            INST_RESP=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
-                -H "Authorization: Bearer $API_TOKEN" \
-                -H "Content-Type: application/json" \
-                -d '{"query":"query($eid:String!){environment(id:$eid){id serviceInstances{edges{node{id serviceId service{id name}}}}}}","variables":{"eid":"'"$ENV_ID"'"}}' 2>/dev/null)
-            ERR_MSG=$(echo "$INST_RESP" | jq -r 'if (.errors|type)=="array" and (.errors|length)>0 then .errors|map(.message)|join("; ") else empty end' 2>/dev/null)
-            if [ -n "$ERR_MSG" ]; then
+            HAS_INST=0
+            if [ -n "$ENV_ID" ] && [ "$ENV_ID" != "null" ]; then
+                local INST_RESP
                 INST_RESP=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
                     -H "Authorization: Bearer $API_TOKEN" \
                     -H "Content-Type: application/json" \
-                    -d '{"query":"query($eid:String!){environment(id:$eid){id serviceInstances{edges{node{id service{id}}}}}}","variables":{"eid":"'"$ENV_ID"'"}}' 2>/dev/null)
+                    -d '{"query":"query($eid:String!){environment(id:$eid){id serviceInstances{edges{node{serviceId}}}}}","variables":{"eid":"'"$ENV_ID"'"}}' 2>/dev/null)
+                HAS_INST=$(echo "$INST_RESP" | jq -r --arg sid "$SVC_ID" '[.data.environment.serviceInstances.edges[]?.node.serviceId? | select(. == $sid)] | length' 2>/dev/null)
+                case "${HAS_INST:-0}" in ''|*[!0-9]*) HAS_INST=0 ;; esac
             fi
 
-            HAS_INST=$(echo "$INST_RESP" | jq -r --arg sid "$SVC_ID" '
-                [ (.data.environment.serviceInstances.edges // [])[]?.node
-                  | [(.serviceId // empty), (.service.id // empty)] | .[]
-                  | select(. != "" and . == $sid) ] | length' 2>/dev/null)
-            case "${HAS_INST:-0}" in ''|*[!0-9]*) HAS_INST=0 ;; esac
+            if [ -z "$ENV_ID" ] || [ "$ENV_ID" = "null" ]; then
+                echo -e "${YELLOW}ℹ️  Could not resolve environment id for \"$ENV_NAME\" in project (GraphQL).${NC}" >&2
+                echo "$ENV_RESPONSE" | jq -r '.errors[]? | .message' 2>/dev/null | while IFS= read -r _em; do
+                    [ -n "$_em" ] && echo -e "${YELLOW}   ${_em}${NC}" >&2
+                done
+                return 1
+            fi
+
             if [ "$HAS_INST" -ge 1 ]; then
                 echo -e "${CYAN}ℹ️  Service instance for $SVC_ID already exists in $ENV_NAME.${NC}"
                 return 0
             fi
 
-            echo -e "${YELLOW}ℹ️  Self-heal: no service instance for this app in $ENV_NAME; calling Railway GraphQL to attach/deploy the service…${NC}"
+            echo -e "${YELLOW}ℹ️  Self-heal: no service instance for this app in $ENV_NAME; calling serviceInstanceDeployV2 (Railway CLI mutation)…${NC}"
             MUT_RESP=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
                 -H "Authorization: Bearer $API_TOKEN" \
                 -H "Content-Type: application/json" \
@@ -1150,7 +1168,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     -d '{"query":"mutation($e:String!,$s:String!){serviceInstanceDeploy(environmentId:$e,serviceId:$s)}","variables":{"e":"'"$ENV_ID"'","s":"'"$SVC_ID"'"}}' 2>/dev/null)
             fi
             if echo "$MUT_RESP" | jq -e '(.errors|type)=="array" and (.errors|length)>0' >/dev/null 2>&1; then
-                echo -e "${YELLOW}ℹ️  GraphQL deploy mutation failed (Railway may use a different schema revision):${NC}" >&2
+                echo -e "${YELLOW}ℹ️  GraphQL deploy mutation failed:${NC}" >&2
                 echo "$MUT_RESP" | jq -r '.errors[]? | .message' 2>/dev/null >&2 || true
                 return 1
             fi
