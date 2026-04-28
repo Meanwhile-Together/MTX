@@ -1668,33 +1668,76 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     fi
                     mtx_deploy_spinner_stop
                     echo ""
-                    echo -e "${YELLOW}ℹ️  Railway upload returned 404 (often a stale service id after wipe/recreate). Re-querying project for service \"${APP_SLUG}\"...${NC}"
+                    echo -e "${YELLOW}ℹ️  Railway upload returned 404. Re-querying project services (config slug + repo folder fallbacks)...${NC}"
                     APP_SVC_REDISCOVER_QUERY='{"query":"query($projectId: String!) { project(id: $projectId) { services { edges { node { id name } } } } }", "variables": {"projectId": "'"$PROJECT_ID"'"}}'
                     APP_SVC_REDISCOVER_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
                         -H "Authorization: Bearer $(mtx_normalize_railway_token "$PROJECT_TOKEN")" \
                         -H "Content-Type: application/json" \
                         -d "$APP_SVC_REDISCOVER_QUERY" 2>/dev/null)
-                    NEW_APP_SERVICE_ID=$(echo "$APP_SVC_REDISCOVER_RESPONSE" | jq -r --arg name "$APP_SLUG" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
+                    _mtx_repo_base="$(basename "$PROJECT_ROOT")"
+                    _mtx_cand_slugs=("$APP_SLUG")
+                    _mtx_cand_slugs+=("$(echo "$_mtx_repo_base" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*//;s/-*$//')")
+                    case "$_mtx_repo_base" in org-*)
+                        _mtx_cand_slugs+=("$(echo "${_mtx_repo_base#org-}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*//;s/-*$//')")
+                        ;;
+                    esac
+                    NEW_APP_SERVICE_ID=""
+                    _mtx_disc_match_name=""
+                    _mtx_found_same_id=0
+                    for _mtx_try_slug in "${_mtx_cand_slugs[@]}"; do
+                        [ -z "$_mtx_try_slug" ] && continue
+                        _mtx_nid=$(echo "$APP_SVC_REDISCOVER_RESPONSE" | jq -r --arg name "$_mtx_try_slug" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
+                        if [ -n "$_mtx_nid" ] && [ "$_mtx_nid" != "null" ] && [ "$_mtx_nid" != "$SERVICE_ID" ]; then
+                            NEW_APP_SERVICE_ID="$_mtx_nid"
+                            _mtx_disc_match_name="$_mtx_try_slug"
+                            echo -e "${GREEN}✅ Matched Railway service name \"${_mtx_try_slug}\" (id differs from Terraform output — adopting for this deploy).${NC}"
+                            break
+                        elif [ -n "$_mtx_nid" ] && [ "$_mtx_nid" != "null" ] && [ "$_mtx_nid" = "$SERVICE_ID" ]; then
+                            _mtx_found_same_id=1
+                            [ -z "$_mtx_disc_match_name" ] && _mtx_disc_match_name="$_mtx_try_slug"
+                        fi
+                    done
                     if [ -z "$NEW_APP_SERVICE_ID" ] || [ "$NEW_APP_SERVICE_ID" = "null" ]; then
                         APP_SVC_REDISCOVER_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
                             -H "Authorization: Bearer $(mtx_normalize_railway_token "$RAILWAY_TOKEN_VALUE")" \
                             -H "Content-Type: application/json" \
                             -d "$APP_SVC_REDISCOVER_QUERY" 2>/dev/null)
-                        NEW_APP_SERVICE_ID=$(echo "$APP_SVC_REDISCOVER_RESPONSE" | jq -r --arg name "$APP_SLUG" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
+                        for _mtx_try_slug in "${_mtx_cand_slugs[@]}"; do
+                            [ -z "$_mtx_try_slug" ] && continue
+                            _mtx_nid=$(echo "$APP_SVC_REDISCOVER_RESPONSE" | jq -r --arg name "$_mtx_try_slug" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
+                            if [ -n "$_mtx_nid" ] && [ "$_mtx_nid" != "null" ] && [ "$_mtx_nid" != "$SERVICE_ID" ]; then
+                                NEW_APP_SERVICE_ID="$_mtx_nid"
+                                _mtx_disc_match_name="$_mtx_try_slug"
+                                echo -e "${GREEN}✅ Matched Railway service name \"${_mtx_try_slug}\" via account token (id differs from Terraform output).${NC}"
+                                break
+                            elif [ -n "$_mtx_nid" ] && [ "$_mtx_nid" != "null" ] && [ "$_mtx_nid" = "$SERVICE_ID" ]; then
+                                _mtx_found_same_id=1
+                                [ -z "$_mtx_disc_match_name" ] && _mtx_disc_match_name="$_mtx_try_slug"
+                            fi
+                        done
                     fi
                     if [ -z "$NEW_APP_SERVICE_ID" ] || [ "$NEW_APP_SERVICE_ID" = "null" ]; then
-                        echo -e "${RED}❌ Could not find a Railway service named \"${APP_SLUG}\" in project ${PROJECT_ID}.${NC}"
-                        exit 2
-                    fi
-                    if [ "$NEW_APP_SERVICE_ID" = "$SERVICE_ID" ]; then
-                        echo -e "${RED}❌ API still reports the same service id as the failed deploy; cannot self-heal from 404.${NC}"
+                        if [ "${_mtx_found_same_id:-0}" -eq 1 ]; then
+                            echo -e "${YELLOW}ℹ️  GraphQL lists app service \"${_mtx_disc_match_name:-$APP_SLUG}\" as ${SERVICE_ID} — same id Terraform uses — but \`railway up\` still returned 404.${NC}"
+                            echo -e "${CYAN}   So the service **exists in the project graph**, but uploads are rejected: most often **${ENVIRONMENT}** is missing, the service is not attached / not deployed in that environment yet, or the project token is scoped to a different environment.${NC}"
+                            echo -e "${CYAN}   Open https://railway.app/project/${PROJECT_ID} → **${ENVIRONMENT}** and confirm this service is present (create **staging** if you deploy to staging).${NC}"
+                            echo -e "${CYAN}   Debug: \`mtx deploy ${ENVIRONMENT} -vv\` for full Railway CLI output.${NC}"
+                            echo ""
+                            echo -e "${CYAN}   Services in project (GraphQL):${NC}"
+                            echo "$APP_SVC_REDISCOVER_RESPONSE" | jq -r '.data.project.services.edges[]? | "   - " + (.node.name // "?") + "  (" + (.node.id // "?") + ")"' 2>/dev/null || true
+                            exit 2
+                        fi
+                        echo -e "${RED}❌ No Railway service in project ${PROJECT_ID} matched any of: ${APP_SLUG} / repo folder slug (Terraform may not have created the app service yet).${NC}"
+                        echo -e "${CYAN}   Services GraphQL can see (check names vs config org.slug and the Railway dashboard):${NC}"
+                        echo "$APP_SVC_REDISCOVER_RESPONSE" | jq -r '.data.project.services.edges[]? | "   - " + (.node.name // "?") + "  (" + (.node.id // "?") + ")"' 2>/dev/null || true
+                        echo -e "${CYAN}   Fix: run \`terraform apply\` (or mtx deploy) until \`railway_app_service_id\` exists, or rename the Railway service to match org.slug.${NC}"
                         exit 2
                     fi
                     SERVICE_ID="$NEW_APP_SERVICE_ID"
                     export RAILWAY_SERVICE="$SERVICE_ID"
                     set_env_var_in_file "RAILWAY_APP_SERVICE_ID" "$SERVICE_ID"
                     RAILWAY_APP_SERVICE_REDISCOVER_COUNT=$((RAILWAY_APP_SERVICE_REDISCOVER_COUNT + 1))
-                    echo -e "${GREEN}✅ Re-linked deploy target to ${APP_SLUG} (${SERVICE_ID}). Retrying railway up...${NC}"
+                    echo -e "${GREEN}✅ Re-linked deploy target to ${_mtx_disc_match_name:-$APP_SLUG} (${SERVICE_ID}). Retrying railway up...${NC}"
                     echo ""
                     cd "$PROJECT_ROOT" || exit 1
                     rm -rf .railway
