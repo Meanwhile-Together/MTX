@@ -654,6 +654,30 @@ for _legacy_app in \
     fi
 done
 
+# Operator recovery: after a manual Railway wipe, Terraform can still track deleted
+# `railway_service.app` (or db) while the dashboard/API show new resources. Removing
+# the managed resource from state lets the next apply adopt GraphQL -var
+# railway_service_id or recreate the service. The imported project stays in state.
+if [ "${MTX_RESET_RAILWAY_TF_STATE:-}" = "1" ] || [ "${MTX_RAILWAY_TF_STATE_RESET:-}" = "1" ]; then
+    echo -e "${YELLOW}🧹 MTX_RESET_RAILWAY_TF_STATE=1 — dropping managed Railway app service from Terraform state (project import unchanged).${NC}"
+    if terraform state list 2>/dev/null | grep -qF 'module.railway_app[0].railway_service.app[0]'; then
+        terraform state rm 'module.railway_app[0].railway_service.app[0]' 2>/dev/null || true
+        echo -e "${GREEN}✅ Removed module.railway_app[0].railway_service.app[0] from state.${NC}"
+    else
+        echo -e "${CYAN}ℹ️  App service not in state (nothing to rm).${NC}"
+    fi
+    if [ "${MTX_RESET_RAILWAY_TF_STATE_INCLUDE_DB:-}" = "1" ]; then
+        echo -e "${YELLOW}🧹 MTX_RESET_RAILWAY_TF_STATE_INCLUDE_DB=1 — dropping managed Postgres plugin from Terraform state...${NC}"
+        if terraform state list 2>/dev/null | grep -qF 'module.railway_owner[0].railway_service.db[0]'; then
+            terraform state rm 'module.railway_owner[0].railway_service.db[0]' 2>/dev/null || true
+            echo -e "${GREEN}✅ Removed module.railway_owner[0].railway_service.db[0] from state.${NC}"
+        else
+            echo -e "${CYAN}ℹ️  DB service not in state (nothing to rm).${NC}"
+        fi
+    fi
+    echo -e "${CYAN}   Continuing with terraform apply; app id will follow GraphQL discovery or Terraform create.${NC}"
+fi
+
 # When adopting an existing Railway app by id, drop managed app from state so Terraform uses -var only.
 if [ -n "${EXISTING_APP_ID:-}" ] && [ "$EXISTING_APP_ID" != "null" ]; then
     if terraform state list 2>/dev/null | grep -qF 'module.railway_app[0].railway_service.app[0]'; then
@@ -1721,6 +1745,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                             echo -e "${YELLOW}ℹ️  GraphQL lists app service \"${_mtx_disc_match_name:-$APP_SLUG}\" as ${SERVICE_ID} — same id Terraform uses — but \`railway up\` still returned 404.${NC}"
                             echo -e "${CYAN}   So the service **exists in the project graph**, but uploads are rejected: most often **${ENVIRONMENT}** is missing, the service is not attached / not deployed in that environment yet, or the project token is scoped to a different environment.${NC}"
                             echo -e "${CYAN}   Open https://railway.app/project/${PROJECT_ID} → **${ENVIRONMENT}** and confirm this service is present (create **staging** if you deploy to staging).${NC}"
+                            echo -e "${CYAN}   When GraphQL id matches Terraform output, a **Terraform state reset usually does not fix** this 404 — fix env + token first.${NC}"
+                            echo -e "${CYAN}   If you wiped Railway and Terraform still tracks **deleted** services (apply drift / wrong resources), run once: **MTX_RESET_RAILWAY_TF_STATE=1 mtx deploy ${ENVIRONMENT}** (add **MTX_RESET_RAILWAY_TF_STATE_INCLUDE_DB=1** if Postgres plugin state is stale).${NC}"
                             echo -e "${CYAN}   Debug: \`mtx deploy ${ENVIRONMENT} -vv\` for full Railway CLI output.${NC}"
                             echo ""
                             echo -e "${CYAN}   Services in project (GraphQL):${NC}"
