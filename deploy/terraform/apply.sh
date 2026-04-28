@@ -1078,10 +1078,10 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             local DB_SVC_ID=""
             local SERVICES_QUERY SERVICES_RESPONSE DB_REF APP_VARS DB_URL_VAL
             local ACCOUNT_API_TOKEN="${ACCOUNT_TOKEN:-$TOKEN}"
-            local DB_ID_VAR DB_ID_FROM_ENV DB_MATCH_COUNT DB_PIN_VALID=false _mtx_add_ok
+            local DB_ID_VAR DB_ID_FROM_ENV DB_MATCH_COUNT DB_PIN_VALID=false _mtx_add_ok _mtx_pi
             local -a DB_MATCHES
 
-            echo -e "${BLUE}🗄️  Ensuring central database service (${DB_SVC_NAME})...${NC}"
+            echo -e "${BLUE}🗄️  Ensuring Postgres for ${ENV_NAME} (canonical name mtx-db-${ENV_NAME} if you create it manually; CLI default is often Postgres)...${NC}"
             mtx_deploy_spinner_start "database" "${APP_NAME:-$APP_SLUG}"
             trap 'mtx_deploy_spinner_stop' RETURN
 
@@ -1133,7 +1133,8 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                         return 1
                     else
                         # Zero Postgres after canonical name + heuristics: provision exactly one (post-wipe / empty project).
-                        echo -e "${YELLOW}ℹ️  No Postgres service in this project; creating ${DB_SVC_NAME} via Railway (\`railway add --database postgres\`)...${NC}"
+                        # Omit --service: Railway names the plugin "Postgres" by default; wiring uses the resolved display name for ${{Name.DATABASE_URL}}.
+                        echo -e "${YELLOW}ℹ️  No Postgres service in this project; creating Postgres via Railway (\`railway add --database postgres\`)...${NC}"
                         if [ -z "${ACCOUNT_API_TOKEN:-}" ] && [ -z "${TOKEN:-}" ]; then
                             echo -e "${RED}❌ No Railway token available for auto-create (set RAILWAY_ACCOUNT_TOKEN in ${MTX_PREPARE_FILE##*/} and/or project token for this environment).${NC}"
                             return 1
@@ -1148,35 +1149,65 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                         # hides Railway errors and can break non-interactive / TTY-sensitive CLI behavior.
                         _mtx_add_ok=0
                         export RAILWAY_TOKEN="${ACCOUNT_API_TOKEN:-$TOKEN}"
-                        if (cd "$PROJECT_ROOT" && railway add --database postgres --service "$DB_SVC_NAME"); then
+                        if (cd "$PROJECT_ROOT" && railway add --database postgres); then
                             _mtx_add_ok=1
                         elif [ -n "${ACCOUNT_API_TOKEN:-}" ] && [ -n "${TOKEN:-}" ] && [ "$ACCOUNT_API_TOKEN" != "$TOKEN" ]; then
                             echo -e "${YELLOW}ℹ️  \`railway add\` failed with account token; retrying with environment project token...${NC}"
                             export RAILWAY_TOKEN="$TOKEN"
-                            if (cd "$PROJECT_ROOT" && railway add --database postgres --service "$DB_SVC_NAME"); then
+                            if (cd "$PROJECT_ROOT" && railway add --database postgres); then
                                 _mtx_add_ok=1
                             fi
                         fi
                         if [ "$_mtx_add_ok" -ne 1 ]; then
                             echo -e "${RED}❌ \`railway add --database postgres\` failed (see Railway output above).${NC}"
-                            echo -e "${CYAN}   Create a Postgres plugin in the Railway UI named ${DB_SVC_NAME}, or set ${DB_ID_VAR} to the new service id.${NC}"
+                            echo -e "${CYAN}   Add Postgres in the Railway UI, or set ${DB_ID_VAR} to the new service id.${NC}"
                             return 1
                         fi
-                        # Brief pause so GraphQL list includes the new service (Railway is eventually consistent).
-                        sleep 3
-                        SERVICES_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
-                            -H "Authorization: Bearer $ACCOUNT_API_TOKEN" \
-                            -H "Content-Type: application/json" \
-                            -d "$SERVICES_QUERY" 2>/dev/null)
-                        DB_SVC_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$DB_SVC_NAME" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
-                        if [ -z "$DB_SVC_ID" ] || [ "$DB_SVC_ID" = "null" ]; then
-                            echo -e "${RED}❌ Postgres was added but the new service id for ${DB_SVC_NAME} could not be resolved yet.${NC}"
-                            echo -e "${CYAN}   Re-run deploy in a minute, or set ${DB_ID_VAR} from the Railway dashboard.${NC}"
+                        # GraphQL can lag behind the CLI; poll for mtx-db-<env> OR exactly one Postgres-like service (e.g. Postgres).
+                        local CANON_DB_NAME="mtx-db-${ENV_NAME}"
+                        local _mtx_pg_poll_max="${MTX_DB_GRAPHQL_POLL_MAX:-18}"
+                        local _mtx_pg_poll_sleep="${MTX_DB_GRAPHQL_POLL_SLEEP:-5}"
+                        DB_SVC_ID=""
+                        DB_SVC_NAME=""
+                        for ((_mtx_pi=1; _mtx_pi<=_mtx_pg_poll_max; _mtx_pi++)); do
+                            SERVICES_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+                                -H "Authorization: Bearer $ACCOUNT_API_TOKEN" \
+                                -H "Content-Type: application/json" \
+                                -d "$SERVICES_QUERY" 2>/dev/null)
+                            DB_SVC_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$CANON_DB_NAME" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
+                            if [ -n "$DB_SVC_ID" ] && [ "$DB_SVC_ID" != "null" ]; then
+                                DB_SVC_NAME="$CANON_DB_NAME"
+                                break
+                            fi
+                            mapfile -t DB_MATCHES < <(echo "$SERVICES_RESPONSE" | jq -r '
+                                .data.project.services.edges[]?.node
+                                | select(.name | test("(^Postgres|postgres|database|\\bdb\\b)"; "i"))
+                                | (.id + "\t" + .name)
+                              ' 2>/dev/null)
+                            DB_MATCH_COUNT="${#DB_MATCHES[@]}"
+                            if [ "$DB_MATCH_COUNT" -eq 1 ]; then
+                                DB_SVC_ID="$(echo "${DB_MATCHES[0]}" | cut -f1)"
+                                DB_SVC_NAME="$(echo "${DB_MATCHES[0]}" | cut -f2)"
+                                break
+                            fi
+                            if [ "$DB_MATCH_COUNT" -gt 1 ]; then
+                                echo -e "${RED}❌ Multiple Postgres-like services appeared while resolving the new database; set ${DB_ID_VAR} explicitly.${NC}"
+                                printf '  %s\n' "${DB_MATCHES[@]}"
+                                return 1
+                            fi
+                            if [ "$_mtx_pi" -lt "$_mtx_pg_poll_max" ]; then
+                                echo -e "${YELLOW}ℹ️  Postgres not visible in Railway API yet (${_mtx_pi}/${_mtx_pg_poll_max}); sleeping ${_mtx_pg_poll_sleep}s...${NC}"
+                                sleep "$_mtx_pg_poll_sleep"
+                            fi
+                        done
+                        if [ -z "$DB_SVC_ID" ] || [ "$DB_SVC_ID" = "null" ] || [ -z "$DB_SVC_NAME" ]; then
+                            echo -e "${RED}❌ Postgres was added but its service id could not be resolved via the API after ${_mtx_pg_poll_max} attempts.${NC}"
+                            echo -e "${CYAN}   Re-run deploy, increase MTX_DB_GRAPHQL_POLL_MAX / MTX_DB_GRAPHQL_POLL_SLEEP, or set ${DB_ID_VAR} from the Railway dashboard.${NC}"
                             return 1
                         fi
                         set_prepare_key "$DB_ID_VAR" "$DB_SVC_ID"
                         set_env_var_in_file "$DB_ID_VAR" "$DB_SVC_ID"
-                        echo -e "${GREEN}✅ Created Postgres service ${DB_SVC_NAME} (${DB_SVC_ID}).${NC}"
+                        echo -e "${GREEN}✅ Postgres ready for wiring: ${DB_SVC_NAME} (${DB_SVC_ID}).${NC}"
                     fi
                 else
                     # Resolved by canonical mtx-db-<env> name; persist id for the next deploy after wipes.
