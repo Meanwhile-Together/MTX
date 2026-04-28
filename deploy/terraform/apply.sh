@@ -403,15 +403,39 @@ mtx_railway_graphql_service_create_for_project_env() {
     return 0
 }
 
+# GraphQL: ensure a project service has an instance in the given environment (Railway CLI mutation).
+mtx_railway_graphql_service_instance_deploy_into_env() {
+    local api_token="$1" env_id="$2" service_id="$3"
+    local mut_resp
+    api_token="$(mtx_normalize_railway_token "$api_token")"
+    [ -z "$api_token" ] || [ -z "$env_id" ] || [ -z "$service_id" ] && return 1
+    mut_resp=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+        -H "Authorization: Bearer $api_token" \
+        -H "Content-Type: application/json" \
+        -d '{"query":"mutation($e:String!,$s:String!){serviceInstanceDeployV2(environmentId:$e,serviceId:$s)}","variables":{"e":"'"$env_id"'","s":"'"$service_id"'"}}' 2>/dev/null)
+    if echo "$mut_resp" | jq -e '(.errors|type)=="array" and (.errors|length>0)' >/dev/null 2>&1; then
+        mut_resp=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+            -H "Authorization: Bearer $api_token" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"mutation($e:String!,$s:String!){serviceInstanceDeploy(environmentId:$e,serviceId:$s)}","variables":{"e":"'"$env_id"'","s":"'"$service_id"'"}}' 2>/dev/null)
+    fi
+    if echo "$mut_resp" | jq -e '(.errors|type)=="array" and (.errors|length>0)' >/dev/null 2>&1; then
+        echo "$mut_resp" | jq -r '.errors[]? | "   " + (.message // "?")' 2>/dev/null >&2 || true
+        return 1
+    fi
+    return 0
+}
+
 # Confirm the resolved environment UUID names the expected logical env, and that SERVICE_ID is
 # actually instanced there. If Terraform still points at a service that is not deployed in this
-# environment, we do not attach or reuse-by-name: we mint a brand-new empty service in this
-# project+environment via GraphQL serviceCreate, adopt its id for this deploy, and drop the old
-# Terraform-managed app resource from state so the next apply can reconcile.
+# environment: prefer GraphQL serviceCreate (empty service, exact app_slug name). If Railway
+# rejects that because the name already exists project-wide, resolve that canonical service id and
+# serviceInstanceDeployV2 into this environment (same human-visible name, no -staging suffix).
+# Adopt the resulting id for this deploy and drop stale Terraform app state when the id changed.
 # Args: account_token environment_uuid logical_env_name app_slug railway_project_id
 mtx_railway_assert_resolved_environment_and_service_for_deploy() {
     local api_token="$1" env_id="$2" logical="$3" app_slug="$4" project_id="${5:-}"
-    local q resp ename el nl cur c1 new_sid poll_sid _poll_max _poll_sleep _pi create_name
+    local q resp ename el nl cur c1 new_sid poll_sid _poll_max _poll_sleep _pi _slug_lc by_name_id svc_query proj_svc mut_ok
     api_token="$(mtx_normalize_railway_token "$api_token")"
     cur="${SERVICE_ID:-}"
     [ -z "$api_token" ] || [ -z "$env_id" ] || [ -z "$logical" ] || [ -z "$app_slug" ] || [ -z "$cur" ] && return 0
@@ -460,26 +484,54 @@ mtx_railway_assert_resolved_environment_and_service_for_deploy() {
         return 1
     fi
 
-    echo -e "${YELLOW}ℹ️  Terraform service ${cur} is not deployed in ${logical}; creating a new empty Railway service named \"${app_slug}\" in this environment (no attach / no reuse-by-name).${NC}" >&2
+    echo -e "${YELLOW}ℹ️  Terraform service ${cur} is not deployed in ${logical}; ensuring Railway service \"${app_slug}\" exists there (create, or reuse same-named project service).${NC}" >&2
     new_sid=""
-    if ! new_sid="$(mtx_railway_graphql_service_create_for_project_env "$api_token" "$project_id" "$env_id" "$app_slug")"; then
+    if new_sid="$(mtx_railway_graphql_service_create_for_project_env "$api_token" "$project_id" "$env_id" "$app_slug")"; then
+        :
+    else
         new_sid=""
     fi
+
     if [ -z "$new_sid" ]; then
-        echo -e "${RED}❌ serviceCreate failed for \"${app_slug}\" in project ${project_id}.${NC}" >&2
-        echo -e "${CYAN}   Instances currently in ${logical}:${NC}" >&2
-        echo "$resp" | jq -r '.data.environment.serviceInstances.edges[]?.node | "   - " + (.serviceName // (.service.name // "?")) + "  (" + (.serviceId // .service.id // "?") + ")"' 2>/dev/null >&2 || true
-        return 1
+        _slug_lc="$(printf '%s' "$app_slug" | tr '[:upper:]' '[:lower:]')"
+        svc_query=$(jq -n --arg pid "$project_id" '{"query":"query($id:String!){project(id:$id){services{edges{node{id name}}}}}","variables":{"id":$pid}}')
+        proj_svc=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+            -H "Authorization: Bearer $api_token" \
+            -H "Content-Type: application/json" \
+            -d "$svc_query" 2>/dev/null)
+        by_name_id=$(echo "$proj_svc" | jq -r --arg s "$_slug_lc" '
+            [.data.project.services.edges[]?.node | select((.name|ascii_downcase) == $s) | .id] | first // empty' 2>/dev/null)
+        if [ -n "$by_name_id" ] && [ "$by_name_id" != "null" ]; then
+            echo -e "${YELLOW}ℹ️  Railway already has a service named \"${app_slug}\" in this project (cannot duplicate the name). Deploying it into ${logical}…${NC}" >&2
+            mut_ok=0
+            mtx_railway_graphql_service_instance_deploy_into_env "$api_token" "$env_id" "$by_name_id" && mut_ok=1
+            if [ "$mut_ok" -ne 1 ]; then
+                echo -e "${RED}❌ Could not deploy existing service \"${app_slug}\" (${by_name_id}) into ${logical}.${NC}" >&2
+                echo -e "${CYAN}   Instances currently in ${logical}:${NC}" >&2
+                echo "$resp" | jq -r '.data.environment.serviceInstances.edges[]?.node | "   - " + (.serviceName // (.service.name // "?")) + "  (" + (.serviceId // .service.id // "?") + ")"' 2>/dev/null >&2 || true
+                return 1
+            fi
+            new_sid="$by_name_id"
+        else
+            echo -e "${RED}❌ serviceCreate failed for \"${app_slug}\" and no same-named service exists in project ${project_id} (see GraphQL errors above).${NC}" >&2
+            echo -e "${CYAN}   Instances currently in ${logical}:${NC}" >&2
+            echo "$resp" | jq -r '.data.environment.serviceInstances.edges[]?.node | "   - " + (.serviceName // (.service.name // "?")) + "  (" + (.serviceId // .service.id // "?") + ")"' 2>/dev/null >&2 || true
+            return 1
+        fi
     fi
 
     SERVICE_ID="$new_sid"
     export RAILWAY_SERVICE="$SERVICE_ID"
     set_env_var_in_file "RAILWAY_APP_SERVICE_ID" "$SERVICE_ID" 2>/dev/null || true
-    echo -e "${GREEN}✅ Created new Railway service ${SERVICE_ID} (this deploy will use it).${NC}"
+    if [ "$SERVICE_ID" = "$cur" ]; then
+        echo -e "${GREEN}✅ Deploy target is still ${SERVICE_ID}; instance materialized in ${logical}.${NC}"
+    else
+        echo -e "${GREEN}✅ Adopted Railway app service ${SERVICE_ID} for ${logical} (Terraform had ${cur}).${NC}"
+    fi
 
-    if [ -d "${SCRIPT_DIR:-}" ] && command -v terraform >/dev/null 2>&1; then
+    if [ "$SERVICE_ID" != "$cur" ] && [ -d "${SCRIPT_DIR:-}" ] && command -v terraform >/dev/null 2>&1; then
         if (cd "$SCRIPT_DIR" && terraform state rm 'module.railway_app[0].railway_service.app[0]' >/dev/null 2>&1); then
-            echo -e "${CYAN}ℹ️  Removed stale module.railway_app[0].railway_service.app[0] from Terraform state; next apply can adopt the new id (or pass -var=railway_service_id=${SERVICE_ID}).${NC}"
+            echo -e "${CYAN}ℹ️  Removed stale module.railway_app[0].railway_service.app[0] from Terraform state; next apply can adopt ${SERVICE_ID} (or pass -var=railway_service_id=${SERVICE_ID}).${NC}"
         fi
     fi
 
@@ -610,8 +662,10 @@ TF_VARS=(
 )
 
 # Railway
-# Terraform provider needs ACCOUNT token to create services (project tokens get "serviceCreate Not Authorized").
-# Project tokens are used only for deploy (railway up) later.
+# Terraform provider + Backboard GraphQL (serviceCreate, environment(id), project services) need an
+# ACCOUNT / workspace token. Project / environment tokens return "Not Authorized" on those mutations.
+# RAILWAY_TOKEN is often set to a project token for `railway` CLI — it must NOT override the account token.
+# Project tokens are used only for deploy (railway up) later via RAILWAY_PROJECT_TOKEN_*.
 if [ "$HAS_RAILWAY" = "true" ]; then
     if [ -n "$ORG_IDENTITY_FILE" ]; then
         APP_OWNER=$(jq -r ".${ORG_IDENTITY_KEY}.owner // \"\"" "$ORG_IDENTITY_FILE" 2>/dev/null || echo "")
@@ -619,12 +673,12 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         APP_OWNER=""
     fi
     RAILWAY_TOKEN_VALUE=""
-    if [ -n "${RAILWAY_TOKEN:-}" ]; then
-        RAILWAY_TOKEN_VALUE="$RAILWAY_TOKEN"
-    elif [ -n "${RAILWAY_ACCOUNT_TOKEN:-}" ]; then
+    if [ -n "${RAILWAY_ACCOUNT_TOKEN:-}" ]; then
         RAILWAY_TOKEN_VALUE="$RAILWAY_ACCOUNT_TOKEN"
     elif [ -n "${TF_VAR_railway_token:-}" ]; then
         RAILWAY_TOKEN_VALUE="$TF_VAR_railway_token"
+    elif [ -n "${RAILWAY_TOKEN:-}" ]; then
+        RAILWAY_TOKEN_VALUE="$RAILWAY_TOKEN"
     fi
     RAILWAY_TOKEN_VALUE="$(mtx_normalize_railway_token "$RAILWAY_TOKEN_VALUE")"
     if [ -z "$RAILWAY_TOKEN_VALUE" ] || [ "$RAILWAY_TOKEN_VALUE" = "null" ]; then
