@@ -460,16 +460,13 @@ mtx_railway_assert_resolved_environment_and_service_for_deploy() {
         return 1
     fi
 
-    echo -e "${YELLOW}ℹ️  Terraform service ${cur} is not deployed in ${logical}; creating a new empty Railway service in this environment (no attach / no reuse-by-name).${NC}" >&2
+    echo -e "${YELLOW}ℹ️  Terraform service ${cur} is not deployed in ${logical}; creating a new empty Railway service named \"${app_slug}\" in this environment (no attach / no reuse-by-name).${NC}" >&2
     new_sid=""
-    for create_name in "$app_slug" "${app_slug}-${el}"; do
-        if new_sid="$(mtx_railway_graphql_service_create_for_project_env "$api_token" "$project_id" "$env_id" "$create_name")"; then
-            [ -n "$new_sid" ] && break
-        fi
+    if ! new_sid="$(mtx_railway_graphql_service_create_for_project_env "$api_token" "$project_id" "$env_id" "$app_slug")"; then
         new_sid=""
-    done
+    fi
     if [ -z "$new_sid" ]; then
-        echo -e "${RED}❌ serviceCreate failed for \"${app_slug}\" (and fallback \"${app_slug}-${el}\") in project ${project_id}.${NC}" >&2
+        echo -e "${RED}❌ serviceCreate failed for \"${app_slug}\" in project ${project_id}.${NC}" >&2
         echo -e "${CYAN}   Instances currently in ${logical}:${NC}" >&2
         echo "$resp" | jq -r '.data.environment.serviceInstances.edges[]?.node | "   - " + (.serviceName // (.service.name // "?")) + "  (" + (.serviceId // .service.id // "?") + ")"' 2>/dev/null >&2 || true
         return 1
