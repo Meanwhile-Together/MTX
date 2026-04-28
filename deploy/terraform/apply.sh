@@ -1134,17 +1134,31 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     else
                         # Zero Postgres after canonical name + heuristics: provision exactly one (post-wipe / empty project).
                         echo -e "${YELLOW}ℹ️  No Postgres service in this project; creating ${DB_SVC_NAME} via Railway (\`railway add --database postgres\`)...${NC}"
-                        if [ -z "${ACCOUNT_API_TOKEN:-}" ]; then
-                            echo -e "${RED}❌ RAILWAY_ACCOUNT_TOKEN is required to auto-create a database.${NC}"
+                        if [ -z "${ACCOUNT_API_TOKEN:-}" ] && [ -z "${TOKEN:-}" ]; then
+                            echo -e "${RED}❌ No Railway token available for auto-create (set RAILWAY_ACCOUNT_TOKEN in ${MTX_PREPARE_FILE##*/} and/or project token for this environment).${NC}"
                             return 1
                         fi
                         mkdir -p "$PROJECT_ROOT/.railway"
                         printf '%s\n' "$PROJ_ID" > "$PROJECT_ROOT/.railway/project"
                         printf '%s\n' "$ENV_NAME" > "$PROJECT_ROOT/.railway/environment"
-                        export RAILWAY_TOKEN="$ACCOUNT_API_TOKEN"
                         unset RAILWAY_API_TOKEN
-                        if ! mtx_run railway add --database postgres --service "$DB_SVC_NAME"; then
-                            echo -e "${RED}❌ \`railway add --database postgres\` failed (check account token has access to this project).${NC}"
+                        # Bind CLI context (raw .railway/* alone is not always enough for `railway add`).
+                        (cd "$PROJECT_ROOT" && railway link --project "$PROJ_ID" --environment "$ENV_NAME" >/dev/null 2>&1) || true
+                        # Do NOT wrap in mtx_run: at MTX_VERBOSE<=1 mtx_run discards stdout+stderr (&>/dev/null), which
+                        # hides Railway errors and can break non-interactive / TTY-sensitive CLI behavior.
+                        local _mtx_add_ok=0
+                        export RAILWAY_TOKEN="${ACCOUNT_API_TOKEN:-$TOKEN}"
+                        if (cd "$PROJECT_ROOT" && railway add --database postgres --service "$DB_SVC_NAME"); then
+                            _mtx_add_ok=1
+                        elif [ -n "${ACCOUNT_API_TOKEN:-}" ] && [ -n "${TOKEN:-}" ] && [ "$ACCOUNT_API_TOKEN" != "$TOKEN" ]; then
+                            echo -e "${YELLOW}ℹ️  \`railway add\` failed with account token; retrying with environment project token...${NC}"
+                            export RAILWAY_TOKEN="$TOKEN"
+                            if (cd "$PROJECT_ROOT" && railway add --database postgres --service "$DB_SVC_NAME"); then
+                                _mtx_add_ok=1
+                            fi
+                        fi
+                        if [ "$_mtx_add_ok" -ne 1 ]; then
+                            echo -e "${RED}❌ \`railway add --database postgres\` failed (see Railway output above).${NC}"
                             echo -e "${CYAN}   Create a Postgres plugin in the Railway UI named ${DB_SVC_NAME}, or set ${DB_ID_VAR} to the new service id.${NC}"
                             return 1
                         fi
