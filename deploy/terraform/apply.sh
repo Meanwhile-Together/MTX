@@ -1078,7 +1078,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
             local DB_SVC_ID=""
             local SERVICES_QUERY SERVICES_RESPONSE DB_REF APP_VARS DB_URL_VAL
             local ACCOUNT_API_TOKEN="${ACCOUNT_TOKEN:-$TOKEN}"
-            local DB_ID_VAR DB_ID_FROM_ENV DB_MATCH_COUNT DB_PIN_VALID=false
+            local DB_ID_VAR DB_ID_FROM_ENV DB_MATCH_COUNT DB_PIN_VALID=false _mtx_add_ok
             local -a DB_MATCHES
 
             echo -e "${BLUE}🗄️  Ensuring central database service (${DB_SVC_NAME})...${NC}"
@@ -1146,7 +1146,7 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                         (cd "$PROJECT_ROOT" && railway link --project "$PROJ_ID" --environment "$ENV_NAME" >/dev/null 2>&1) || true
                         # Do NOT wrap in mtx_run: at MTX_VERBOSE<=1 mtx_run discards stdout+stderr (&>/dev/null), which
                         # hides Railway errors and can break non-interactive / TTY-sensitive CLI behavior.
-                        local _mtx_add_ok=0
+                        _mtx_add_ok=0
                         export RAILWAY_TOKEN="${ACCOUNT_API_TOKEN:-$TOKEN}"
                         if (cd "$PROJECT_ROOT" && railway add --database postgres --service "$DB_SVC_NAME"); then
                             _mtx_add_ok=1
