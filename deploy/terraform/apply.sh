@@ -381,18 +381,21 @@ mtx_railway_assert_project_token_scoped_to_env() {
 # actually instanced there (catches Terraform pinning a project-level id that only exists in prod).
 mtx_railway_assert_resolved_environment_and_service_for_deploy() {
     local api_token="$1" env_id="$2" logical="$3" app_slug="$4"
-    local q resp ename el nl cur c1 found
+    local q resp ename el nl cur c1 found mut_resp _poll_max _poll_sleep _pi _slug_lc
     api_token="$(mtx_normalize_railway_token "$api_token")"
     cur="${SERVICE_ID:-}"
     [ -z "$api_token" ] || [ -z "$env_id" ] || [ -z "$logical" ] || [ -z "$app_slug" ] || [ -z "$cur" ] && return 0
     if [[ ! "$env_id" =~ ^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$ ]]; then
         return 0
     fi
-    q=$(jq -n --arg eid "$env_id" '{"query":"query($eid:String!){environment(id:$eid){id name serviceInstances{edges{node{serviceId serviceName}}}}}","variables":{"eid":$eid}}')
-    resp=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
-        -H "Authorization: Bearer $api_token" \
-        -H "Content-Type: application/json" \
-        -d "$q" 2>/dev/null)
+    q=$(jq -n --arg eid "$env_id" '{"query":"query($eid:String!){environment(id:$eid){id name serviceInstances{edges{node{serviceId serviceName service{id name}}}}}}","variables":{"eid":$eid}}')
+    mtx_railway_refresh_env_instances_resp() {
+        resp=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+            -H "Authorization: Bearer $api_token" \
+            -H "Content-Type: application/json" \
+            -d "$q" 2>/dev/null)
+    }
+    mtx_railway_refresh_env_instances_resp
     if echo "$resp" | jq -e '(.errors|type)=="array" and (.errors|length>0)' >/dev/null 2>&1; then
         echo -e "${RED}❌ GraphQL environment(id) verification failed:${NC}" >&2
         echo "$resp" | jq -r '.errors[]? | "   " + (.message // "?")' 2>/dev/null >&2 || true
@@ -411,17 +414,29 @@ mtx_railway_assert_resolved_environment_and_service_for_deploy() {
         return 1
     fi
 
-    c1=$(echo "$resp" | jq -r --arg sid "$cur" '[.data.environment.serviceInstances.edges[]?.node.serviceId? | select(. == $sid)] | length' 2>/dev/null)
-    case "${c1:-0}" in ''|*[!0-9]*) c1=0 ;; esac
+    _slug_lc="$(printf '%s' "$app_slug" | tr '[:upper:]' '[:lower:]')"
+    mtx_railway_count_sid_in_resp() {
+        c1=$(echo "$resp" | jq -r --arg sid "$cur" '[.data.environment.serviceInstances.edges[]?.node.serviceId? | select(. == $sid)] | length' 2>/dev/null)
+        case "${c1:-0}" in ''|*[!0-9]*) c1=0 ;; esac
+    }
+    mtx_railway_find_slug_sid_in_resp() {
+        found=$(echo "$resp" | jq -r --arg slug "$_slug_lc" '
+            [.data.environment.serviceInstances.edges[]?.node
+              | select(
+                  ((.serviceName // "")|ascii_downcase) == $slug
+                  or ((.service.name // "")|ascii_downcase) == $slug
+                )
+              | (.serviceId // .service.id // empty)
+            ] | map(select(. != "" and . != null)) | first // empty' 2>/dev/null)
+    }
+
+    mtx_railway_count_sid_in_resp
     if [ "${c1}" -ge 1 ]; then
         echo -e "${CYAN}ℹ️  Verified service ${cur} is instanced in ${logical} (${env_id}).${NC}"
         return 0
     fi
 
-    found=$(echo "$resp" | jq -r --arg slug "$(printf '%s' "$app_slug" | tr '[:upper:]' '[:lower:]')" '
-        [.data.environment.serviceInstances.edges[]?.node
-          | select((.serviceName|ascii_downcase) == $slug)
-          | .serviceId] | first // empty' 2>/dev/null)
+    mtx_railway_find_slug_sid_in_resp
     if [ -n "$found" ] && [ "$found" != "null" ] && [ "$found" != "$cur" ]; then
         echo -e "${YELLOW}⚠️  Terraform service id ${cur} is not instanced in ${logical}, but \"${app_slug}\" exists there as ${found}. Re-aligning deploy target.${NC}" >&2
         SERVICE_ID="$found"
@@ -430,10 +445,61 @@ mtx_railway_assert_resolved_environment_and_service_for_deploy() {
         return 0
     fi
 
-    echo -e "${RED}❌ Service id ${cur} is not instanced in ${logical} (${env_id}) and no instance named \"${app_slug}\" was found.${NC}" >&2
-    echo -e "${CYAN}   Terraform/\`-var=railway_service_id\` is likely pointing at a service id that only exists outside ${logical} (common after wipes/renames).${NC}" >&2
-    echo -e "${CYAN}   Instances visible in ${logical} via GraphQL:${NC}" >&2
-    echo "$resp" | jq -r '.data.environment.serviceInstances.edges[]?.node | "   - " + (.serviceName // "?") + "  (" + (.serviceId // "?") + ")"' 2>/dev/null >&2 || true
+    # Empty canvas / missing instance: attach this project service to the target environment, then poll GraphQL
+    # until the instance exists (same pattern as Railway CLI's serviceInstanceDeployV2).
+    echo -e "${YELLOW}ℹ️  No \"${app_slug}\" instance in ${logical} yet; attaching service ${cur} to environment ${env_id} (GraphQL)…${NC}" >&2
+    mut_resp=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+        -H "Authorization: Bearer $api_token" \
+        -H "Content-Type: application/json" \
+        -d '{"query":"mutation($e:String!,$s:String!){serviceInstanceDeployV2(environmentId:$e,serviceId:$s)}","variables":{"e":"'"$env_id"'","s":"'"$cur"'"}}' 2>/dev/null)
+    if echo "$mut_resp" | jq -e '(.errors|type)=="array" and (.errors|length>0)' >/dev/null 2>&1; then
+        mut_resp=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+            -H "Authorization: Bearer $api_token" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"mutation($e:String!,$s:String!){serviceInstanceDeploy(environmentId:$e,serviceId:$s)}","variables":{"e":"'"$env_id"'","s":"'"$cur"'"}}' 2>/dev/null)
+    fi
+    if echo "$mut_resp" | jq -e '(.errors|type)=="array" and (.errors|length>0)' >/dev/null 2>&1; then
+        echo -e "${RED}❌ Could not attach service ${cur} to ${logical} (${env_id}). GraphQL:${NC}" >&2
+        echo "$mut_resp" | jq -r '.errors[]? | "   " + (.message // "?")' 2>/dev/null >&2 || true
+        echo -e "${CYAN}   Instances currently in ${logical}:${NC}" >&2
+        echo "$resp" | jq -r '.data.environment.serviceInstances.edges[]?.node | "   - " + (.serviceName // (.service.name // "?")) + "  (" + (.serviceId // .service.id // "?") + ")"' 2>/dev/null >&2 || true
+        return 1
+    fi
+    echo -e "${GREEN}✅ Attach mutation accepted; waiting for Railway to materialize the service instance in ${logical}…${NC}"
+
+    _poll_max="${MTX_RAILWAY_INSTANCE_ATTACH_POLL_MAX:-15}"
+    _poll_sleep="${MTX_RAILWAY_INSTANCE_ATTACH_POLL_SLEEP:-4}"
+    for ((_pi=1; _pi<=_poll_max; _pi++)); do
+        if [ "$_pi" -gt 1 ]; then
+            sleep "$_poll_sleep"
+        fi
+        mtx_railway_refresh_env_instances_resp
+        if echo "$resp" | jq -e '(.errors|type)=="array" and (.errors|length>0)' >/dev/null 2>&1; then
+            echo -e "${YELLOW}ℹ️  environment(id) poll error (attempt ${_pi}/${_poll_max}); continuing…${NC}" >&2
+            continue
+        fi
+        mtx_railway_count_sid_in_resp
+        if [ "${c1}" -ge 1 ]; then
+            echo -e "${GREEN}✅ Service ${cur} is now instanced in ${logical} (${env_id}).${NC}"
+            return 0
+        fi
+        mtx_railway_find_slug_sid_in_resp
+        if [ -n "$found" ] && [ "$found" != "null" ]; then
+            if [ "$found" != "$cur" ]; then
+                echo -e "${YELLOW}⚠️  After attach, matched \"${app_slug}\" as ${found} (Terraform had ${cur}). Re-aligning deploy target.${NC}" >&2
+                SERVICE_ID="$found"
+                export RAILWAY_SERVICE="$SERVICE_ID"
+                set_env_var_in_file "RAILWAY_APP_SERVICE_ID" "$SERVICE_ID" 2>/dev/null || true
+            fi
+            echo -e "${GREEN}✅ Service instance for \"${app_slug}\" is present in ${logical} (${env_id}).${NC}"
+            return 0
+        fi
+    done
+
+    echo -e "${RED}❌ Timed out waiting for service ${cur} / \"${app_slug}\" to appear in ${logical} (${env_id}) after attach.${NC}" >&2
+    echo -e "${CYAN}   Increase MTX_RAILWAY_INSTANCE_ATTACH_POLL_MAX / MTX_RAILWAY_INSTANCE_ATTACH_POLL_SLEEP, or attach the service in the Railway UI.${NC}" >&2
+    echo -e "${CYAN}   Instances visible now:${NC}" >&2
+    echo "$resp" | jq -r '.data.environment.serviceInstances.edges[]?.node | "   - " + (.serviceName // (.service.name // "?")) + "  (" + (.serviceId // .service.id // "?") + ")"' 2>/dev/null >&2 || true
     return 1
 }
 
