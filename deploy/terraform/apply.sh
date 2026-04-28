@@ -378,17 +378,26 @@ mtx_railway_assert_project_token_scoped_to_env() {
 }
 
 # Create an empty Railway service scoped to one environment (GraphQL). Prints new service id on stdout.
+# Matches railwayapp/cli ServiceCreate.graphql: empty services pass source: {} (omit only if API rejects).
 mtx_railway_graphql_service_create_for_project_env() {
     local api_token="$1" project_id="$2" env_id="$3" name="$4"
     local body resp nid
     api_token="$(mtx_normalize_railway_token "$api_token")"
     [ -z "$api_token" ] || [ -z "$project_id" ] || [ -z "$env_id" ] || [ -z "$name" ] && return 1
     body=$(jq -n --arg pid "$project_id" --arg eid "$env_id" --arg n "$name" \
-        '{query:"mutation($i:ServiceCreateInput!){serviceCreate(input:$i){id name}}",variables:{i:{projectId:$pid,environmentId:$eid,name:$n}}}')
+        '{query:"mutation($i:ServiceCreateInput!){serviceCreate(input:$i){id name}}",variables:{i:{projectId:$pid,environmentId:$eid,name:$n,source:{}}}}')
     resp=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
         -H "Authorization: Bearer $api_token" \
         -H "Content-Type: application/json" \
         -d "$body" 2>/dev/null)
+    if echo "$resp" | jq -e '(.errors|type)=="array" and (.errors|length>0)' >/dev/null 2>&1; then
+        body=$(jq -n --arg pid "$project_id" --arg eid "$env_id" --arg n "$name" \
+            '{query:"mutation($i:ServiceCreateInput!){serviceCreate(input:$i){id name}}",variables:{i:{projectId:$pid,environmentId:$eid,name:$n}}}')
+        resp=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+            -H "Authorization: Bearer $api_token" \
+            -H "Content-Type: application/json" \
+            -d "$body" 2>/dev/null)
+    fi
     if echo "$resp" | jq -e '(.errors|type)=="array" and (.errors|length>0)' >/dev/null 2>&1; then
         echo "$resp" | jq -r '.errors[]? | "   " + (.message // "?")' 2>/dev/null >&2 || true
         return 1
@@ -426,39 +435,53 @@ mtx_railway_graphql_service_instance_deploy_into_env() {
     return 0
 }
 
+# Canonical Railway check: does this service exist in this environment? (same query as railwayapp/cli ServiceInstance.graphql)
+mtx_railway_graphql_service_instance_id() {
+    local api_token="$1" env_id="$2" service_id="$3"
+    local body r iid
+    api_token="$(mtx_normalize_railway_token "$api_token")"
+    [ -z "$api_token" ] || [ -z "$env_id" ] || [ -z "$service_id" ] && return 1
+    body=$(jq -n --arg e "$env_id" --arg s "$service_id" \
+        '{query:"query($e:String!,$s:String!){serviceInstance(environmentId:$e,serviceId:$s){id}}",variables:{e:$e,s:$s}}')
+    r=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+        -H "Authorization: Bearer $api_token" \
+        -H "Content-Type: application/json" \
+        -d "$body" 2>/dev/null)
+    if echo "$r" | jq -e '(.errors|type)=="array" and (.errors|length>0)' >/dev/null 2>&1; then
+        echo "$r" | jq -r '.errors[]? | "   " + (.message // "?")' 2>/dev/null >&2 || true
+    fi
+    iid=$(echo "$r" | jq -r '.data.serviceInstance.id // empty' 2>/dev/null)
+    if [ -n "$iid" ] && [ "$iid" != "null" ]; then
+        printf '%s' "$iid"
+        return 0
+    fi
+    return 1
+}
+
 # Confirm the resolved environment UUID names the expected logical env, and that SERVICE_ID is
-# actually instanced there. If Terraform still points at a service that is not deployed in this
-# environment: prefer GraphQL serviceCreate (empty service, exact app_slug name). If Railway
-# rejects that because the name already exists project-wide, resolve that canonical service id and
-# serviceInstanceDeployV2 into this environment (same human-visible name, no -staging suffix).
-# Adopt the resulting id for this deploy and drop stale Terraform app state when the id changed.
+# bound there using Railway’s canonical serviceInstance(environmentId, serviceId) query (same as
+# railwayapp/cli). Empty services are created with serviceCreate + source:{} (CLI parity), then
+# fallback without source if GraphQL rejects. If the name already exists project-wide, we call
+# serviceInstanceDeployV2 (redeploy / attach when Railway already has a row); if the canvas stays
+# empty, we fail honestly unless MTX_RAILWAY_LOOSE_INSTANCE_POLL=1.
 # Args: account_token environment_uuid logical_env_name app_slug railway_project_id
 mtx_railway_assert_resolved_environment_and_service_for_deploy() {
     local api_token="$1" env_id="$2" logical="$3" app_slug="$4" project_id="${5:-}"
-    local q resp ename el nl cur c1 new_sid poll_sid _poll_max _poll_sleep _pi _slug_lc by_name_id svc_query proj_svc mut_ok
+    local q resp ename el nl cur new_sid poll_sid _poll_max _poll_sleep _pi _slug_lc by_name_id svc_query proj_svc mut_ok iid
     api_token="$(mtx_normalize_railway_token "$api_token")"
     cur="${SERVICE_ID:-}"
     [ -z "$api_token" ] || [ -z "$env_id" ] || [ -z "$logical" ] || [ -z "$app_slug" ] || [ -z "$cur" ] && return 0
     if [[ ! "$env_id" =~ ^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$ ]]; then
         return 0
     fi
-    q=$(jq -n --arg eid "$env_id" '{"query":"query($eid:String!){environment(id:$eid){id name serviceInstances{edges{node{serviceId serviceName service{id name}}}}}}","variables":{"eid":$eid}}')
-    mtx_railway_refresh_env_instances_resp() {
+    q=$(jq -n --arg eid "$env_id" '{"query":"query($eid:String!){environment(id:$eid){id name}}","variables":{"eid":$eid}}')
+    mtx_railway_refresh_env_name_resp() {
         resp=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
             -H "Authorization: Bearer $api_token" \
             -H "Content-Type: application/json" \
             -d "$q" 2>/dev/null)
     }
-    # Match Railway node shape: instance may expose serviceId and/or nested service.id.
-    mtx_railway_count_sid_in_resp() {
-        local sid="${1:-}"
-        c1=$(echo "$resp" | jq -r --arg sid "$sid" '
-            [.data.environment.serviceInstances.edges[]?.node
-              | select(((.serviceId // .service.id // "") | tostring) == $sid)
-            ] | length' 2>/dev/null)
-        case "${c1:-0}" in ''|*[!0-9]*) c1=0 ;; esac
-    }
-    mtx_railway_refresh_env_instances_resp
+    mtx_railway_refresh_env_name_resp
     if echo "$resp" | jq -e '(.errors|type)=="array" and (.errors|length>0)' >/dev/null 2>&1; then
         echo -e "${RED}❌ GraphQL environment(id) verification failed:${NC}" >&2
         echo "$resp" | jq -r '.errors[]? | "   " + (.message // "?")' 2>/dev/null >&2 || true
@@ -477,9 +500,8 @@ mtx_railway_assert_resolved_environment_and_service_for_deploy() {
         return 1
     fi
 
-    mtx_railway_count_sid_in_resp "$cur"
-    if [ "${c1}" -ge 1 ]; then
-        echo -e "${CYAN}ℹ️  Verified service ${cur} is instanced in ${logical} (${env_id}).${NC}"
+    if iid="$(mtx_railway_graphql_service_instance_id "$api_token" "$env_id" "$cur" 2>/dev/null)"; then
+        echo -e "${CYAN}ℹ️  Verified service ${cur} is bound to ${logical} (serviceInstance id ${iid}).${NC}"
         return 0
     fi
 
@@ -506,20 +528,19 @@ mtx_railway_assert_resolved_environment_and_service_for_deploy() {
         by_name_id=$(echo "$proj_svc" | jq -r --arg s "$_slug_lc" '
             [.data.project.services.edges[]?.node | select((.name|ascii_downcase) == $s) | .id] | first // empty' 2>/dev/null)
         if [ -n "$by_name_id" ] && [ "$by_name_id" != "null" ]; then
-            echo -e "${YELLOW}ℹ️  Railway already has a service named \"${app_slug}\" in this project (cannot duplicate the name). Deploying it into ${logical}…${NC}" >&2
+            echo -e "${YELLOW}ℹ️  Railway already has a project-level service named \"${app_slug}\" (id ${by_name_id}). Calling serviceInstanceDeployV2 to attach/redeploy in ${logical}…${NC}" >&2
+            echo -e "${CYAN}   Note: deployV2 redeploys an existing binding; if staging was wiped empty, Railway may still require an empty service shell in that environment (UI: New → Empty Service).${NC}" >&2
             mut_ok=0
             mtx_railway_graphql_service_instance_deploy_into_env "$api_token" "$env_id" "$by_name_id" && mut_ok=1
             if [ "$mut_ok" -ne 1 ]; then
-                echo -e "${RED}❌ Could not deploy existing service \"${app_slug}\" (${by_name_id}) into ${logical}.${NC}" >&2
-                echo -e "${CYAN}   Instances currently in ${logical}:${NC}" >&2
-                echo "$resp" | jq -r '.data.environment.serviceInstances.edges[]?.node | "   - " + (.serviceName // (.service.name // "?")) + "  (" + (.serviceId // .service.id // "?") + ")"' 2>/dev/null >&2 || true
+                echo -e "${RED}❌ Could not run serviceInstanceDeployV2 for \"${app_slug}\" (${by_name_id}) in ${logical}.${NC}" >&2
+                echo -e "${CYAN}   Open: https://railway.com/project/${project_id}/environment/${env_id}${NC}" >&2
                 return 1
             fi
             new_sid="$by_name_id"
         else
             echo -e "${RED}❌ serviceCreate failed for \"${app_slug}\" and no same-named service exists in project ${project_id} (see GraphQL errors above).${NC}" >&2
-            echo -e "${CYAN}   Instances currently in ${logical}:${NC}" >&2
-            echo "$resp" | jq -r '.data.environment.serviceInstances.edges[]?.node | "   - " + (.serviceName // (.service.name // "?")) + "  (" + (.serviceId // .service.id // "?") + ")"' 2>/dev/null >&2 || true
+            echo -e "${CYAN}   Open: https://railway.com/project/${project_id}/environment/${env_id}${NC}" >&2
             return 1
         fi
     fi
@@ -528,9 +549,9 @@ mtx_railway_assert_resolved_environment_and_service_for_deploy() {
     export RAILWAY_SERVICE="$SERVICE_ID"
     set_env_var_in_file "RAILWAY_APP_SERVICE_ID" "$SERVICE_ID" 2>/dev/null || true
     if [ "$SERVICE_ID" = "$cur" ]; then
-        echo -e "${GREEN}✅ Deploy target remains ${SERVICE_ID}; triggered Railway materialization in ${logical} (verifying via GraphQL…)${NC}"
+        echo -e "${GREEN}✅ Deploy target remains ${SERVICE_ID}; checking Railway binding for ${logical}…${NC}"
     else
-        echo -e "${GREEN}✅ Adopted Railway app service ${SERVICE_ID} for ${logical} (Terraform had ${cur}); verifying via GraphQL…${NC}"
+        echo -e "${GREEN}✅ Adopted Railway app service ${SERVICE_ID} for ${logical} (Terraform had ${cur}); checking binding…${NC}"
     fi
 
     if [ "$SERVICE_ID" != "$cur" ] && [ -d "${SCRIPT_DIR:-}" ] && command -v terraform >/dev/null 2>&1; then
@@ -540,36 +561,27 @@ mtx_railway_assert_resolved_environment_and_service_for_deploy() {
     fi
 
     poll_sid="$SERVICE_ID"
-    # After a wipe, Backboard can lag listing serviceInstances even though deploy/create succeeded; defaults are generous.
     _poll_max="${MTX_RAILWAY_INSTANCE_ATTACH_POLL_MAX:-25}"
     _poll_sleep="${MTX_RAILWAY_INSTANCE_ATTACH_POLL_SLEEP:-5}"
     for ((_pi=1; _pi<=_poll_max; _pi++)); do
         if [ "$_pi" -gt 1 ]; then
             sleep "$_poll_sleep"
         fi
-        mtx_railway_refresh_env_instances_resp
-        if echo "$resp" | jq -e '(.errors|type)=="array" and (.errors|length>0)' >/dev/null 2>&1; then
-            echo -e "${YELLOW}ℹ️  environment(id) poll error (attempt ${_pi}/${_poll_max}); continuing…${NC}" >&2
-            continue
-        fi
-        mtx_railway_count_sid_in_resp "$poll_sid"
-        if [ "${c1}" -ge 1 ]; then
-            echo -e "${GREEN}✅ Service ${poll_sid} is visible in ${logical} (${env_id}).${NC}"
+        if iid="$(mtx_railway_graphql_service_instance_id "$api_token" "$env_id" "$poll_sid" 2>/dev/null)"; then
+            echo -e "${GREEN}✅ Railway reports service ${poll_sid} bound to ${logical} (serviceInstance id ${iid}).${NC}"
             return 0
         fi
     done
 
-    echo -e "${YELLOW}⚠️  GraphQL still does not list service ${poll_sid} under ${logical} (${env_id}) after ${_poll_max} polls (~$((_poll_max * _poll_sleep))s).${NC}" >&2
-    echo -e "${CYAN}   Instances visible in last response:${NC}" >&2
-    echo "$resp" | jq -r '.data.environment.serviceInstances.edges[]?.node | "   - " + (.serviceName // (.service.name // "?")) + "  (" + (.serviceId // .service.id // "?") + ")"' 2>/dev/null >&2 || true
-    if [ "${MTX_RAILWAY_STRICT_INSTANCE_POLL:-0}" = "1" ]; then
-        echo -e "${RED}❌ MTX_RAILWAY_STRICT_INSTANCE_POLL=1 — aborting deploy.${NC}" >&2
-        echo -e "${CYAN}   Increase MTX_RAILWAY_INSTANCE_ATTACH_POLL_MAX / MTX_RAILWAY_INSTANCE_ATTACH_POLL_SLEEP, or unset strict mode.${NC}" >&2
-        return 1
+    echo -e "${RED}❌ After ${_poll_max} checks (~$((_poll_max * _poll_sleep))s), Railway GraphQL still has no serviceInstance for service ${poll_sid} in ${logical} (${env_id}).${NC}" >&2
+    echo -e "${CYAN}   That matches an empty canvas in the dashboard: mtx cannot invent a canvas row if the API never creates one.${NC}" >&2
+    echo -e "${CYAN}   Open the project environment and add/re-link the app service, or run \`railway add --service ${app_slug}\` from a linked staging context:${NC}" >&2
+    echo -e "${CYAN}   https://railway.com/project/${project_id}/environment/${env_id}${NC}" >&2
+    if [ "${MTX_RAILWAY_LOOSE_INSTANCE_POLL:-0}" = "1" ]; then
+        echo -e "${YELLOW}⚠️  MTX_RAILWAY_LOOSE_INSTANCE_POLL=1 — continuing deploy despite missing serviceInstance (legacy escape hatch).${NC}" >&2
+        return 0
     fi
-    echo -e "${YELLOW}⚠️  Continuing deploy anyway (self-heal: create/deploy already succeeded; \`railway up\` often works while GraphQL catches up).${NC}" >&2
-    echo -e "${CYAN}   Set MTX_RAILWAY_STRICT_INSTANCE_POLL=1 to hard-fail when the instance is not visible.${NC}" >&2
-    return 0
+    return 1
 }
 
 mtx_output_looks_like_network_problem() {
