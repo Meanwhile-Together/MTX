@@ -301,12 +301,26 @@ mtx_railway_resolve_project_environment_id() {
         -H "Authorization: Bearer $api_token" \
         -H "Content-Type: application/json" \
         -d "$q" 2>/dev/null)
+    local _mtx_env_match_count
+    _mtx_env_match_count=$(echo "$resp" | jq -r --arg n "$env_name" '[.data.project.environments.edges[]?.node | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | .id] | length' 2>/dev/null)
+    case "${_mtx_env_match_count:-0}" in ''|*[!0-9]*) _mtx_env_match_count=0 ;; esac
+    if [ "${_mtx_env_match_count}" -gt 1 ]; then
+        echo -e "${RED}❌ Multiple Railway environments match \"${env_name}\" in this project; refusing to pick one.${NC}" >&2
+        echo "$resp" | jq -r --arg n "$env_name" '.data.project.environments.edges[]?.node | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | "   - " + (.name // "?") + "  (" + (.id // "?") + ")"' 2>/dev/null >&2 || true
+        return 1
+    fi
     eid=$(echo "$resp" | jq -r --arg n "$env_name" '.data.project.environments.edges[]?.node | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | .id // empty' 2>/dev/null | head -1)
     if [ -z "$eid" ] || [ "$eid" = "null" ]; then
         resp=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
             -H "Authorization: Bearer $api_token" \
             -H "Content-Type: application/json" \
             -d '{"query":"query { project(id: \"'"$project_id"'\") { environments { id name } } }"}' 2>/dev/null)
+        _mtx_env_match_count=$(echo "$resp" | jq -r --arg n "$env_name" '[.data.project.environments[]? | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | .id] | length' 2>/dev/null)
+        case "${_mtx_env_match_count:-0}" in ''|*[!0-9]*) _mtx_env_match_count=0 ;; esac
+        if [ "${_mtx_env_match_count}" -gt 1 ]; then
+            echo -e "${RED}❌ Multiple Railway environments match \"${env_name}\" (legacy GraphQL shape).${NC}" >&2
+            return 1
+        fi
         eid=$(echo "$resp" | jq -r --arg n "$env_name" '.data.project.environments[]? | select(.name == $n or (.name|ascii_downcase) == ($n|ascii_downcase)) | .id // empty' 2>/dev/null | head -1)
     fi
     if [ -n "$eid" ] && [ "$eid" != "null" ]; then
@@ -336,7 +350,17 @@ mtx_railway_assert_project_token_scoped_to_env() {
     tid=$(echo "$resp" | jq -r '.data.projectToken.environment.id // empty' 2>/dev/null)
     tname=$(echo "$resp" | jq -r '.data.projectToken.environment.name // empty' 2>/dev/null)
     if [ -z "$tid" ] || [ "$tid" = "null" ]; then
-        echo -e "${YELLOW}ℹ️  Could not read Railway projectToken environment (GraphQL). Skipping token/env scope check.${NC}" >&2
+        if echo "$resp" | jq -e '(.errors|type)=="array" and (.errors|length>0)' >/dev/null 2>&1; then
+            echo -e "${YELLOW}ℹ️  Railway projectToken GraphQL errors (token/env scope could not be verified):${NC}" >&2
+            echo "$resp" | jq -r '.errors[]? | "   " + (.message // "?")' 2>/dev/null >&2 || true
+        else
+            echo -e "${YELLOW}ℹ️  Railway projectToken query returned no environment (GraphQL).${NC}" >&2
+        fi
+        if [ "${MTX_RAILWAY_REQUIRE_PROJECT_TOKEN_VERIFY:-0}" = "1" ]; then
+            echo -e "${RED}❌ MTX_RAILWAY_REQUIRE_PROJECT_TOKEN_VERIFY=1 but projectToken could not be read. Fix tokens or Railway API access.${NC}" >&2
+            return 1
+        fi
+        echo -e "${CYAN}   Skipping token/env scope check (set MTX_RAILWAY_REQUIRE_PROJECT_TOKEN_VERIFY=1 to hard-fail).${NC}" >&2
         return 0
     fi
     nl=$(printf '%s' "$tname" | tr '[:upper:]' '[:lower:]')
@@ -351,6 +375,66 @@ mtx_railway_assert_project_token_scoped_to_env() {
         return 1
     fi
     return 0
+}
+
+# Confirm the resolved environment UUID names the expected logical env, and that SERVICE_ID is
+# actually instanced there (catches Terraform pinning a project-level id that only exists in prod).
+mtx_railway_assert_resolved_environment_and_service_for_deploy() {
+    local api_token="$1" env_id="$2" logical="$3" app_slug="$4"
+    local q resp ename el nl cur c1 found
+    api_token="$(mtx_normalize_railway_token "$api_token")"
+    cur="${SERVICE_ID:-}"
+    [ -z "$api_token" ] || [ -z "$env_id" ] || [ -z "$logical" ] || [ -z "$app_slug" ] || [ -z "$cur" ] && return 0
+    if [[ ! "$env_id" =~ ^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$ ]]; then
+        return 0
+    fi
+    q=$(jq -n --arg eid "$env_id" '{"query":"query($eid:String!){environment(id:$eid){id name serviceInstances{edges{node{serviceId serviceName}}}}}","variables":{"eid":$eid}}')
+    resp=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+        -H "Authorization: Bearer $api_token" \
+        -H "Content-Type: application/json" \
+        -d "$q" 2>/dev/null)
+    if echo "$resp" | jq -e '(.errors|type)=="array" and (.errors|length>0)' >/dev/null 2>&1; then
+        echo -e "${RED}❌ GraphQL environment(id) verification failed:${NC}" >&2
+        echo "$resp" | jq -r '.errors[]? | "   " + (.message // "?")' 2>/dev/null >&2 || true
+        return 1
+    fi
+    ename=$(echo "$resp" | jq -r '.data.environment.name // empty' 2>/dev/null)
+    el=$(printf '%s' "$logical" | tr '[:upper:]' '[:lower:]')
+    nl=$(printf '%s' "$ename" | tr '[:upper:]' '[:lower:]')
+    if [ -z "$ename" ] || [ "$ename" = "null" ]; then
+        echo -e "${RED}❌ Could not read environment name for id ${env_id} (GraphQL).${NC}" >&2
+        return 1
+    fi
+    if [ "$nl" != "$el" ]; then
+        echo -e "${RED}❌ mtx deploy ${logical} resolved environment id ${env_id}, but Railway names that environment \"${ename}\".${NC}" >&2
+        echo -e "${CYAN}   This indicates a mapping bug (wrong id), duplicate/conflicting env names, or stale RAILWAY_PROJECT_ID. Open the Railway dashboard and compare ids for ${logical}.${NC}" >&2
+        return 1
+    fi
+
+    c1=$(echo "$resp" | jq -r --arg sid "$cur" '[.data.environment.serviceInstances.edges[]?.node.serviceId? | select(. == $sid)] | length' 2>/dev/null)
+    case "${c1:-0}" in ''|*[!0-9]*) c1=0 ;; esac
+    if [ "${c1}" -ge 1 ]; then
+        echo -e "${CYAN}ℹ️  Verified service ${cur} is instanced in ${logical} (${env_id}).${NC}"
+        return 0
+    fi
+
+    found=$(echo "$resp" | jq -r --arg slug "$(printf '%s' "$app_slug" | tr '[:upper:]' '[:lower:]')" '
+        [.data.environment.serviceInstances.edges[]?.node
+          | select((.serviceName|ascii_downcase) == $slug)
+          | .serviceId] | first // empty' 2>/dev/null)
+    if [ -n "$found" ] && [ "$found" != "null" ] && [ "$found" != "$cur" ]; then
+        echo -e "${YELLOW}⚠️  Terraform service id ${cur} is not instanced in ${logical}, but \"${app_slug}\" exists there as ${found}. Re-aligning deploy target.${NC}" >&2
+        SERVICE_ID="$found"
+        export RAILWAY_SERVICE="$SERVICE_ID"
+        set_env_var_in_file "RAILWAY_APP_SERVICE_ID" "$SERVICE_ID" 2>/dev/null || true
+        return 0
+    fi
+
+    echo -e "${RED}❌ Service id ${cur} is not instanced in ${logical} (${env_id}) and no instance named \"${app_slug}\" was found.${NC}" >&2
+    echo -e "${CYAN}   Terraform/\`-var=railway_service_id\` is likely pointing at a service id that only exists outside ${logical} (common after wipes/renames).${NC}" >&2
+    echo -e "${CYAN}   Instances visible in ${logical} via GraphQL:${NC}" >&2
+    echo "$resp" | jq -r '.data.environment.serviceInstances.edges[]?.node | "   - " + (.serviceName // "?") + "  (" + (.serviceId // "?") + ")"' 2>/dev/null >&2 || true
+    return 1
 }
 
 mtx_output_looks_like_network_problem() {
@@ -887,6 +971,9 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         fi
         if [ "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" != "$ENVIRONMENT" ]; then
             echo -e "${CYAN}ℹ️  Railway CLI/link/upload will use environment id ${RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD} (logical: ${ENVIRONMENT}).${NC}"
+        fi
+        if [ -n "${RAILWAY_TOKEN_VALUE:-}" ] && [ -n "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" ]; then
+            mtx_railway_assert_resolved_environment_and_service_for_deploy "$RAILWAY_TOKEN_VALUE" "$RAILWAY_CLI_ENVIRONMENT_FOR_UPLOAD" "$ENVIRONMENT" "$APP_SLUG" || exit 1
         fi
 
         # Harden: framework project-bridge (sibling) or cwd must have placeholder org.json before link/build/upload.
