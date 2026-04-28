@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # MTX: vendor path payloads from config/server.json into ./payloads/<slug>/ and write server.json.railway.
-# Invoked by MTX build.sh before org "npm run prepare:railway" (mtx build server / mtx deploy).
+# Invoked by MTX build.sh before project/prepare-railway-artifact.sh (mtx build server / mtx deploy).
 #
 # Requires: jq, rsync, perl (File::Spec for relpaths), bash.
 # Env: MTX_SKIP_PAYLOAD_VENDOR=1 — no-op.

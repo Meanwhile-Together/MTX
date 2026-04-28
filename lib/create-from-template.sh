@@ -580,35 +580,15 @@ mtx_org_merge_host_into_package_json() {
   workspace_root="$(cd "$workspace_root" && pwd -P)"
   pb="$workspace_root/project-bridge"
   [ -f "$pkg" ] || return 0
-  if [ ! -f "$repo_path/scripts/org-build-server.sh" ]; then
-    warn "scripts/org-build-server.sh missing from template; cannot wire build:server."
-    return 1
-  fi
-  if [ ! -f "$repo_path/scripts/org-dev-server.sh" ]; then
-    warn "scripts/org-dev-server.sh missing from template; cannot wire dev."
-    return 1
-  fi
-  if [ ! -f "$repo_path/scripts/railway-build.sh" ]; then
-    warn "scripts/railway-build.sh missing from template."
-    return 1
-  fi
-  if [ ! -f "$repo_path/scripts/prepare-railway-artifact.sh" ] || [ ! -f "$repo_path/scripts/generate-railway-deploy-manifest.sh" ]; then
-    warn "scripts/prepare-railway-artifact.sh or generate-railway-deploy-manifest.sh missing from template."
-    return 1
-  fi
-  if [ ! -f "$repo_path/scripts/railway-ci-install.sh" ]; then
-    warn "scripts/railway-ci-install.sh missing from template."
+  : "${MTX_ROOT:?MTX_ROOT must be set when merging org host package.json}"
+  if [ ! -f "$MTX_ROOT/project/prepare-railway-artifact.sh" ]; then
+    warn "MTX project/prepare-railway-artifact.sh missing; cannot wire org host scripts."
     return 1
   fi
   if [ ! -f "$repo_path/package.deploy.json" ] || [ ! -f "$repo_path/package-lock.deploy.json" ]; then
     warn "package.deploy.json or package-lock.deploy.json missing from template."
     return 1
   fi
-  chmod +x "$repo_path/scripts/org-build-server.sh" "$repo_path/scripts/org-dev-server.sh" \
-    "$repo_path/scripts/railway-build.sh" \
-    "$repo_path/scripts/railway-ci-install.sh" \
-    "$repo_path/scripts/prepare-railway-artifact.sh" \
-    "$repo_path/scripts/generate-railway-deploy-manifest.sh"
   if ! command -v jq &>/dev/null; then
     warn "jq required to merge org host into package.json"
     return 1
@@ -619,8 +599,8 @@ mtx_org_merge_host_into_package_json() {
     | .dependencies["@meanwhile-together/shared"] = "file:../project-bridge/shared"
     | .dependencies["@meanwhile-together/ui"] = "file:../project-bridge/ui"
     | .devDependencies = ((.devDependencies // {}) + {"@meanwhile-together/engine": "file:../project-bridge/engine"})
-    | .scripts["prepare:railway"] = "bash scripts/prepare-railway-artifact.sh"
-    | .scripts["dev"] = "bash scripts/org-dev-server.sh"
+    | .scripts["prepare:railway"] = "mtx project prepare-railway-artifact"
+    | .scripts["dev"] = "mtx project dev-server"
     | .scripts["build:server"] = "mtx build server"
     | .scripts["build:backend-server"] = "npm run build:server"
     | .scripts = ((.scripts // {}) | del(.preinstall))
@@ -628,7 +608,7 @@ mtx_org_merge_host_into_package_json() {
 
   if [ -f "$pb/railway.json" ]; then
     jq '
-      .build.buildCommand = "bash scripts/railway-build.sh"
+      .build.buildCommand = "export PATH=\"/usr/local/bin:/usr/bin:$PATH\" && mtx project railway-build"
       | .deploy.startCommand = "PROJECT_ROOT=/app DISABLE_BROWSER_AUTOMATION=1 node targets/server/dist/index.js"
     ' "$pb/railway.json" > "$repo_path/railway.json"
   else
@@ -636,7 +616,7 @@ mtx_org_merge_host_into_package_json() {
       --arg schema "https://railway.app/railway.schema.json" \
       '{
         "$schema": $schema,
-        build: { builder: "RAILPACK", buildCommand: "bash scripts/railway-build.sh" },
+        build: { builder: "RAILPACK", buildCommand: "export PATH=\"/usr/local/bin:/usr/bin:$PATH\" && mtx project railway-build" },
         deploy: { startCommand: "PROJECT_ROOT=/app DISABLE_BROWSER_AUTOMATION=1 node targets/server/dist/index.js", restartPolicyType: "ON_FAILURE", restartPolicyMaxRetries: 10 }
       }' > "$repo_path/railway.json"
   fi
@@ -661,8 +641,8 @@ update_repo_metadata_from_template() {
       step3="3. **Shared host (optional):** Add this repo to a central project-bridge \`config/server.json\` with \`source.git\` if you are not deploying this tree as the unified server."
       next_extra="
 
-4. **Local dev** — \`npm run dev\` runs **project-bridge**’s \`npm run dev\` with this repo’s \`config/\` synced in; project-bridge \`config/\` is **restored** when dev exits (Ctrl+C).  
-5. **Standalone deploy** — Same local project-bridge checkout as above. \`mtx deploy\` runs \`npm run prepare:railway\` automatically (unified server dist, npm-packs, deploy manifests) before \`railway up\`. You can still run \`npm run prepare:railway\` alone to verify the bundle."
+4. **Local dev** — \`npm run dev\` (\`mtx project dev-server\`) runs **project-bridge**’s \`npm run dev\` with this repo’s \`config/\` synced in; project-bridge \`config/\` is **restored** when dev exits (Ctrl+C).  
+5. **Standalone deploy** — Same local project-bridge checkout as above. \`mtx deploy\` runs the Railway bundle step automatically (unified server dist, npm-packs, deploy manifests) before \`railway up\`. You can still run \`npm run prepare:railway\` or \`mtx build server\` alone to verify the bundle."
       ;;
   esac
 
@@ -1126,7 +1106,7 @@ mtx_create_from_template_run() {
       warn "Org deploy config scaffold had warnings; check config/ and terraform/."
     }
     mtx_org_merge_host_into_package_json "$REPO_PATH" "$WORKSPACE_ROOT" || {
-      warn "Could not wire package.json to project-bridge (jq or scripts/org-build-server.sh missing)."
+      warn "Could not wire package.json to project-bridge (jq or MTX project/ scripts missing)."
     }
     # template-org admin is sibling payload-admin (../payload-admin in config/server.json), not bundled under payloads/.
     local _ws_admin="${WORKSPACE_ROOT%/}/payload-admin"

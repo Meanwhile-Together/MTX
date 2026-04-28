@@ -19,9 +19,10 @@ for d in "$WS"/payload-*; do
   inner="$d/payloads/$slug"
   [[ -d "$inner" ]] || continue
   org=0
-  [[ -f "$d/scripts/prepare-railway-artifact.sh" ]] && org=1
-  [[ -f "$d/scripts/org-build-server.sh" ]] && org=1
-  echo "$base	slug=$slug	org_scripts=$org	app_dir=$inner"
+  if [[ -f "$d/config/app.json" ]] || [[ -f "$d/config/org.json" ]]; then
+    org=1
+  fi
+  echo "$base	slug=$slug	org_config=$org	app_dir=$inner"
   found=$((found + 1))
 done
 if [[ "$found" -eq 0 ]]; then

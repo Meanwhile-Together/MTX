@@ -3,9 +3,9 @@
 # Same npm steps as mtx deploy uses before railway up; does not provision infra or upload.
 # Org hosts (config/app.json + project-bridge): before build, primes resolved project-bridge with
 # npm install and db:generate (same as project/org-build-server.sh).
-# Org repos with scripts/prepare-railway-artifact.sh: run npm run prepare:railway instead of
-# build:server — produces targets/server/dist, npm-packs, and deploy manifests for Railway.
-# Path payloads: MTX runs lib/vendor-payloads-from-config.sh on the org root before prepare:railway.
+# Org deploy roots (unified host): run MTX project/prepare-railway-artifact.sh — produces
+# targets/server/dist, npm-packs, and deploy manifests for Railway.
+# Path payloads: MTX runs lib/vendor-payloads-from-config.sh on the deploy root before prepare.
 # Terraform: when terraform/main.tf exists, MTX runs lib/vendor-terraform-from-bridge.sh to re-sync
 # project-bridge/terraform if its fingerprint changed since the last mtx deploy digest.
 # Usage: mtx build [server|backend|all]   (default: all)
@@ -25,7 +25,7 @@ if [ -z "${MTX_VERBOSE+x}" ]; then
 fi
 declare -F mtx_run &>/dev/null || mtx_run() { "$@"; }
 
-# One-line status while quiet `npm run prepare:railway` runs (otherwise mtx_run hides all output; long silence).
+# One-line status while quiet prepare-railway runs (otherwise mtx_run hides all output; long silence).
 # shellcheck source=includes/mtx-deploy-spinner.sh
 [ -f "$MTX_ROOT/includes/mtx-deploy-spinner.sh" ] && source "$MTX_ROOT/includes/mtx-deploy-spinner.sh" || {
   mtx_deploy_spinner_start() { :; }
@@ -51,15 +51,17 @@ mtx_build_spinner_org_name() {
 
 # Match deploy/terraform/apply.sh PROJECT_ROOT resolution
 PROJECT_ROOT=""
-if [ -f "config/app.json" ]; then
+if [ -f "config/app.json" ] || [ -f "config/org.json" ]; then
   PROJECT_ROOT="$(pwd)"
 fi
-if [ -z "$PROJECT_ROOT" ] && [ -f "../config/app.json" ]; then
+if [ -z "$PROJECT_ROOT" ] && { [ -f "../config/app.json" ] || [ -f "../config/org.json" ]; }; then
   PROJECT_ROOT="$(cd .. && pwd)"
 fi
 if [ -z "$PROJECT_ROOT" ]; then
   for d in . .. ../project-bridge; do
-    [ -f "${d}/config/app.json" ] && PROJECT_ROOT="$(cd "$d" && pwd)" && break
+    [ -f "${d}/config/app.json" ] || [ -f "${d}/config/org.json" ] || continue
+    PROJECT_ROOT="$(cd "$d" && pwd)"
+    break
   done
 fi
 [ -z "$PROJECT_ROOT" ] && PROJECT_ROOT="$(pwd)"
@@ -72,8 +74,8 @@ case "$TARGET" in
   all|a|'') TARGET=all ;;
   -h|--help|help)
     echo "Usage: mtx build [server|backend|all]"
-    echo "  server   — org hosts: MTX project/org-build-server.sh; else npm run build:server. With prepare:railway scripts, runs prepare:railway (path payloads: vendor-payloads-from-config.sh first)"
-    echo "  backend  — npm run build:backend-server (or same prepare:railway when unified)"
+    echo "  server   — unified deploy roots: MTX project/prepare-railway-artifact.sh; else MTX project/org-build-server.sh or npm run build:server (path payloads: vendor-payloads-from-config.sh first)"
+    echo "  backend  — npm run build:backend-server (or same prepare bundle when unified)"
     echo "  all      — both (default; org repos run one unified build if backend aliases to server)"
     echo "  Org repos: project-bridge is primed with npm install + db:generate first (sibling, vendor/, or PROJECT_BRIDGE_ROOT)."
     exit 0
@@ -96,7 +98,7 @@ fi
 # Org host: config/app.json + resolvable project-bridge (same unified build as mtx build server → project/org-build-server.sh).
 mtx_is_org_unified_host() {
   local root="${1:-$PROJECT_ROOT}"
-  [ -f "$root/config/app.json" ] || return 1
+  [ -f "$root/config/app.json" ] || [ -f "$root/config/org.json" ] || return 1
   mtx_resolve_org_project_bridge "$root" &>/dev/null
 }
 
@@ -139,14 +141,17 @@ ensure_npm_deps() {
   fi
 }
 
-# Org template: full Railway bundle (mirrored dist + npm pack + package.deploy.json / lock).
+# Unified org deploy root: full Railway bundle (mirrored dist + npm pack + package.deploy.json / lock).
 mtx_org_use_prepare_railway() {
-  [ -f "$PROJECT_ROOT/scripts/prepare-railway-artifact.sh" ] &&
-    [ -f "$PROJECT_ROOT/scripts/generate-railway-deploy-manifest.sh" ]
+  mtx_is_org_unified_host "$PROJECT_ROOT"
 }
 
 run_prepare_railway_bundle() {
-  echo "🔨 Building Railway deploy bundle (npm run prepare:railway)..." >&2
+  echo "🔨 Building Railway deploy bundle (MTX project/prepare-railway-artifact.sh)..." >&2
+  if [ ! -f "$MTX_ROOT/project/prepare-railway-artifact.sh" ]; then
+    echo "❌ Missing $MTX_ROOT/project/prepare-railway-artifact.sh" >&2
+    exit 1
+  fi
   # Path payloads: vendor + build from config/server.json (canonical MTX lib; do not duplicate in org scripts/).
   if [ "${MTX_SKIP_PAYLOAD_VENDOR:-}" != "1" ] && [ -f "$PROJECT_ROOT/config/server.json" ]; then
     if [ ! -f "$MTX_ROOT/lib/vendor-payloads-from-config.sh" ]; then
@@ -156,33 +161,35 @@ run_prepare_railway_bundle() {
     echo "==> mtx build: vendor path payloads from config/server.json (MTX lib)" >&2
     # Vendor script prints one TTY status line per payload (dots); npm inside it uses mtx_run for quiet.
     bash "$MTX_ROOT/lib/vendor-payloads-from-config.sh" "$PROJECT_ROOT"
-    # scripts/prepare-railway-artifact.sh (invoked by npm run prepare:railway below) runs the same
-    # vendor if MTX_SKIP_PAYLOAD_VENDOR is unset — that duplicates work and prints each "Vendoring…
-    # Finished" line twice. MTX has already vended; skip the second pass.
+    # prepare-railway-artifact runs the same vendor if MTX_SKIP_PAYLOAD_VENDOR is unset — duplicates
+    # work. MTX has already vended; skip the second pass.
     export MTX_SKIP_PAYLOAD_VENDOR=1
   fi
-  # At MTX_VERBOSE<=1, mtx_run hides prepare:railway — show one-line status so the gap is not blank.
+  # At MTX_VERBOSE<=1, mtx_run hides long subprocess output — show one-line status so the gap is not blank.
   if [ "${MTX_VERBOSE:-1}" -le 1 ]; then
     mtx_deploy_spinner_start "prepare" "$(mtx_build_spinner_org_name)"
     set +e
-    mtx_run npm run prepare:railway
+    mtx_run bash "$MTX_ROOT/project/prepare-railway-artifact.sh" "$PROJECT_ROOT"
     pr_ec=$?
     set -e
     mtx_deploy_spinner_stop
     if [ $pr_ec -ne 0 ]; then
-      echo "❌ prepare:railway failed" >&2
+      echo "❌ prepare-railway-artifact failed" >&2
       exit 1
     fi
   else
-    mtx_run npm run prepare:railway || { echo "❌ prepare:railway failed" >&2; exit 1; }
+    mtx_run bash "$MTX_ROOT/project/prepare-railway-artifact.sh" "$PROJECT_ROOT" || {
+      echo "❌ prepare-railway-artifact failed" >&2
+      exit 1
+    }
   fi
-  echo "✅ prepare:railway complete" >&2
-  # After payload vendor/build: portable MTX pre-deploy (org hook + root-path HTML/Vite fixes). See includes/mtx-predeploy.sh + fixes/root-paths-lib.sh.
+  echo "✅ prepare-railway-artifact complete" >&2
+  # After payload vendor/build: portable MTX pre-deploy (hook + root-path HTML/Vite fixes). See includes/mtx-predeploy.sh + fixes/root-paths-lib.sh.
   if [ -f "$MTX_ROOT/includes/mtx-predeploy.sh" ]; then
     # shellcheck source=includes/mtx-predeploy.sh
     source "$MTX_ROOT/includes/mtx-predeploy.sh"
     mtx_predeploy_after_payload_assembly "$PROJECT_ROOT" || {
-      echo "❌ mtx pre-deploy after prepare:railway failed" >&2
+      echo "❌ mtx pre-deploy after prepare-railway-artifact failed" >&2
       exit 1
     }
   fi

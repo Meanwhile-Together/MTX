@@ -6,6 +6,7 @@ nobanner=1
 set -e
 
 MTX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export MTX_ROOT
 export MTX_CREATE_VARIANT=org
 export MTX_REPO_PREFIX="org-"
 # Canonical org-host scaffold is `template-org` (rule-of-law §1). `template-basic` is not supported.

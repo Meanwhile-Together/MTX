@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Portable (Linux / macOS / WSL): post-assembly pre-deploy for org Railway bundles.
-# Invoked by MTX build.sh after `npm run prepare:railway` (payload vendor + per-payload builds).
+# Invoked by MTX build.sh after project/prepare-railway-artifact.sh (payload vendor + per-payload builds).
 #
-# 1) Optional org hook: scripts/org-pre-deploy.sh <project_root> (silent no-op if missing)
+# 1) Optional hook: MTX project/org-pre-deploy.sh <deploy_root> (silent no-op if missing)
 # 2) Payload root-path normalization — see tools/fixes/root-paths-lib.sh (HTML + Vite base; no Node).
 
 _mtx_predeploy_mtx_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -26,9 +26,13 @@ mtx_predeploy_after_payload_assembly() {
   [ -n "$root" ] || return 0
   root="$(cd "$root" && pwd)"
 
-  local hook="$root/scripts/org-pre-deploy.sh"
-  if [ -f "$hook" ]; then
-    echo "==> mtx-predeploy: org hook"
+  local mtx_r="${MTX_ROOT:-}"
+  if [ -z "$mtx_r" ]; then
+    mtx_r="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  fi
+  local hook="$mtx_r/project/org-pre-deploy.sh"
+  if [ -n "$hook" ] && [ -f "$hook" ]; then
+    echo "==> mtx-predeploy: MTX hook"
     bash "$hook" "$root" || return 1
   fi
 

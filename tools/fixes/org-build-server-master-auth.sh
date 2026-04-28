@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mtx fixes org-build-server-master-auth — bring an org-*'s scripts/org-build-server.sh to
+# mtx fixes org-build-server-master-auth — bring MTX project/org-build-server.sh to
 # master-auth parity: source .env so build-time VITE_MASTER_AUTH_URL is baked into payload-
 # admin, derive VITE_MASTER_AUTH_URL from MASTER_AUTH_PUBLIC_URL when only the latter is
 # set, and always run npm run build:backend (payload-admin) after build:client. Idempotent:
@@ -15,7 +15,7 @@
 # Why this fix exists (rule-of-law §1 2026-04-21 Asmaster architecture):
 #   payload-admin's SPA reads VITE_MASTER_AUTH_URL at BUILD TIME and defaults to same-origin
 #   `/auth`. When an org's org-build-server.sh predates the master-auth fan-out contract,
-#   it never sources .env and gates the admin rebuild on a "slug" : "admin" grep that does
+#   older copies never sourced .env and gated the admin rebuild on a "slug" : "admin" grep that does
 #   not match payload-admin entries (id: "payload-admin", no slug). Result: the tenant
 #   admin bundle ships with authBasePath=/auth and admin login hits the tenant's local
 #   auth instead of asmaster `/auth`, surfacing as "invalid username or password" even
@@ -25,7 +25,7 @@
 #   mtx fixes org-build-server-master-auth                 # patch cwd if it's an org-*; else all workspace siblings
 #   mtx fixes org-build-server-master-auth org-foo org-bar # patch explicit paths
 #   mtx fixes org-build-server-master-auth --dry-run ...   # show what would change, no writes
-desc="Patch org-*/scripts/org-build-server.sh to source .env and always rebuild payload-admin with VITE_MASTER_AUTH_URL"
+desc="Patch MTX project/org-build-server.sh to source .env and always rebuild payload-admin with VITE_MASTER_AUTH_URL"
 nobanner=1
 set -e
 
@@ -55,22 +55,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# --- target discovery ---
+# --- target discovery (canonical script is MTX/project/org-build-server.sh) ---
 if [ "${#TARGETS[@]}" -eq 0 ]; then
-  cwd="$(pwd)"
-  base="$(basename "$cwd")"
-  if [[ "$base" == org-* ]]; then
-    TARGETS=("$cwd")
-  else
-    ws="${MTX_WORKSPACE_ROOT:-$(cd "$MTX_ROOT/.." && pwd)}"
-    for d in "$ws"/org-*; do
-      [ -d "$d" ] || continue
-      [ -f "$d/scripts/org-build-server.sh" ] || continue
-      TARGETS+=("$d")
-    done
-    [ "${#TARGETS[@]}" -eq 0 ] && { error "No org-* targets found (cwd not org-*, no siblings under $ws)."; exit 1; }
-    echoc dim "Auto-detected ${#TARGETS[@]} org-* target(s) under $ws"
-  fi
+  TARGETS=("$MTX_ROOT/project/org-build-server.sh")
+  echoc dim "Default target: ${TARGETS[0]}"
 fi
 
 if ! command -v python3 >/dev/null 2>&1; then
@@ -299,28 +287,27 @@ PYEOF
 patched=0
 skipped=0
 failed=0
-for org in "${TARGETS[@]}"; do
-  if [ ! -d "$org" ]; then
-    warn "skip: $org is not a directory"
+_seen_files=""
+for item in "${TARGETS[@]}"; do
+  file=""
+  if [ -f "$item" ]; then
+    file="$(cd "$(dirname "$item")" && pwd -P)/$(basename "$item")"
+  elif [ -d "$item" ] && [[ "$(basename "$item")" == org-* ]]; then
+    file="$MTX_ROOT/project/org-build-server.sh"
+    echoc dim "  (org dir $item → canonical $file)"
+  else
+    warn "skip: $item (pass a file path or org-* directory)"
     ((skipped++)) || true
     continue
   fi
-  org_abs="$(cd "$org" && pwd -P)"
-  base="$(basename "$org_abs")"
-  case "$base" in
-    org-*) ;;
-    *) warn "skip: $org_abs (basename does not start with org-)"
-       ((skipped++)) || true
-       continue ;;
-  esac
-  echoc cyan "→ $base"
-
-  file="$org_abs/scripts/org-build-server.sh"
+  case " $_seen_files " in *" $file "*) continue ;; esac
+  _seen_files="$_seen_files $file "
   if [ ! -f "$file" ]; then
-    echoc dim "  (no scripts/org-build-server.sh)"
+    echoc dim "  (missing $file)"
     ((skipped++)) || true
     continue
   fi
+  echoc cyan "→ $file"
   if _patch_one "$file" "$DRY_RUN"; then
     if [ "$DRY_RUN" -eq 0 ]; then
       if ! bash -n "$file"; then
@@ -337,8 +324,8 @@ done
 
 echo ""
 if [ "$DRY_RUN" -eq 1 ]; then
-  success "dry-run done. orgs scanned: $patched, skipped: $skipped"
+  success "dry-run done. files scanned: $patched, skipped: $skipped"
 else
-  success "patch done. orgs processed: $patched, skipped: $skipped, failures: $failed"
+  success "patch done. files processed: $patched, skipped: $skipped, failures: $failed"
 fi
 [ "$failed" -eq 0 ]
