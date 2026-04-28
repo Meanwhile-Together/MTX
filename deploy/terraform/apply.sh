@@ -1596,19 +1596,23 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         # Status line while Railway CLI uploads (no spinner during read below)
         mtx_deploy_spinner_start "railway-up" "$APP_NAME"
         
-        # Run Railway CLI and capture output - retry with new token if validation fails
+        # Run Railway CLI and capture output - retry with new token if validation fails, or re-discover app service id on 404.
         RAILWAY_DEPLOY_OUTPUT=""  # Initialize global output variable
         DEPLOY_SUCCESS=false
         MAX_TOKEN_RETRIES=2
         TOKEN_RETRY_COUNT=0
+        RAILWAY_APP_SERVICE_REDISCOVER_COUNT=0
         
-        while [ "$DEPLOY_SUCCESS" = "false" ] && [ $TOKEN_RETRY_COUNT -lt $MAX_TOKEN_RETRIES ]; do
+        while [ "$DEPLOY_SUCCESS" = "false" ]; do
             if deploy_to_railway "$PROJECT_TOKEN" "$PROJECT_ID" "$SERVICE_ID" "$ENVIRONMENT"; then
                 DEPLOY_SUCCESS=true
                 echo -e "${GREEN}✅ Deployment successful!${NC}"
             else
                 # Check if it was a token error (wrong project, expired, or Unauthorized)
                 if echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "Unauthorized|Invalid RAILWAY_TOKEN|invalid.*token|token.*invalid|valid and has access|Login state is corrupt|failed to parse header value"; then
+                    if [ "$TOKEN_RETRY_COUNT" -ge "$MAX_TOKEN_RETRIES" ]; then
+                        break
+                    fi
                     echo ""
                     if echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "Login state is corrupt|failed to parse header value"; then
                         echo -e "${RED}❌ Railway CLI rejected the token as an HTTP header (often newline, spaces, or quotes in the prepare file or .env).${NC}"
@@ -1654,12 +1658,52 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                     echo -e "${CYAN}Retrying deployment with new token...${NC}"
                     mtx_deploy_spinner_start "railway-up" "$APP_NAME"
                 elif echo "$RAILWAY_DEPLOY_OUTPUT" | grep -qiE "404|Failed to upload code"; then
-                    # Service/environment ID invalid – invalidate so setup can re-discover (same as token invalidation)
-                    clear_env_var_in_file "RAILWAY_APP_SERVICE_ID"
-                    echo -e "${RED}❌ App deployment failed (service or environment invalid)${NC}"
+                    # Stale Terraform / .env service id after Railway recreate — re-query GraphQL once and retry `railway up`.
+                    clear_env_var_in_file "RAILWAY_APP_SERVICE_ID" "true"
+                    if [ "$RAILWAY_APP_SERVICE_REDISCOVER_COUNT" -ge "${MTX_RAILWAY_APP_SERVICE_REDISCOVER_MAX:-1}" ]; then
+                        mtx_deploy_spinner_stop
+                        echo -e "${RED}❌ App deployment still failing after re-discovering the app service (404 / invalid service or environment).${NC}"
+                        echo -e "${CYAN}   Run ./scripts/setup.sh --setup-deployment from the org repo, or refresh Terraform state after Railway recovery.${NC}"
+                        exit 2
+                    fi
+                    mtx_deploy_spinner_stop
                     echo ""
-                    echo -e "${CYAN}   Re-run: ./scripts/setup.sh --setup-deployment to re-discover services.${NC}"
-                    exit 2
+                    echo -e "${YELLOW}ℹ️  Railway upload returned 404 (often a stale service id after wipe/recreate). Re-querying project for service \"${APP_SLUG}\"...${NC}"
+                    APP_SVC_REDISCOVER_QUERY='{"query":"query($projectId: String!) { project(id: $projectId) { services { edges { node { id name } } } } }", "variables": {"projectId": "'"$PROJECT_ID"'"}}'
+                    APP_SVC_REDISCOVER_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+                        -H "Authorization: Bearer $(mtx_normalize_railway_token "$PROJECT_TOKEN")" \
+                        -H "Content-Type: application/json" \
+                        -d "$APP_SVC_REDISCOVER_QUERY" 2>/dev/null)
+                    NEW_APP_SERVICE_ID=$(echo "$APP_SVC_REDISCOVER_RESPONSE" | jq -r --arg name "$APP_SLUG" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
+                    if [ -z "$NEW_APP_SERVICE_ID" ] || [ "$NEW_APP_SERVICE_ID" = "null" ]; then
+                        APP_SVC_REDISCOVER_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+                            -H "Authorization: Bearer $(mtx_normalize_railway_token "$RAILWAY_TOKEN_VALUE")" \
+                            -H "Content-Type: application/json" \
+                            -d "$APP_SVC_REDISCOVER_QUERY" 2>/dev/null)
+                        NEW_APP_SERVICE_ID=$(echo "$APP_SVC_REDISCOVER_RESPONSE" | jq -r --arg name "$APP_SLUG" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
+                    fi
+                    if [ -z "$NEW_APP_SERVICE_ID" ] || [ "$NEW_APP_SERVICE_ID" = "null" ]; then
+                        echo -e "${RED}❌ Could not find a Railway service named \"${APP_SLUG}\" in project ${PROJECT_ID}.${NC}"
+                        exit 2
+                    fi
+                    if [ "$NEW_APP_SERVICE_ID" = "$SERVICE_ID" ]; then
+                        echo -e "${RED}❌ API still reports the same service id as the failed deploy; cannot self-heal from 404.${NC}"
+                        exit 2
+                    fi
+                    SERVICE_ID="$NEW_APP_SERVICE_ID"
+                    export RAILWAY_SERVICE="$SERVICE_ID"
+                    set_env_var_in_file "RAILWAY_APP_SERVICE_ID" "$SERVICE_ID"
+                    RAILWAY_APP_SERVICE_REDISCOVER_COUNT=$((RAILWAY_APP_SERVICE_REDISCOVER_COUNT + 1))
+                    echo -e "${GREEN}✅ Re-linked deploy target to ${APP_SLUG} (${SERVICE_ID}). Retrying railway up...${NC}"
+                    echo ""
+                    cd "$PROJECT_ROOT" || exit 1
+                    rm -rf .railway
+                    mkdir -p .railway
+                    printf '%s\n' "$PROJECT_ID" > .railway/project
+                    printf '%s\n' "$SERVICE_ID" > .railway/service
+                    printf '%s\n' "$ENVIRONMENT" > .railway/environment
+                    (railway link --service "$SERVICE_ID" --project "$PROJECT_ID" --environment "$ENVIRONMENT" >/dev/null 2>&1) || true
+                    mtx_deploy_spinner_start "railway-up" "$APP_NAME"
                 else
                     # Non-token error, don't retry
                     echo -e "${RED}❌ Deployment failed${NC}"
@@ -1676,7 +1720,11 @@ if [ "$HAS_RAILWAY" = "true" ]; then
         done
         
         if [ "$DEPLOY_SUCCESS" = "false" ]; then
-            echo -e "${RED}❌ App deployment failed after $MAX_TOKEN_RETRIES token attempts${NC}"
+            if [ "$TOKEN_RETRY_COUNT" -ge "$MAX_TOKEN_RETRIES" ]; then
+                echo -e "${RED}❌ App deployment failed after $MAX_TOKEN_RETRIES token refresh attempts${NC}"
+            else
+                echo -e "${RED}❌ App deployment failed${NC}"
+            fi
             exit 1
         fi
         
