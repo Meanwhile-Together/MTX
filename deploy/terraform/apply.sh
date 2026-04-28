@@ -1132,9 +1132,37 @@ if [ "$HAS_RAILWAY" = "true" ]; then
                         printf '  %s\n' "${DB_MATCHES[@]}"
                         return 1
                     else
-                        echo -e "${RED}❌ No Postgres service found and auto-create is disabled to prevent duplicates.${NC}"
-                        echo "Create one DB service manually, then set ${DB_ID_VAR} in .mtx.prepare.env."
-                        return 1
+                        # Zero Postgres after canonical name + heuristics: provision exactly one (post-wipe / empty project).
+                        echo -e "${YELLOW}ℹ️  No Postgres service in this project; creating ${DB_SVC_NAME} via Railway (\`railway add --database postgres\`)...${NC}"
+                        if [ -z "${ACCOUNT_API_TOKEN:-}" ]; then
+                            echo -e "${RED}❌ RAILWAY_ACCOUNT_TOKEN is required to auto-create a database.${NC}"
+                            return 1
+                        fi
+                        mkdir -p "$PROJECT_ROOT/.railway"
+                        printf '%s\n' "$PROJ_ID" > "$PROJECT_ROOT/.railway/project"
+                        printf '%s\n' "$ENV_NAME" > "$PROJECT_ROOT/.railway/environment"
+                        export RAILWAY_TOKEN="$ACCOUNT_API_TOKEN"
+                        unset RAILWAY_API_TOKEN
+                        if ! mtx_run railway add --database postgres --service "$DB_SVC_NAME"; then
+                            echo -e "${RED}❌ \`railway add --database postgres\` failed (check account token has access to this project).${NC}"
+                            echo -e "${CYAN}   Create a Postgres plugin in the Railway UI named ${DB_SVC_NAME}, or set ${DB_ID_VAR} to the new service id.${NC}"
+                            return 1
+                        fi
+                        # Brief pause so GraphQL list includes the new service (Railway is eventually consistent).
+                        sleep 3
+                        SERVICES_RESPONSE=$(curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+                            -H "Authorization: Bearer $ACCOUNT_API_TOKEN" \
+                            -H "Content-Type: application/json" \
+                            -d "$SERVICES_QUERY" 2>/dev/null)
+                        DB_SVC_ID=$(echo "$SERVICES_RESPONSE" | jq -r --arg name "$DB_SVC_NAME" '.data.project.services.edges[]? | select(.node.name == $name) | .node.id // empty' 2>/dev/null | head -1)
+                        if [ -z "$DB_SVC_ID" ] || [ "$DB_SVC_ID" = "null" ]; then
+                            echo -e "${RED}❌ Postgres was added but the new service id for ${DB_SVC_NAME} could not be resolved yet.${NC}"
+                            echo -e "${CYAN}   Re-run deploy in a minute, or set ${DB_ID_VAR} from the Railway dashboard.${NC}"
+                            return 1
+                        fi
+                        set_prepare_key "$DB_ID_VAR" "$DB_SVC_ID"
+                        set_env_var_in_file "$DB_ID_VAR" "$DB_SVC_ID"
+                        echo -e "${GREEN}✅ Created Postgres service ${DB_SVC_NAME} (${DB_SVC_ID}).${NC}"
                     fi
                 else
                     # Resolved by canonical mtx-db-<env> name; persist id for the next deploy after wipes.
